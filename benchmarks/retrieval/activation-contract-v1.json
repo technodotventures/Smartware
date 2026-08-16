@@ -1,0 +1,25 @@
+{
+  "name": "smartware-retrieval-activation-contract-v1",
+  "description": "Promotion policy contract. The development classification must force a hold even when the captured hybrid channel improves quality.",
+  "evidence": {
+    "dataset_status": "development",
+    "data_classification": "synthetic_non_user_data",
+    "arena_sha256": "38b992167d43511067c7ce1df5f415997fd637d5ced188b55ff5fdc5a729bd58",
+    "run_sha256": "fcc02d56e62cfbd5fca6d90744468fc16ebc7fd4a6475bf51c6895f4367dbdf1"
+  },
+  "policy": {
+    "baseline_channel": "lexical",
+    "candidate_channel": "hybrid",
+    "min_queries": 10,
+    "min_scored_queries": 8,
+    "min_query_wins": 3,
+    "max_query_losses": 0,
+    "min_pass_rate_delta": 0,
+    "min_recall_at_5_delta": 0,
+    "min_mean_reciprocal_rank_delta": 0,
+    "min_ndcg_at_10_delta": 0,
+    "min_abstention_accuracy_delta": 0,
+    "max_candidate_latency_p95_ms": 1500,
+    "max_candidate_cost_usd": 0.01
+  }
+}

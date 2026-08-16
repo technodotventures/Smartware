@@ -1,0 +1,86 @@
+{
+  "name": "smartware",
+  "version": "0.6.1",
+  "description": "An open, user-owned memory protocol for every app and agent, with provenance, bitemporal truth, policy-first retrieval, and safe fallback.",
+  "type": "module",
+  "main": "dist/core.js",
+  "types": "dist/core.d.ts",
+  "bin": {
+    "smartware": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "schemas/v0.4.2",
+    "benchmarks/retrieval/*.json",
+    "docs",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:schemas": "node scripts/verify-schema-checksums.mjs",
+    "benchmark:retrieval-kernel": "npm run build --silent && node scripts/run-retrieval-kernel-benchmark.mjs benchmarks/retrieval/kernel-contract-v1.json",
+    "benchmark:retrieval-arena": "npm run build --silent && node scripts/evaluate-retrieval-arena.mjs benchmarks/retrieval/arena-contract-v1.json benchmarks/retrieval/arena-contract-run-v1.json",
+    "benchmark:retrieval-activation-contract": "npm run build --silent && node scripts/evaluate-retrieval-activation.mjs benchmarks/retrieval/arena-contract-v1.json benchmarks/retrieval/arena-contract-run-v1.json benchmarks/retrieval/activation-contract-v1.json --expect-hold",
+    "prepare": "tsc"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "memory",
+    "knowledge-graph",
+    "claims",
+    "agent-memory",
+    "semantic-search",
+    "temporal-memory",
+    "provenance",
+    "local-first"
+  ],
+  "author": "Techno Ventures",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/technodotventures/Smartware.git"
+  },
+  "bugs": {
+    "url": "https://github.com/technodotventures/Smartware/issues"
+  },
+  "homepage": "https://github.com/technodotventures/Smartware#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^13.0.3",
+    "simple-git": "^3.36.0",
+    "ulid": "^3.0.2",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp.d.ts",
+      "import": "./dist/mcp.js"
+    },
+    "./schemas/v0.4.2/*": {
+      "default": "./schemas/v0.4.2/*"
+    }
+  }
+}

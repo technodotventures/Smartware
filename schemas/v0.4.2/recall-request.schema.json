@@ -1,0 +1,81 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/recall-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RECALL Request",
+  "type": "object",
+  "required": [
+    "query",
+    "scope",
+    "actor_id"
+  ],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/Scope"
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "resolution": {
+      "type": "string",
+      "enum": [
+        "oneline",
+        "paragraph",
+        "full"
+      ],
+      "default": "paragraph"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 10
+    },
+    "include_stale": {
+      "type": "boolean",
+      "default": false
+    },
+    "include_forgotten": {
+      "type": "boolean",
+      "default": false
+    },
+    "include_superseded": {
+      "type": "boolean",
+      "default": false,
+      "description": "Audit mode. Ordinary RECALL excludes targets of active admitted supersedes/corrects edges."
+    },
+    "include_sensitive": {
+      "type": "boolean",
+      "default": false,
+      "description": "Requires explicit owner authorization; never implied by ordinary read access."
+    },
+    "min_confidence": {
+      "$ref": "common.schema.json#/$defs/ConfidenceBucket",
+      "default": "low"
+    },
+    "epistemic_tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/EpistemicTag"
+      }
+    },
+    "delivery_mode": {
+      "type": "string",
+      "enum": [
+        "inline",
+        "file_reference",
+        "context_bundle"
+      ],
+      "default": "inline"
+    },
+    "as_of": {
+      "$ref": "common.schema.json#/$defs/Iso8601",
+      "description": "Reserved post-beta. A v0.4.2 beta implementation returns invalid_payload if supplied."
+    }
+  },
+  "additionalProperties": false
+}

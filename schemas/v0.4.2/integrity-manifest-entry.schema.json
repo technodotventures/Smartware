@@ -1,0 +1,52 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/integrity-manifest-entry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Integrity Manifest Entry",
+  "type": "object",
+  "required": [
+    "surface",
+    "entry_id",
+    "prev_hash",
+    "hash",
+    "schema_version",
+    "attested_at",
+    "attested_by"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "operations",
+        "agent_registry"
+      ]
+    },
+    "entry_id": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    },
+    "prev_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "attested_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601"
+    },
+    "attested_by": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    }
+  },
+  "additionalProperties": false
+}

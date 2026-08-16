@@ -1,0 +1,76 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/observation.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Observation",
+  "type": "object",
+  "required": [
+    "observation_id",
+    "source",
+    "scope",
+    "content",
+    "metadata",
+    "operation_id",
+    "actor_id"
+  ],
+  "properties": {
+    "observation_id": {
+      "$ref": "common.schema.json#/$defs/ObservationId"
+    },
+    "source": {
+      "type": "string",
+      "description": "Origin identifier, e.g., 'claude.ai', 'github', 'user-direct'"
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/Scope"
+    },
+    "content": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "timestamp",
+        "actor"
+      ],
+      "properties": {
+        "timestamp": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "informed_by": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/ClaimId"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "operation_id": {
+      "$ref": "common.schema.json#/$defs/OperationId"
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional client key included in the content-addressed canonical observation payload."
+    }
+  },
+  "additionalProperties": false
+}

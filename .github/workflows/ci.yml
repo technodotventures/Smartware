@@ -1,0 +1,69 @@
+name: Smartware gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smartware-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Reject production vulnerabilities
+        run: npm audit --omit=dev --audit-level=low
+
+      - name: Build Smartware
+        run: npm run build
+
+      - name: Verify frozen schema checksums
+        run: npm run verify:schemas
+
+      - name: Run protocol tests
+        run: npm test
+
+      - name: Verify retrieval contracts
+        run: |
+          npm run benchmark:retrieval-kernel
+          npm run benchmark:retrieval-activation-contract
+
+      - name: Verify published package surface
+        if: matrix.node-version == 22
+        run: |
+          package_tarball="$(npm pack --silent)"
+          tar -tf "$package_tarball" | grep 'package/dist/core.js'
+          tar -tf "$package_tarball" | grep 'package/dist/mcp.js'
+          tar -tf "$package_tarball" | grep 'package/dist/cli.js'
+          tar -tf "$package_tarball" | grep 'package/schemas/v0.4.2/claim.schema.json'
+          package_test_dir="$(mktemp -d)"
+          npm install --prefix "$package_test_dir" "./$package_tarball"
+          (
+            cd "$package_test_dir"
+            node --input-type=module -e "const core = await import('smartware'); if (typeof core.SmartwareCore !== 'function') process.exit(1)"
+            node --input-type=module -e "const mcp = await import('smartware/mcp'); if (typeof mcp.createSmartwareMcpServer !== 'function') process.exit(1)"
+          )

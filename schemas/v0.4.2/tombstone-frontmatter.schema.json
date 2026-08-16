@@ -1,0 +1,194 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/tombstone-frontmatter.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tombstone Frontmatter",
+  "type": "object",
+  "required": [
+    "tombstone_id",
+    "claim_id",
+    "forgotten_at",
+    "forgotten_by",
+    "operation_id",
+    "reason",
+    "snapshot",
+    "blast_radius_summary",
+    "affected_pages"
+  ],
+  "properties": {
+    "tombstone_id": {
+      "$ref": "common.schema.json#/$defs/TombstoneId"
+    },
+    "claim_id": {
+      "$ref": "common.schema.json#/$defs/ClaimId"
+    },
+    "forgotten_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601"
+    },
+    "forgotten_by": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "operation_id": {
+      "$ref": "common.schema.json#/$defs/OperationId"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "snapshot": {
+      "type": "object",
+      "description": "Full snapshot of the prior active L1 version at time of forgetting. Contains every field the claim schema requires, so a missing forgotten L1 version can be reconstructed catastrophically from this snapshot plus the tombstone's top-level forget-specific fields (see Conformance Test LC-04).",
+      "required": [
+        "claim_id",
+        "version",
+        "state",
+        "content",
+        "derived_from",
+        "author",
+        "epistemic_owner",
+        "fingerprint",
+        "confidence",
+        "epistemic_tag",
+        "claim_type",
+        "claim_role",
+        "scope",
+        "created_at",
+        "version_at",
+        "operation_id",
+        "actor_id",
+        "relations",
+        "tags"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "const": "active"
+        },
+        "content": {
+          "type": "string"
+        },
+        "derived_from": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/ObservationId"
+          }
+        },
+        "author": {
+          "$ref": "common.schema.json#/$defs/Author"
+        },
+        "epistemic_owner": {
+          "$ref": "common.schema.json#/$defs/Author"
+        },
+        "fingerprint": {
+          "$ref": "common.schema.json#/$defs/Fingerprint"
+        },
+        "confidence": {
+          "$ref": "common.schema.json#/$defs/ConfidenceBucket"
+        },
+        "epistemic_tag": {
+          "$ref": "common.schema.json#/$defs/EpistemicTag"
+        },
+        "claim_type": {
+          "$ref": "common.schema.json#/$defs/ClaimType"
+        },
+        "claim_role": {
+          "$ref": "common.schema.json#/$defs/ClaimRole"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "created_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        },
+        "version_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601",
+          "description": "version_at of the prior active L1 version (not of the FORGET operation)"
+        },
+        "operation_id": {
+          "$ref": "common.schema.json#/$defs/OperationId",
+          "description": "operation_id of the prior active L1 version (the one that created or revised the claim to its forgotten state)"
+        },
+        "actor_id": {
+          "$ref": "common.schema.json#/$defs/ActorId",
+          "description": "actor_id of the prior active L1 version"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Tag"
+          }
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "relation.schema.json"
+          }
+        },
+        "endorsement_source": {
+          "$ref": "common.schema.json#/$defs/PageId"
+        },
+        "supersedes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revived_via": {
+          "$ref": "common.schema.json#/$defs/TombstoneId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "blast_radius_summary": {
+      "type": "object",
+      "required": [
+        "pages_affected",
+        "agent_blocks_marked",
+        "user_pages_notified"
+      ],
+      "properties": {
+        "pages_affected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "agent_blocks_marked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "user_pages_notified": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "affected_pages": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/PageId"
+      }
+    },
+    "revived_at": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "revived_via": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/TombstoneId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

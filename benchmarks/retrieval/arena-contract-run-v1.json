@@ -1,0 +1,153 @@
+{
+  "name": "smartware-retrieval-arena-captured-contract-v1",
+  "metadata": {
+    "purpose": "Evaluator contract only",
+    "quality_claim": "none"
+  },
+  "observations": [
+    {
+      "query_id": "exact-deadline",
+      "channel": "lexical",
+      "result_ids": ["claim_deadline"],
+      "latency_ms": 4
+    },
+    {
+      "query_id": "paraphrase-checkpoint",
+      "channel": "lexical",
+      "result_ids": [],
+      "latency_ms": 3
+    },
+    {
+      "query_id": "entity-owner",
+      "channel": "lexical",
+      "result_ids": ["claim_aster_owner"],
+      "latency_ms": 4
+    },
+    {
+      "query_id": "current-pricing",
+      "channel": "lexical",
+      "result_ids": ["claim_pricing_current"],
+      "latency_ms": 5
+    },
+    {
+      "query_id": "historical-pricing",
+      "channel": "lexical",
+      "result_ids": ["claim_pricing_old"],
+      "latency_ms": 5
+    },
+    {
+      "query_id": "range-incidents",
+      "channel": "lexical",
+      "result_ids": ["claim_incident_1"],
+      "latency_ms": 6
+    },
+    {
+      "query_id": "multi-hop-founder",
+      "channel": "lexical",
+      "result_ids": [],
+      "latency_ms": 4
+    },
+    {
+      "query_id": "procedural-deploy",
+      "channel": "lexical",
+      "result_ids": ["claim_deploy_drain"],
+      "latency_ms": 5
+    },
+    {
+      "query_id": "negative-weather",
+      "channel": "lexical",
+      "result_ids": [],
+      "abstained": true,
+      "latency_ms": 2
+    },
+    {
+      "query_id": "safety-private-payroll",
+      "channel": "lexical",
+      "result_ids": [],
+      "abstained": true,
+      "latency_ms": 2
+    },
+    {
+      "query_id": "exact-deadline",
+      "channel": "hybrid",
+      "result_ids": ["claim_deadline", "claim_checkpoint"],
+      "latency_ms": 62,
+      "input_tokens": 12,
+      "cost_usd": 0.00001
+    },
+    {
+      "query_id": "paraphrase-checkpoint",
+      "channel": "hybrid",
+      "result_ids": ["claim_checkpoint", "claim_deadline"],
+      "latency_ms": 74,
+      "input_tokens": 14,
+      "cost_usd": 0.00001
+    },
+    {
+      "query_id": "entity-owner",
+      "channel": "hybrid",
+      "result_ids": ["claim_aster_owner"],
+      "latency_ms": 69,
+      "input_tokens": 9,
+      "cost_usd": 0.00001
+    },
+    {
+      "query_id": "current-pricing",
+      "channel": "hybrid",
+      "result_ids": ["claim_pricing_current"],
+      "latency_ms": 81,
+      "input_tokens": 11,
+      "cost_usd": 0.00001
+    },
+    {
+      "query_id": "historical-pricing",
+      "channel": "hybrid",
+      "result_ids": ["claim_pricing_old"],
+      "latency_ms": 85,
+      "input_tokens": 13,
+      "cost_usd": 0.00001
+    },
+    {
+      "query_id": "range-incidents",
+      "channel": "hybrid",
+      "result_ids": ["claim_incident_1", "claim_incident_2"],
+      "latency_ms": 92,
+      "input_tokens": 10,
+      "cost_usd": 0.00001
+    },
+    {
+      "query_id": "multi-hop-founder",
+      "channel": "hybrid",
+      "result_ids": ["claim_founder_dependency"],
+      "latency_ms": 113,
+      "input_tokens": 16,
+      "cost_usd": 0.00002
+    },
+    {
+      "query_id": "procedural-deploy",
+      "channel": "hybrid",
+      "result_ids": ["claim_deploy_drain", "claim_deploy_verify"],
+      "latency_ms": 97,
+      "input_tokens": 18,
+      "cost_usd": 0.00002
+    },
+    {
+      "query_id": "negative-weather",
+      "channel": "hybrid",
+      "result_ids": [],
+      "abstained": true,
+      "latency_ms": 72,
+      "input_tokens": 8,
+      "cost_usd": 0.00001
+    },
+    {
+      "query_id": "safety-private-payroll",
+      "channel": "hybrid",
+      "result_ids": [],
+      "abstained": true,
+      "latency_ms": 64,
+      "input_tokens": 9,
+      "cost_usd": 0.00001
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/operation-log-entry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Operations Log Entry",
+  "type": "object",
+  "required": [
+    "operation_id",
+    "actor_id",
+    "timestamp",
+    "op"
+  ],
+  "properties": {
+    "operation_id": {
+      "$ref": "common.schema.json#/$defs/OperationId"
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "timestamp": {
+      "$ref": "common.schema.json#/$defs/Iso8601"
+    },
+    "op": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "reflect",
+        "reflect.auto",
+        "reflect.profile",
+        "revise.claim",
+        "endorse",
+        "revive",
+        "forget",
+        "grant",
+        "revoke",
+        "session.start",
+        "session.end",
+        "quarantine_review",
+        "access.allow",
+        "access.deny",
+        "dream.verify",
+        "dream.extract_relations",
+        "dream.detect_conflicts",
+        "dream.recompile_pages",
+        "dream.check_capacity",
+        "dream.find_orphans",
+        "repair"
+      ]
+    },
+    "details": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

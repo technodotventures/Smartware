@@ -1,0 +1,66 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/agent-registry-entry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Registry Entry",
+  "type": "object",
+  "required": [
+    "actor_id",
+    "kind",
+    "owner",
+    "capabilities",
+    "added"
+  ],
+  "properties": {
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "human",
+        "agent",
+        "sidecar",
+        "substrate"
+      ]
+    },
+    "owner": {
+      "type": "string"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "observe",
+          "recall",
+          "reflect",
+          "revise",
+          "forget",
+          "read",
+          "explain",
+          "context",
+          "grant",
+          "revoke",
+          "session",
+          "status",
+          "quarantine_review",
+          "all"
+        ]
+      }
+    },
+    "scope_limits": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Scope"
+      }
+    },
+    "added": {
+      "type": "string",
+      "format": "date"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

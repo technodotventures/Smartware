@@ -1,0 +1,206 @@
+{
+  "name": "smartware-retrieval-kernel-contract-v1",
+  "description": "Deterministic contract fixture for eligibility, semantic ranking, and bi-temporal filtering. Hand-authored vectors test orchestration, not embedding-model quality.",
+  "documents": [
+    {
+      "id": "claim_release_expired",
+      "scope": "workspace",
+      "version": "2026-07-01T00:00:00.000Z",
+      "text": "Release\nblocked by: restore hangs after manifest load",
+      "valid_time": {
+        "from": "2026-01-01T00:00:00.000Z",
+        "to": "2026-07-01T00:00:00.000Z"
+      },
+      "transaction_time": {
+        "from": "2026-01-02T00:00:00.000Z",
+        "to": "2026-07-02T00:00:00.000Z"
+      },
+      "vector": [1, 0, 0, 0]
+    },
+    {
+      "id": "claim_release_current",
+      "scope": "workspace",
+      "version": "2026-07-02T00:00:00.000Z",
+      "text": "Release\nblocked by: checkpoint recovery is slow",
+      "valid_time": {
+        "from": "2026-07-01T00:00:00.000Z",
+        "to": null
+      },
+      "transaction_time": {
+        "from": "2026-07-02T00:00:00.000Z",
+        "to": null
+      },
+      "vector": [0.98, 0.2, 0, 0]
+    },
+    {
+      "id": "claim_lunch",
+      "scope": "workspace",
+      "version": "2026-07-03T00:00:00.000Z",
+      "text": "Lunch\ndescription: team catering menu",
+      "valid_time": {
+        "from": "2026-07-03T00:00:00.000Z",
+        "to": null
+      },
+      "transaction_time": {
+        "from": "2026-07-03T00:00:00.000Z",
+        "to": null
+      },
+      "vector": [0, 1, 0, 0]
+    },
+    {
+      "id": "claim_secret",
+      "scope": "private",
+      "version": "2026-07-04T00:00:00.000Z",
+      "text": "Secret migration\nblocked by: restore checkpoint failure",
+      "valid_time": {
+        "from": "2026-07-04T00:00:00.000Z",
+        "to": null
+      },
+      "transaction_time": {
+        "from": "2026-07-04T00:00:00.000Z",
+        "to": null
+      },
+      "vector": [1, 0, 0, 0]
+    },
+    {
+      "id": "claim_policy",
+      "scope": "workspace",
+      "version": "2026-07-10T00:00:00.000Z",
+      "text": "Policy\nrequires: two reviewers",
+      "valid_time": {
+        "from": "2026-01-01T00:00:00.000Z",
+        "to": null
+      },
+      "transaction_time": {
+        "from": "2026-07-10T00:00:00.000Z",
+        "to": null
+      },
+      "vector": [0, 0, 1, 0]
+    },
+    {
+      "id": "claim_prior_policy",
+      "scope": "workspace",
+      "version": "2026-01-10T00:00:00.000Z",
+      "text": "Policy\nrequires: one reviewer",
+      "valid_time": {
+        "from": "2026-01-01T00:00:00.000Z",
+        "to": null
+      },
+      "transaction_time": {
+        "from": "2026-01-10T00:00:00.000Z",
+        "to": null
+      },
+      "vector": [0, 0, 1, 0]
+    }
+  ],
+  "queries": [
+    {
+      "id": "paraphrase",
+      "text": "Why does the checkpoint stall?",
+      "vector": [1, 0, 0, 0],
+      "eligible_ids": ["claim_release_expired", "claim_release_current", "claim_lunch"],
+      "expected_id": "claim_release_expired",
+      "forbidden_ids": ["claim_secret"]
+    },
+    {
+      "id": "current-valid-time",
+      "text": "What is blocking the release now?",
+      "vector": [1, 0, 0, 0],
+      "eligible_ids": ["claim_release_expired", "claim_release_current", "claim_lunch"],
+      "temporal": {
+        "mode": "current",
+        "axis": "valid_time",
+        "at": "2026-07-24T00:00:00.000Z"
+      },
+      "expected_id": "claim_release_current",
+      "forbidden_ids": ["claim_release_expired", "claim_secret"]
+    },
+    {
+      "id": "historical-valid-time",
+      "text": "What blocked the release in May?",
+      "vector": [1, 0, 0, 0],
+      "eligible_ids": ["claim_release_expired", "claim_release_current"],
+      "temporal": {
+        "mode": "as_of",
+        "axis": "valid_time",
+        "at": "2026-05-15T00:00:00.000Z"
+      },
+      "expected_id": "claim_release_expired",
+      "forbidden_ids": ["claim_release_current"]
+    },
+    {
+      "id": "knowledge-as-of",
+      "text": "What policy did Smartware know in May?",
+      "vector": [0, 0, 1, 0],
+      "eligible_ids": ["claim_policy"],
+      "temporal": {
+        "mode": "as_of",
+        "axis": "transaction_time",
+        "at": "2026-05-15T00:00:00.000Z"
+      },
+      "expected_id": null,
+      "forbidden_ids": ["claim_policy"]
+    },
+    {
+      "id": "world-as-of",
+      "text": "What policy was valid in May?",
+      "vector": [0, 0, 1, 0],
+      "eligible_ids": ["claim_policy"],
+      "temporal": {
+        "mode": "as_of",
+        "axis": "valid_time",
+        "at": "2026-05-15T00:00:00.000Z"
+      },
+      "expected_id": "claim_policy",
+      "forbidden_ids": []
+    },
+    {
+      "id": "knowledge-starts-in-range",
+      "text": "Which policy did Smartware first learn in July?",
+      "vector": [0, 0, 1, 0],
+      "eligible_ids": ["claim_prior_policy", "claim_policy"],
+      "temporal": {
+        "mode": "range",
+        "relation": "starts_in",
+        "axis": "transaction_time",
+        "from": "2026-07-01T00:00:00.000Z",
+        "to": "2026-08-01T00:00:00.000Z"
+      },
+      "expected_id": "claim_policy",
+      "forbidden_ids": ["claim_prior_policy"]
+    },
+    {
+      "id": "hybrid-event-start",
+      "text": "Which July policy requires reviewers?",
+      "vector": [0, 0, 1, 0],
+      "eligible_ids": ["claim_prior_policy", "claim_policy"],
+      "lexical_ids": ["claim_prior_policy", "claim_policy"],
+      "temporal": {
+        "mode": "range",
+        "relation": "starts_in",
+        "axis": "transaction_time",
+        "from": "2026-07-01T00:00:00.000Z",
+        "to": "2026-08-01T00:00:00.000Z"
+      },
+      "expected_id": "claim_policy",
+      "forbidden_ids": ["claim_prior_policy"]
+    },
+    {
+      "id": "hybrid-provider-fallback",
+      "text": "Which lunch memory is available?",
+      "vector": null,
+      "eligible_ids": ["claim_release_current", "claim_lunch"],
+      "lexical_ids": ["claim_secret", "claim_lunch", "claim_release_current"],
+      "expected_id": "claim_lunch",
+      "forbidden_ids": ["claim_secret"]
+    },
+    {
+      "id": "negative",
+      "text": "unrelated astronomical weather",
+      "vector": [0, 0, 0, 1],
+      "eligible_ids": ["claim_release_current", "claim_lunch", "claim_policy"],
+      "expected_id": null,
+      "forbidden_ids": []
+    }
+  ]
+}

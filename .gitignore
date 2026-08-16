@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Claude Code local settings (user-specific permissions)
+.claude/settings.local.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Test artifacts
+coverage/
+.nyc_output/
+
+# OS
+Thumbs.db
+
+# Local Smartware instance data (if stored in repo during testing)
+.smartware/
+data/

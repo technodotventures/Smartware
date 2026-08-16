@@ -1,0 +1,58 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/watch-event.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WATCH Binding Event",
+  "description": "Transport event, not a canonical surface or core memory verb.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "op",
+    "actor_id",
+    "scope",
+    "target",
+    "operation_id",
+    "emitted_at",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "op": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "reflect",
+        "revise",
+        "forget",
+        "grant",
+        "revoke",
+        "session.start",
+        "session.end",
+        "quarantine_review"
+      ]
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/Scope"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation_id": {
+      "$ref": "common.schema.json#/$defs/OperationId"
+    },
+    "emitted_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Access-filtered identifiers and operation metadata; restricted content is forbidden."
+    }
+  },
+  "additionalProperties": false
+}

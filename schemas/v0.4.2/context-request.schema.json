@@ -1,0 +1,38 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.4.2/context-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CONTEXT Request",
+  "type": "object",
+  "required": [
+    "query",
+    "scope",
+    "actor_id"
+  ],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/Scope"
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "include_forgotten": {
+      "type": "boolean",
+      "default": false
+    },
+    "include_superseded": {
+      "type": "boolean",
+      "default": false
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 10
+    }
+  },
+  "additionalProperties": false
+}
