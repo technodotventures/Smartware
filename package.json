@@ -1,6 +1,6 @@
 {
   "name": "smartware",
-  "version": "0.6.1",
+  "version": "0.6.3",
   "description": "An open, user-owned memory protocol for every app and agent, with provenance, bitemporal truth, policy-first retrieval, and safe fallback.",
   "type": "module",
   "main": "dist/core.js",
@@ -81,6 +81,18 @@
     },
     "./schemas/v0.4.2/*": {
       "default": "./schemas/v0.4.2/*"
+    },
+    "./layer0": {
+      "types": "./dist/layer0/index.d.ts",
+      "import": "./dist/layer0/index.js"
+    },
+    "./layer1": {
+      "types": "./dist/layer1/store.d.ts",
+      "import": "./dist/layer1/store.js"
+    },
+    "./layer3": {
+      "types": "./dist/layer3/search.d.ts",
+      "import": "./dist/layer3/search.js"
     }
   }
 }
