@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [22, 24]
 
     steps:
       - name: Check out repository
@@ -50,6 +50,7 @@ jobs:
       - name: Verify retrieval contracts
         run: |
           npm run benchmark:retrieval-kernel
+          npm run benchmark:retrieval-arena
           npm run benchmark:retrieval-activation-contract
 
       - name: Verify published package surface

@@ -72,9 +72,9 @@ Smartware `0.6.x` is beta software.
 - Semantic activation remains fail-closed until sealed held-out evaluation
   passes the configured quality, safety, latency, and cost gates.
 - The production dependency audit reports zero vulnerabilities.
-- The repository gate runs the full protocol suite on Node.js 20 and 22,
+- The repository gate runs the full protocol suite on Node.js 22 and 24,
   verifies frozen schema checksums and the packed public API, and executes the
-  deterministic retrieval and activation contracts.
+  deterministic retrieval kernel, retrieval arena, and activation contracts.
 
 See [retrieval](docs/retrieval.md) and
 [implementation conformance](docs/conformance-status.md) for the evidence and
@@ -127,7 +127,7 @@ visibility and release readiness are managed independently from the protocol.
 
 ## Install
 
-Requirements: Node.js 20 or newer.
+Requirements: Node.js 22 or newer.
 
 ```sh
 git clone https://github.com/technodotventures/Smartware.git
