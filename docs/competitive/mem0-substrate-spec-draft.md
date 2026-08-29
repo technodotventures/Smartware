@@ -1,6 +1,6 @@
 # Smartware Company-Brain Substrate Specification
 
-**Status:** v0.7 NORMATIVE · 2026-08-29 · G0 verdict + compile-latency evidence baked in (§11); all §9 decisions closed; supersedes DRAFT (v0.3–v0.6)
+**Status:** v0.8 NORMATIVE · 2026-08-29 · G0 verdict + compile-latency evidence baked in (§11); Coffee tenant config shape bound (§10b); all §9 decisions closed; supersedes DRAFT (v0.3–v0.6)
 **Companion:** `mem0-gap-analysis.md` (this doc is the design contract; that doc is the analysis).
 **Product frame:** Coffee — end-to-end SaaS for small service businesses. The mem0-compat surface (§2–§8) is optional ecosystem reach; the Coffee tenant model (§10) is the primary product frame.
 **Binding decisions — all CLOSED 2026-08-29:** provenance-at-query-time (spike, §7); client-scope erasure semantics (§10); `add` compile-default (§9.1); FORGET.SCOPE versioning (§9.2); MCP namespace / CLI scope / adapter hosting (§9.3–9.5). G0 spike evidence: §11.
@@ -108,6 +108,93 @@ Auth: accept `Authorization: Token <key>` (hosted shape) and `X-API-Key: <key>` 
 - **Freshness window is STATE-based, never time-based:** observation stays raw-searchable (`unverified`) until its compile job resolves — EXTRACTED → claim ranks above it, obs retained as evidence; FAILED → searchable forever with `unverified`; job never resolves → flagged, not hidden. A time window would desync from what durably happened.
 - **Rebuild-equivalence conformance (consistency contract):** FTS and ops indexes are regenerable artifacts. v0.5.0 conformance includes wipe-and-rebuild from JSONL asserting byte-level equivalence with the canonical log, and **FORGET.SCOPE "zero results in every lane" is asserted against a REBUILT index** — stale FTS entry = the ghost that resurfaces a purged client; purge proof is only valid if index regeneration is part of the conformance suite.
 
+## 10b. Coffee tenant config shape — `config.json` (binding, v0.5.0 cut)
+
+**One business = one tenant = one Pod = one instance** (`instance_id` + `data_dir` + `config.json`). There is no separate tenant record: the tenant IS the Smartware instance. Provisioned once at onboarding; thereafter `scopes` + `grants` are the tenant's operational surface. **Zero code changes required for the shape itself** — verified against dist v0.6.3 (see code-verified notes). The only non-config touch is the schema-set `Scope` pattern (see Schema seam below).
+
+### 10b.1 Field bindings
+
+| Field | Shape | Binding rule |
+|---|---|---|
+| `instance_id` | `smartware_<ulid>` | Pod identity; one per business. Never reused after a business closes. |
+| `owner_id` | spec-conformant ActorId — `user:<slug>` (e.g. `user:ava`) | The business owner. Owner bypasses ALL grant checks (`grants.ts isOwner`); never assign staff here. Legacy ids (`person_owner`) still accepted in migration window but NOT used for new Coffee tenants. `user:<slug>` verified conformant to `common.schema.json` `ActorId` (`^(user|agent|sidecar|substrate):[a-z0-9-]+$`); `person_owner` is not. |
+| `writer_id` | `writer_local_<ulid>` | Pod writer; untouched by tenant model. |
+| `version` / `data_dir` | as scaffolded | untouched by tenant model. |
+| `scopes[]` | `ScopeEntry` | `self` (private, parent null) and `workspace` (workspace, parent null) remain from the scaffold. `project:default` is replaced by the client scopes in the Coffee frame. **Each client = one scope entry** `client:<id>` with `parent: 'workspace'`, `visibility_default: 'scope'` — clients are scopes, never subjects (see §10). |
+| scope id versioning | `client:<id>#n` where n ≥ 1 | **Non-reusable marker (binding):** initial onboarding mints `client:<id>#1`; a returned client after erasure/offboarding mints `#2` (fresh scope inherits nothing — §10). `#1` is permanently retired and its entry removed from `scopes` on `reason=erasure`. Scope ids are plain strings to the runtime — verified no id validation rejects `:` or `#` (round-trip test, §10b.5). |
+| `grants[]` | `Grant` | One grant per staff actor (human OR agent); capabilities per client-scope **cluster**. See 10b.2. |
+| `llm` / `staleness` / `entity_resolution` | as scaffolded | `staleness.scope_overrides` is declared in the config contract but **not consumed by the runtime today** (verified: only `default_half_life_days`/`stale_threshold` are read, `manifest.ts`). Set staleness at Pod level; do not rely on per-client overrides until a future staleness layer consumes them. |
+
+### 10b.2 Staff grants — per client-scope cluster (binding)
+
+- One `Grant` per staff actor; `actor_type` legacy enum `person|agent|system` with **conformant `actor_id`** (`user:<slug>` for staff, `agent:<slug>` for Coffee agents/teammates). Legacy enum ↔ spec kinds is projected in `registry-md.ts` (person→human); the alias-map PR will tighten.
+- Capabilities: `observe` (record), `query` (recall), `read`, `correct`, optionally `compile`; `forget` only where the business wants staff-initiated five-verb FORGET within their cluster — **erasure/offboarding (FORGET.SCOPE) is an owner decision**; staff never invoke it. Grants carry `trusted:false`, `quarantine:false`, `status:'active'`, `expires_at` set for contractors or `null` for permanent staff (expiry is enforced by `isExpired`).
+- **The cluster IS the exact scope-id list (binding — verified):** `scopeMatches` supports only (a) exact id, (b) `*` (matches EVERY scope — never issue to staff), (c) `prefix/*` (matches `prefix/…` slash ids **only** — does NOT match colon ids). Verified: `client:*`, `client/*`, and `client:acme#*` ALL return false for `client:acme#2`; only exact `client:acme#2` (or `*`) matches. Therefore: **list every client scope id explicitly** in the capabilities arrays; a "cluster" of clients = the explicit set in one grant's arrays. Rotation = explicit list edit (weekly ops cadence, per §10).
+- **Non-reusability by construction:** because no wildcard spans versions, a grant for `client:acme#2` can never authorize `client:acme#1` (verified: grant on `#2` → `checkGrant(query, 'client:acme')` = false). A resurrected marker cannot be reached by any pattern except `*` or an explicit re-list — both are config smells; the rule is: never issue `*`, never re-list a retired marker.
+- Minimal cluster: one grant `query:[client:<id>]` + `observe:[client:<id>]` is sufficient for a staff member serving one client; empty arrays for unheld operations (default `getActiveGrants`/`checkGrant` semantics treat them as absent).
+
+### 10b.3 Lifecycle in config terms
+
+| Event | Config effect (same commit as the FORGET.SCOPE mutation) |
+|---|---|
+| Client onboard | add `client:<id>#1` scope entry; add/extend grants for serving staff (after GRANT op or config edit — scope entries have no protocol op today; they are config-provisioned). |
+| Staff reassignment | edit capability lists to add/remove exact client ids (weekly, audited). |
+| Client offboarding | `FORGET.SCOPE{reason:offboarding}` → grants referencing the client scope set `status:'revoked'` (auditable, reversible); scope entry retained (tombstone is data-side). Reopen → `client:<id>#2` + repointed grants; optional owner-approved non-PII pointer (§10). |
+| Client erasure | `FORGET.SCOPE{reason:erasure}` → grants revoked (same commit); **scope entry removed**; `#1` marker permanently retired. Reopen → `#2` inherits nothing. |
+| Business closes | suspend Pod; never reuse `instance_id`; `owner_id` transfer is a config edit + audit. |
+
+### 10b.4 Worked example (tenant "Harbor & Lane", 2 staff + 1 agent, 3 clients)
+
+```json
+{
+  "instance_id": "smartware_01kxw9f2v3",
+  "owner_id": "user:ava",
+  "writer_id": "writer_local_01kxw9f2v4",
+  "version": "0.6.3",
+  "data_dir": "/var/lib/smartware/harbor-lane",
+  "scopes": [
+    { "id": "self", "parent": null, "visibility_default": "private" },
+    { "id": "workspace", "parent": null, "visibility_default": "workspace" },
+    { "id": "client:acme#1", "parent": "workspace", "visibility_default": "scope" },
+    { "id": "client:bcau#1", "parent": "workspace", "visibility_default": "scope" },
+    { "id": "client:gate#2", "parent": "workspace", "visibility_default": "scope" }
+  ],
+  "grants": [
+    { "id": "grant_01kxw9f2v5", "actor_type": "person", "actor_id": "user:gigi",
+      "capabilities": { "observe": ["client:acme#1", "client:bcau#1"], "query": ["client:acme#1", "client:bcau#1"], "compile": [], "correct": ["client:acme#1"], "forget": [], "read": ["client:acme#1", "client:bcau#1"] },
+      "trusted": false, "quarantine": false, "created_at": "2026-08-29T09:00:00.000Z", "expires_at": null, "status": "active" },
+    { "id": "grant_01kxw9f2v6", "actor_type": "person", "actor_id": "user:noah",
+      "capabilities": { "observe": ["client:acme#1", "client:gate#2"], "query": ["client:acme#1", "client:gate#2"], "compile": [], "correct": [], "forget": [], "read": ["client:gate#2"] },
+      "trusted": false, "quarantine": false, "created_at": "2026-08-29T09:00:00.000Z", "expires_at": "2027-01-01T00:00:00.000Z", "status": "active" },
+    { "id": "grant_01kxw9f2v7", "actor_type": "agent", "actor_id": "agent:coffee-assistant",
+      "capabilities": { "observe": ["client:gate#2"], "query": ["client:gate#2"], "compile": [], "correct": [], "forget": [], "read": [] },
+      "trusted": false, "quarantine": false, "created_at": "2026-08-29T09:00:00.000Z", "expires_at": null, "status": "active" }
+  ],
+  "llm": { "provider": "anthropic", "model": "claude-sonnet-4-5" },
+  "staleness": { "default_half_life_days": 90, "scope_overrides": {}, "stale_threshold": 0.3 }
+}
+```
+
+(`client:gate` left via erasure earlier → mints `#2` only; `#1` is absent from `scopes` and permanently retired. `user:ava` has no grant — owner bypasses. Mirror/companion file: `docs/competitive/coffee-tenant-config.example.json`.)
+
+### 10b.5 Code-verified facts (dist v0.6.3, Node v26.5.1; harness `scripts/verify-config-shape.mjs`)
+
+- `loadConfig`/`saveConfig` round-trip a Coffee shape unchanged (scopes incl. `client:<id>#n`); no format validation on scope ids in the runtime.
+- `ScopeRegistry.getAncestors('client:acme#2')` → `client:acme#2 > workspace` — hierarchy holds as configured.
+- `checkGrant('user:gigi','query','client:acme#2')` = true; `client:acme` (#1 orphan) = false; `client:*` / `client/*` / `client:acme#*` = false; `*` = true (therefore banned for staff).
+- `isOwner('user:ava')` = true → staff/agent rows are grant-only; owner row appears in `agents/registry.md` (human|self|all).
+- `getVisibilityDefault('client:acme#2')` = `'scope'` (accessor exists; the write path defaults observation visibility to literal `'scope'` today — observe.ts — which coincides with this binding; no runtime mismatch).
+
+### 10b.6 Schema seam (the ONE non-config touch, v0.5.0 schema set)
+
+`common.schema.json` `$defs/Scope` currently restricts ids to `^(self|workspace|project:[a-z0-9-]+|agent:[a-z0-9-]+)$` — it **rejects** `client:<id>` and `client:<id>#n`. It is referenced by `observation`, `claim`, `recall-request`, `context-request`, `context-bundle`, `page-frontmatter`, `tombstone-frontmatter`, `watch-event`, `agent-registry-entry`. The v0.5.0 schema set (released with the cut, per §9.2 "schemas + contract ship together") must widen it:
+
+```
+^(self|workspace|project:[a-z0-9-]+|agent:[a-z0-9-]+|client:[a-z0-9-]+(?:#[0-9]+)?)$
+```
+
+This is a schema-pattern widening, NOT a protocol-semantics change (no verbs, contracts, or conformance semantics change); v0.4.x artifacts keep the old pattern (migration note per §9.2). Impl card (t_357cd5fb) and conformance card (t_58b66030): the Coffee-tenant config fixture above is the seed fixture for config-shape conformance and for the widened `Scope` tests.
+
 ## 11. G0 spike evidence — verdicts and bindings (CLOSED 2026-08-29)
 
 ### 11.1 mem0 head-to-head (record: `mem0-h2h-recall.md`)
@@ -163,3 +250,4 @@ Expected outcome after 1+2: q03 → rank 1; MRR/NDCG edge widens. Honest caveat 
 - v0.5 (2026-08-29): `add` compile-default RESOLVED — sync-raw + async-compile (per smarty-pants/tech-head); v0.5.0 cut scope bound: observation FTS index + derived ops index (both are compile-queue prerequisites, not follow-up), state-based freshness window (`unverified`/EXTRACTED/FAILED semantics in RECALL payload), rebuild-equivalence conformance incl. FORGET.SCOPE against REBUILT indexes.
 - v0.6 (2026-08-29): remaining spec items RESOLVED — MCP namespace = option-gated namespace on existing Smartware MCP server (default off); mem0 CLI ships in compat package only; adapter hosting = separate `smartware-mem0-compat` package with own semver. All §9 items closed except deferred QM appendix.
 - v0.7 (2026-08-29): **DRAFT → NORMATIVE.** G0 verdicts baked in (§11): mem0 head-to-head — mem0's fused retriever did NOT win (recall@k ties, Smartware leads MRR/NDCG, latency 2.35×, provenance 200/200, safety, temporal); the single mem0 win (q03) traced to Smartware internals defects D1 (entity-aggregated lexical feed) + D2 (alphabetical tiebreak) with concrete BINDING fix path. Compile-latency: sync-raw write p95 1.868ms @50k VALIDATED, async compile 9,468,298ms @50k INVALIDATED (1,893.7× over 5s; O(N²) fingerprint dedup + per-claim fsync) → fingerprint index + batched appends bound to the v0.5.0 compile-queue cut; explicit `unverified`/`EXTRACTED`/`FAILED` labels bound in the compile/recall payload contract; spike re-run required before G2 closes. Records: `mem0-h2h-recall.md`, `.spike/compile-latency/`.
+- v0.8 (2026-08-29): **Coffee tenant config shape bound (§10b).** One business = one tenant = one Pod (`config.json` + scopes + grants); `client:<id>` under `workspace` with `visibility_default: 'scope'`; non-reusable `client:<id>#n` markers; staff = Grant capability clusters expressed as **exact scope-id lists** (verified: `client:*`, `client/*`, `client:acme#*` do NOT match — `scopeMatches` supports exact ids, `*`, and `prefix/*` slash wildcards only); versioned distinctness is structural (grant on `#2` never authorizes `#1`). Code-verified against dist v0.6.3 (harness `scripts/verify-config-shape.mjs`); worked example `docs/competitive/coffee-tenant-config.example.json`. One seam flagged: v0.5.0 schema set must widen `common.schema.json` `Scope` pattern to admit `client:<id>` + `#n` — schema widening only, no protocol-semantics change (§10b.6).

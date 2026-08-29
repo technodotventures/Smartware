@@ -1,9 +1,9 @@
 # Smartware → Coffee Company Brain: Execution Plan
 
-**Status:** v2 · 2026-08-29 · Source material: `mem0-substrate-spec-draft.md` (v0.7 NORMATIVE), `mem0-gap-analysis.md`, corpus entries (`gbrain-company-brain.md`, `qm-memory.md`)
+**Status:** v2 · 2026-08-29 · Source material: `mem0-substrate-spec-draft.md` (v0.8 NORMATIVE), `mem0-gap-analysis.md`, corpus entries (`gbrain-company-brain.md`, `qm-memory.md`)
 **Product frame:** Coffee — end-to-end SaaS for small service businesses. One business = one tenant.
 
-**Decision state:** all strategic questions RESOLVED (see spec §7, §9, §10, §10a). G0 spike COMPLETE (verdict + both axes recorded); no blocking unknowns remain; the rest of the plan is sequence plus the G2 conformance gate.
+**Decision state:** all strategic questions RESOLVED (see spec §7, §9, §10, §10a, §10b). G0 spike COMPLETE (verdict + both axes recorded); config shape DEFINED (§10b); no blocking unknowns remain; the rest of the plan is sequence plus the G2 conformance gate.
 
 ---
 
@@ -29,7 +29,7 @@
 - Protocol v0.5.0 core intent: FORGET.SCOPE w/ erasure|offboarding, one ops-log entry + counts, same-commit grant revocation, lane-exhaustive purge (vector/BM25/graph + derived summaries), non-reusable `client:<id>#n` markers.
 - Cut scope (bound, not follow-up): **observation FTS index** + **derived ops index** (compile-queue prerequisites; the G0 compile spike makes the ops index data-backed load-bearing, not optional).
 - **Compile-queue fixes (v0.5.0-bound, G0-invalidated):** fingerprint→claim_id index (hash/SQLite, O(1) dedup) + batched claim/ops appends (one fsync per N) + explicit `unverified`/`EXTRACTED`/`FAILED` labels in the compile/recall payload contract. **Re-run the compile-latency spike after the fix** — compile ≤5s @50k is a G2 exit condition, not a review comment.
-- Clients-as-scopes config shape lands with it: `client:<id>` under `workspace`, `visibility_default: 'scope'`, staff via Grant capabilities.
+- Clients-as-scopes config shape **DEFINED (spec §10b, code-verified 2026-08-29 — `scripts/verify-config-shape.mjs`, dist v0.6.3; example `docs/competitive/coffee-tenant-config.example.json`)**: one business = one Pod; `client:<id>` under `workspace`, `visibility_default: 'scope'`; staff = Grant capability clusters as **exact scope-id lists** (verified: `client:*` / `client/*` / `client:acme#*` do NOT match — `scopeMatches` supports exact ids, `*`, `prefix/*` only; never issue `*` to staff); non-reusable `client:<id>#n` markers with versioned distinctness by construction (grant on `#2` never authorizes `#1`). ZERO config-code changes; ONE v0.5.0 schema-set touch flagged for the impl card: widen `common.schema.json` `Scope` pattern (§10b.6).
 - sync-raw + async-compile write path + state-based freshness (`unverified` / EXTRACTED / FAILED).
 - Hybrid retrieval fixes D1+D2 (spec §11.1: claim-level FTS lexical feed; semantic_relevance-desc tiebreak) land in the same cut — they are prerequisites of any mem0-compat hybrid claims.
 - **Conformance suite (must pass):** rebuild-equivalence (wipe/rebuild from JSONL, byte-equal to canonical log); FORGET.SCOPE "zero results in every lane" asserted against **rebuilt** indexes; erasure/offboarding semantics tests; provenance-integrity tests.
