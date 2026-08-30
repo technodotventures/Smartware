@@ -1,0 +1,281 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.0/revise-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "REVISE Request",
+  "description": "User-only beta operation for claim adjudication, page endorsement, or tombstone revival. Claim content is immutable in v0.4.2.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/claim_admission"
+    },
+    {
+      "$ref": "#/$defs/page_endorsement"
+    },
+    {
+      "$ref": "#/$defs/tombstone_revival"
+    }
+  ],
+  "$defs": {
+    "user_actor_id": {
+      "type": "string",
+      "pattern": "^user:[a-z0-9-]+$"
+    },
+    "admission_relation": {
+      "type": "object",
+      "required": [
+        "kind",
+        "target",
+        "valid_at",
+        "provenance"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "supports",
+            "contradicts",
+            "supersedes",
+            "corrects",
+            "invalidates",
+            "summarizes",
+            "references"
+          ]
+        },
+        "target": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "valid_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        },
+        "invalid_at": {
+          "type": "null"
+        },
+        "provenance": {
+          "type": "object",
+          "required": [
+            "origin",
+            "target_claim_version"
+          ],
+          "properties": {
+            "origin": {
+              "const": "user"
+            },
+            "target_claim_version": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false,
+          "description": "asserted_in_source_version and relation_id are server-stamped on append."
+        }
+      },
+      "additionalProperties": false
+    },
+    "claim_admission": {
+      "type": "object",
+      "required": [
+        "target",
+        "expected_base_version",
+        "reason",
+        "operation_id",
+        "actor_id"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "expected_base_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "add_relations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/admission_relation"
+          }
+        },
+        "set_confidence": {
+          "$ref": "common.schema.json#/$defs/ConfidenceBucket"
+        },
+        "set_epistemic_tag": {
+          "$ref": "common.schema.json#/$defs/EpistemicTag"
+        },
+        "add_derived_from": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/ObservationId"
+          },
+          "description": "Valid only when the target is already epistemic_owner=user or this operation also adjudicates."
+        },
+        "invalidate_relations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/RelationId"
+          },
+          "description": "Withdraws user-admitted epistemic edges. Deterministic references reconciliation is not this action."
+        },
+        "adopt_body": {
+          "type": "boolean",
+          "default": false
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation_id": {
+          "$ref": "common.schema.json#/$defs/OperationId"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/user_actor_id"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "add_relations"
+          ]
+        },
+        {
+          "required": [
+            "set_confidence"
+          ]
+        },
+        {
+          "required": [
+            "set_epistemic_tag"
+          ]
+        },
+        {
+          "required": [
+            "add_derived_from"
+          ]
+        },
+        {
+          "required": [
+            "invalidate_relations"
+          ]
+        },
+        {
+          "properties": {
+            "adopt_body": {
+              "const": true
+            }
+          },
+          "required": [
+            "adopt_body"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "page_endorsement": {
+      "type": "object",
+      "required": [
+        "target",
+        "author",
+        "reason",
+        "actor_id"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "common.schema.json#/$defs/PageId"
+        },
+        "author": {
+          "const": "user"
+        },
+        "set_confidence": {
+          "$ref": "common.schema.json#/$defs/ConfidenceBucket"
+        },
+        "set_epistemic_tag": {
+          "$ref": "common.schema.json#/$defs/EpistemicTag"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": false
+        },
+        "operation_id": {
+          "$ref": "common.schema.json#/$defs/OperationId"
+        },
+        "cascade_preview_id": {
+          "$ref": "common.schema.json#/$defs/CascadePreviewId"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/user_actor_id"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "dry_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "dry_run"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "operation_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "cascade_preview_id"
+                  ]
+                }
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "operation_id"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "tombstone_revival": {
+      "type": "object",
+      "required": [
+        "target",
+        "revived",
+        "reason",
+        "operation_id",
+        "actor_id"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "common.schema.json#/$defs/TombstoneId"
+        },
+        "revived": {
+          "const": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation_id": {
+          "$ref": "common.schema.json#/$defs/OperationId"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/user_actor_id"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

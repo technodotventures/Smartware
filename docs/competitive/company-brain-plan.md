@@ -34,11 +34,13 @@
 - Hybrid retrieval fixes D1+D2 (spec §11.1: claim-level FTS lexical feed; semantic_relevance-desc tiebreak) land in the same cut — they are prerequisites of any mem0-compat hybrid claims.
 - **Conformance suite (must pass):** rebuild-equivalence (wipe/rebuild from JSONL, byte-equal to canonical log); FORGET.SCOPE "zero results in every lane" asserted against **rebuilt** indexes; erasure/offboarding semantics tests; provenance-integrity tests.
 - v0.4.x migration note (five-verb backward compat; scope-erasure non-conformant) — never a break (anti-pattern: mem0 v2→v3 churn).
-- **Exit:** conformance green + migration note shipped + compile-latency spike re-run green (≤5s @50k).
+- **Exit (recorded re-scope 2026-08-29, owner @tech-head — card t_b5392e58):** conformance green + migration note shipped + async claim-production path ≤5s @50k MET (per-claim 189.4ms → 0.49ms, 388×; `.spike/compile-latency/report-v2.json`); full pipeline-and-wiki synthesis target **≤10s @50k** — **VERIFIED MET 2026-08-30: 9,493.5ms @50k (0.19ms/claim; n=3 9,445/9,493/9,682ms; 443/443 tests; tsc clean); exit + levers recorded in spec §11.2c (owner @tech-head, 2026-08-30)**. D1+D2 tracked by card t_7ab8e358 (hybrid.ts:179 tiebreak → semantic_relevance-desc; claim-level FTS as RRF lexical channel; exit: q03-class no longer mis-ranks).
 
-### G3 — Slot against Coffee's release window — owner: @user decision
+### G3 — Slot against Coffee's release window — owner: @user decision — **flows DESIGNED 2026-08-29 (spec §10c v0.11, `coffee-client-scope-flows.md`); dates still @user**
 - After G2, plan the client-scope UX: staff-facing attribution rendering ("learned from Maya, May 12; corrected May 13" — default for consequential/recent facts; "why this answer?" toggle), erasure/offboarding flows, export-one-client portability.
-- No dates until Coffee's window is known.
+- **Designed (2026-08-29, card t_cd39a364):** five flows bound — F1 export (`smartware_export_scope`, owner-only, one-scope boundary, canonical package + manifest; **impl card G3.1 created**), F2 offboarding + F3 erasure (substrate SHIPPED v0.5.0), F4 return (`#N` + owner-approved non-PII pointer from the offboarding audit marker), F5 staff-facing attribution (default-on: correctness events / non-EXTRACTED freshness / ≤14d; toggle otherwise). **Erasure-vs-legal-hold binding: a dispute never triggers erasure** — hold lane = offboarding + export snapshot; erasure only after owner attestation. Export-before-erasure default; DSR lane = audit marker is the deletion certificate. Import/restore verb deferred to G4 with a re-import-equivalence acceptance test.
+- No dates until Coffee's window is known. Open @user decisions: (1) release window, (2) which flows ship in the launch cut, (3) whether G3.1 export tool ships substrate-side now (recommended), (4) legal-hold marker (G4) vs v1 composition.
+- **F5 rendering contract LANDED (2026-08-29, card t_bf5839cd — spec §10d v0.12):** §10c.6's attribution rule made implementable — staff-facing-only authority matrix (+ client-facing denial incl. client-owned "From your messages" exception), exact defaulting predicate (freshness ≠ EXTRACTED, failed compile, stale/contested/low-confidence, consequential types/tags, ≤14d recency cap, 30d correction visibility), NORMATIVE wording table for unverified / EXTRACTED / FAILED (flagship "Learned from Maya, May 12; corrected by owner May 13."), and executable conformance anchor `src/render/provenance.ts` + 33 exact-string tests. Coffee MUST render through it (`smartware/render`). Open substrate follow-up (§10d.4): expose `compile_state` on raw-window hits (v0.5.1 candidate, tech-head).
 
 ---
 
@@ -54,7 +56,7 @@
 ## Out of scope (this plan)
 
 - mem0 data import beyond the secondary lossy path (re-ingest text + thin metadata; never vectors).
-- mem0-compat adapter release (optional reach, own versioning, decoupled from protocol).
+- mem0-compat adapter release (optional reach; packaging/versioning/conformance DECIDED 2026-08-29 in `mem0-compat-contract.md` + fixture, to be implemented post-G2 by tech-head; own versioning, decoupled from protocol).
 - QM hosting appendix (deferred; interface verified, 11 methods, sha256-CAS via `readHead?`).
 - Self-hosted company-brain product (GBrain Model A shape) — Coffee is the product; that shape is not.
 
@@ -67,7 +69,7 @@
 | Compile latency blows p95 at 50k | **CONFIRMED DATA-BACKED (G0): 1,893.7× over at 50k, O(N²) fingerprint dedup + per-claim fsync.** Mitigation: both indexes + fingerprint→claim_id index + batched appends in the v0.5.0 cut (not follow-up); spike re-run green is a G2 exit condition |
 | Head-to-head retrieval loss vs mem0 | **G0 verdict: mem0 did NOT win (1/18, fully explained).** Fix path D1+D2 bound in spec §11.1 as v0.5.0-scope prerequisites; never adopt their engine |
 | Tenant/small-business scale (2–10 staff, constant churn) | Client scopes + FORGET.SCOPE erasure/offboarding as weekly ops, audited |
-| Mem0-compat adapter drifts from protocol | Separate `smartware-mem0-compat` package with own semver, decoupled from protocol v0.5.0 |
+| Mem0-compat adapter drifts from protocol | **RESOLVED 2026-08-29 (G3 decision: `mem0-compat-contract.md` + fixture `fixtures/mem0-v3-contract.v1.json`)** — separate `smartware-mem0-compat` package, own semver (MAJOR = contract generation/breaking change; MINOR = additive; PATCH = fixes), in-repo at `packages/mem0-compat/`, peer `smartware ^0.5.0`; pinned to mem0 v3 contract anchored at mem0ai/mem0 commit 19cb89aff472325c707f64b2f34ae6afdbf7faf7; conformance = migration-guide fixture rows (T1) + real client golden tests (T2) + repoint tests (T3) + drift watch (T4); Python OSS v3 still unpublished (PyPI 2.0.19) — honest note in fixture |
 
 ## Source of truth
 

@@ -1,0 +1,124 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.0/common.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ObservationId": {
+      "type": "string",
+      "pattern": "^obs_[a-f0-9]{16,64}$"
+    },
+    "ClaimId": {
+      "type": "string",
+      "pattern": "^claim_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "PageId": {
+      "type": "string",
+      "pattern": "^page_[a-z0-9-]+$"
+    },
+    "BlockId": {
+      "type": "string",
+      "pattern": "^block_[a-z0-9-]+_[0-9]+$"
+    },
+    "TombstoneId": {
+      "type": "string",
+      "pattern": "^tomb_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "OperationId": {
+      "type": "string",
+      "pattern": "^op_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "RelationId": {
+      "type": "string",
+      "pattern": "^rel_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "Fingerprint": {
+      "type": "string",
+      "pattern": "^fp_[a-f0-9]{8,64}$"
+    },
+    "CascadePreviewId": {
+      "type": "string",
+      "pattern": "^preview_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Returned by REVISE dry-run for page endorsement; referenced by the commit phase to satisfy shared-claim cascade acknowledgement"
+    },
+    "ActorId": {
+      "type": "string",
+      "pattern": "^(user|agent|sidecar|substrate):[a-z0-9-]+$"
+    },
+    "Scope": {
+      "type": "string",
+      "pattern": "^(self|workspace|project:[a-z0-9-]+|agent:[a-z0-9-]+|client:[a-z0-9-]+(?:#[1-9][0-9]*)?)$",
+      "description": "Scope identifiers. client:<id> is the Coffee tenant-boundary scope (spec §10); client:<id>#n markers are NON-REUSABLE (n >= 1, minted on onboarding/rotation, permanently retired on erasure — §10b.1). The pattern admits no leading-zero markers (#0, #01 are invalid) and no grant wildcards: `client:*`, `client/*`, `client:acme#*` are config patterns, never scope ids."
+    },
+    "EpistemicTag": {
+      "type": "string",
+      "enum": [
+        "fact",
+        "inference",
+        "opinion",
+        "stale",
+        "contested"
+      ],
+      "description": "Truth status of a claim. Distinct from claim_type (which classifies the kind of assertion)."
+    },
+    "ClaimType": {
+      "type": "string",
+      "enum": [
+        "decision",
+        "constraint",
+        "correction",
+        "lesson",
+        "preference",
+        "hypothesis",
+        "checkpoint",
+        "handoff",
+        "finding"
+      ]
+    },
+    "ClaimRole": {
+      "type": "string",
+      "enum": [
+        "memory",
+        "working",
+        "summary",
+        "checkpoint",
+        "audit",
+        "retrospective"
+      ]
+    },
+    "ConfidenceBucket": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "description": "Bucketed confidence. Beta uses bucket enums throughout; numeric scoring is post-beta."
+    },
+    "Author": {
+      "type": "string",
+      "enum": [
+        "agent",
+        "user"
+      ]
+    },
+    "RelationKind": {
+      "type": "string",
+      "enum": [
+        "supports",
+        "contradicts",
+        "supersedes",
+        "corrects",
+        "invalidates",
+        "summarizes",
+        "references"
+      ]
+    },
+    "Iso8601": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "Tag": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    }
+  }
+}

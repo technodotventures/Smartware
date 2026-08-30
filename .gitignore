@@ -32,3 +32,7 @@ Thumbs.db
 # Local Smartware instance data (if stored in repo during testing)
 .smartware/
 data/
+
+# Spike measurement artifacts (large, regenerable)
+.spike/
+.spike-h2h/

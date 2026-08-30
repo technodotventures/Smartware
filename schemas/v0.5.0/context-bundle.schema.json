@@ -1,0 +1,251 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.0/context-bundle.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One-hop Context Bundle",
+  "type": "object",
+  "required": [
+    "seeds",
+    "outbound_relations",
+    "inbound_relations",
+    "provenance"
+  ],
+  "properties": {
+    "seeds": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/claim_summary"
+      }
+    },
+    "outbound_relations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/outbound_relation"
+      }
+    },
+    "inbound_relations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/inbound_relation"
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation_summary"
+      }
+    }
+  },
+  "$defs": {
+    "claim_summary": {
+      "type": "object",
+      "required": [
+        "claim_id",
+        "version",
+        "state",
+        "content",
+        "confidence",
+        "epistemic_tag",
+        "author",
+        "epistemic_owner",
+        "scope",
+        "claim_type",
+        "claim_role",
+        "version_at"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "forgotten"
+          ]
+        },
+        "content": {
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "common.schema.json#/$defs/ConfidenceBucket"
+        },
+        "epistemic_tag": {
+          "$ref": "common.schema.json#/$defs/EpistemicTag"
+        },
+        "author": {
+          "$ref": "common.schema.json#/$defs/Author"
+        },
+        "epistemic_owner": {
+          "$ref": "common.schema.json#/$defs/Author"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "claim_type": {
+          "$ref": "common.schema.json#/$defs/ClaimType"
+        },
+        "claim_role": {
+          "$ref": "common.schema.json#/$defs/ClaimRole"
+        },
+        "version_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        }
+      },
+      "additionalProperties": false
+    },
+    "current_version": {
+      "type": "object",
+      "required": [
+        "version",
+        "state",
+        "version_at"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "forgotten"
+          ]
+        },
+        "version_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outbound_relation": {
+      "type": "object",
+      "required": [
+        "relation_id",
+        "seed",
+        "kind",
+        "target",
+        "valid_at",
+        "invalid_at",
+        "provenance",
+        "target_claim"
+      ],
+      "properties": {
+        "relation_id": {
+          "$ref": "common.schema.json#/$defs/RelationId"
+        },
+        "seed": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "kind": {
+          "$ref": "common.schema.json#/$defs/RelationKind"
+        },
+        "target": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "valid_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        },
+        "invalid_at": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/Iso8601"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "$ref": "relation.schema.json#/properties/provenance"
+        },
+        "target_claim": {
+          "$ref": "#/$defs/claim_summary",
+          "description": "The pinned target_claim_version, not necessarily the latest version."
+        },
+        "target_current": {
+          "$ref": "#/$defs/current_version"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inbound_relation": {
+      "type": "object",
+      "required": [
+        "relation_id",
+        "source",
+        "kind",
+        "seed",
+        "valid_at",
+        "invalid_at",
+        "provenance",
+        "source_claim"
+      ],
+      "properties": {
+        "relation_id": {
+          "$ref": "common.schema.json#/$defs/RelationId"
+        },
+        "source": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "kind": {
+          "$ref": "common.schema.json#/$defs/RelationKind"
+        },
+        "seed": {
+          "$ref": "common.schema.json#/$defs/ClaimId"
+        },
+        "valid_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        },
+        "invalid_at": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/Iso8601"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "$ref": "relation.schema.json#/properties/provenance"
+        },
+        "source_claim": {
+          "$ref": "#/$defs/claim_summary",
+          "description": "The pinned asserted_in_source_version, not necessarily the latest version."
+        },
+        "source_current": {
+          "$ref": "#/$defs/current_version"
+        }
+      },
+      "additionalProperties": false
+    },
+    "observation_summary": {
+      "type": "object",
+      "required": [
+        "observation_id",
+        "source",
+        "content",
+        "timestamp"
+      ],
+      "properties": {
+        "observation_id": {
+          "$ref": "common.schema.json#/$defs/ObservationId"
+        },
+        "source": {
+          "type": "string"
+        },
+        "content": {},
+        "timestamp": {
+          "$ref": "common.schema.json#/$defs/Iso8601"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

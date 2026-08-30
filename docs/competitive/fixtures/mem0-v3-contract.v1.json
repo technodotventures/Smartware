@@ -1,0 +1,175 @@
+{
+  "$schema_desc": "Machine-readable pin of the mem0 v3 contract used by Smartware's mem0-compat adapter. Generated from mem0's own guides/release notes; regenerable; line-level source traceability in 'provenance'.",
+  "fixture": "mem0-v3-contract",
+  "fixture_version": "v1",
+  "extracted_at": "2026-08-29",
+  "extracted_by": "smarty-pants (smartware G3, kanban t_0724f1dc)",
+  "contract_generation": "mem0 v3 (new memory algorithm: single-pass ADD-only extraction, multi-signal hybrid retrieval, entity linking; graph memory Platform-only)",
+  "provenance": {
+    "mem0_repo": {
+      "url": "https://github.com/mem0ai/mem0",
+      "commit": "19cb89aff472325c707f64b2f34ae6afdbf7faf7",
+      "commit_date": "2026-08-29",
+      "license": "Apache-2.0",
+      "note": "Vendored extracts are permitted under Apache-2.0 with attribution (see NOTICE at implementation)."
+    },
+    "sources": [
+      {
+        "id": "oss-v2-to-v3",
+        "doc_url": "https://docs.mem0.ai/migration/oss-v2-to-v3",
+        "repo_path": "docs/migration/oss-v2-to-v3.mdx",
+        "what": "OSS SDK breaking changes (Python + TypeScript), removed-parameters reference, common issues, graceful degradation"
+      },
+      {
+        "id": "platform-v2-to-v3",
+        "doc_url": "https://docs.mem0.ai/migration/platform-v2-to-v3",
+        "repo_path": "docs/migration/platform-v2-to-v3.mdx",
+        "what": "Platform v3 endpoints, search param changes, response shapes, SDK client cleanup, backward compatibility"
+      },
+      {
+        "id": "ts-v3.0.0-release",
+        "url": "https://github.com/mem0ai/mem0/releases/tag/ts-v3.0.0",
+        "published": "2026-04-16T11:52:37Z",
+        "what": "Mem0 Node SDK v3.0.0 release notes (camelCase, topK, filters, customInstructions, removed params, getAll envelope)"
+      },
+      {
+        "id": "cli-readme",
+        "repo_path": "cli/README.md",
+        "what": "mem0 CLI command contract and MEM0_BASE_URL env override"
+      },
+      {
+        "id": "mem0-mcp-docs",
+        "doc_url": "https://docs.mem0.ai/platform/mem0-mcp",
+        "what": "Hosted mem0 MCP server tool set and auth"
+      }
+    ]
+  },
+  "published_surface_versions": {
+    "as_of": "2026-08-29",
+    "npm_mem0ai": "3.1.7",
+    "npm_mem0ai_3_0_0_date": "2026-04-16T11:53:17.819Z",
+    "npm_mem0ai_3_1_7_date": "2026-08-24T13:18:04.648Z",
+    "pypi_mem0ai": "2.0.19",
+    "pypi_mem0ai_has_v3_release": false,
+    "pypi_mem0_cli": "0.2.12",
+    "npm_mem0_cli": "0.2.13",
+    "mcp_endpoint": "https://mcp.mem0.ai/mcp",
+    "npm_mem0_mcp": "404 (docs npx snippet does not resolve)",
+    "mem0_mcp_repo_archived": true,
+    "note": "Python OSS v3 documented but NOT published on PyPI as of extraction date; TS SDK v3 published."
+  },
+  "rest": {
+    "primary_v3_endpoints": [
+      {
+        "operation": "add",
+        "method": "POST",
+        "path": "/v3/memories/add/",
+        "request_body_example": {
+          "messages": [{"role": "user", "content": "..."}],
+          "user_id": "alice"
+        },
+        "response": {"event_id": "evt-uuid", "status": "PENDING"},
+        "note": "Async: poll GET /v1/event/{event_id}/ -> status SUCCEEDED or FAILED"
+      },
+      {
+        "operation": "search",
+        "method": "POST",
+        "path": "/v3/memories/search/",
+        "request_body": "query: string; filters: {user_id, agent_id, run_id} (optional keys); top_k: int 1-1000 default 10 (optional); threshold: float in [0,1] default 0.1 (optional; 0.0 disables); rerank: bool default false (optional)",
+        "response": {
+          "results": [
+            {
+              "id": "mem-uuid",
+              "memory": "string",
+              "score": 0.82,
+              "metadata": {},
+              "categories": ["location"],
+              "created_at": "ISO8601",
+              "updated_at": "ISO8601"
+            }
+          ]
+        }
+      },
+      {
+        "operation": "get_all",
+        "method": "POST",
+        "path": "/v3/memories/",
+        "query_params": "page: int default 1; page_size: int default first page",
+        "response": {"count": 123, "next": "url-or-null", "previous": "url-or-null", "results": []}
+      }
+    ],
+    "legacy_surfaces_keep_working": {
+      "note": "V1 and V2 endpoints continue to work per mem0 backward-compat promise.",
+      "oss_shape_routes_reference": "spec sub 2.1 (G1-derived from mem0ai 2.x server; re-verify at implementation)",
+      "hosted_shape": "same routes with /v1/ prefix"
+    },
+    "entity_ids_rule": "Top-level entity IDs in search/get_all raise (REST 400; SDKs ValueError/throw). add()/delete_all() keep top-level entity IDs.",
+    "relations_field": "No longer returned in v3 (graph memory Platform-only). Must not be fabricated."
+  },
+  "sdk": {
+    "methods_attested": ["add", "search", "get", "get_all", "update", "delete", "delete_all", "history", "reset"],
+    "python_oss_breaking": [
+      ["search()/get_all() entity IDs", "top-level kwargs", "inside filters dict; top-level raises ValueError"],
+      ["top_k default", "100", "20"],
+      ["threshold default", "None (no filtering)", "0.1; pass 0.0 to disable"],
+      ["threshold validation", "any float", "[0,1]; out-of-range raises ValueError"],
+      ["rerank default", "True", "False"],
+      ["entity ID validation", "any string", "trimmed; empty/whitespace/internal-space rejected"],
+      ["add() messages", "could be None", "must be str/dict/list[dict]; else Mem0ValidationError VALIDATION_003"],
+      ["add() events", "returns ADD, UPDATE, DELETE", "ADD only"],
+      ["custom extraction prompt", "custom_fact_extraction_prompt", "custom_instructions"],
+      ["custom update prompt", "custom_update_memory_prompt", "deprecated; use custom_instructions"],
+      ["graph memory", "enable_graph + graph_store in config", "removed (Platform-only)"],
+      ["qdrant client", ">=1.9.1", ">=1.12.0"],
+      ["upstash client", ">=0.1.0", ">=0.6.0"]
+    ],
+    "typescript_oss_breaking": [
+      ["search limit param", "search(query, { limit: 10 })", "search(query, { topK: 10 })"],
+      ["topK default", "100", "20"],
+      ["search()/getAll() entity IDs", "top-level options", "inside filters object"],
+      ["threshold validation", "any number", "[0,1]; out-of-range throws"],
+      ["entity ID validation", "any string", "trimmed; empty/whitespace rejected"],
+      ["add() messages", "could be null/undefined", "required; throws on null/undefined"],
+      ["internal payload key", "text_lemmatized", "textLemmatized (keep collections language-scoped)"],
+      ["custom prompt", "customPrompt", "customInstructions"],
+      ["graph memory", "enableGraph + graphStore", "removed"]
+    ],
+    "python_client_sdk_breaking": [
+      ["constructor", "MemoryClient(api_key, org_id, project_id)", "MemoryClient(api_key)"],
+      ["method options", "client.add(messages, **kwargs)", "typed option classes (AddMemoryOptions/SearchMemoryOptions); **kwargs still works"],
+      ["add semantics", "async_mode, output_format present", "async by default, v1.1 always; params removed"],
+      ["removed params", "api_version, output_format, async_mode, filter_memories, keyword_search, force_add_only, batch_size, immutable, includes, excludes, enable_graph, org_name, project_name, org_id, project_id", "remove from all calls"]
+    ],
+    "typescript_client_sdk_breaking": [
+      ["constructor", "new MemoryClient({apiKey, organizationId, projectId})", "new MemoryClient({apiKey})"],
+      ["param casing", "snake_case (user_id, agent_id, top_k)", "camelCase (userId, agentId, topK)"],
+      ["removed", "OutputFormat enum, API_VERSION enum, organizationId, projectId, organizationName, projectName, enableGraph, asyncMode, outputFormat, immutable, filterMemories, batchSize, forceAddOnly, includes, excludes, keywordSearch", "n/a"],
+      ["add response", "synchronous results", "{status: PENDING, eventId}"],
+      ["getAll response", "bare results", "{count, next, previous, results}"],
+      ["response fields", "snake_case", "camelCase (createdAt, updatedAt, memoryId, eventId, scoreBreakdown)"]
+    ]
+  },
+  "cli": {
+    "package": {"pypi": "mem0-cli", "npm": "@mem0/cli"},
+    "commands": ["init", "add", "search", "list", "get", "update", "delete", "import", "config", "entity", "event", "status"],
+    "commands_platform_only_excluded": {"whoami": "server-issued identity (default_user_id)", "agent_rush": "Platform /v1/agent-rush/ competition endpoints"},
+    "global_flags": {"agent": "--agent/--json sanitized output, errors as JSON, non-zero exit", "output": "--output text|json|quiet|table", "help_json": "mem0 help --json command tree"},
+    "repoint_env": "MEM0_BASE_URL (API base URL)",
+    "delete_flags": ["--all", "--entity", "--project", "--dry-run", "--force"],
+    "note": "Existing mem0 CLI can repoint to the compat server via MEM0_BASE_URL with no code change."
+  },
+  "mcp": {
+    "endpoint": "https://mcp.mem0.ai/mcp",
+    "hosted_only": true,
+    "repo_archived": true,
+    "tools_documented": ["add_memory", "search_memories", "get_memories", "get_memory", "update_memory", "delete_memory"],
+    "tools_verification_note": "Docs page extraction truncated at update_memory; verify exact live set via tools/list at implementation and update this fixture.",
+    "auth": "API key as bearer token or browser sign-in; 401 Authentication required otherwise"
+  },
+  "verification_notes": [
+    "All registry versions verified via PyPI/npm listing 2026-08-29; mem0 repo commit via GitHub API; archived flag via GitHub API (archived: true).",
+    "OSS Python v3 is documented but not published on PyPI (mem0ai latest = 2.0.19). Python conformance must assert v3 semantics from docs and validate legacy surface with 2.0.19.",
+    "mem0 v3 benchmark claims (LoCoMo 71.4->91.6, LongMemEval 67.8->93.4, extraction latency ~2.0s->~1.0s p50) are mem0's own reported numbers; not independently verified by Smartware; not part of the compat contract/conformance.",
+    "This fixture defines behavioral shape only. Retrieval ranking/score parity is explicitly OUT of scope (spec 6; G0 verdict in spec 11.1)."
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.0/profile-frontmatter.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Profile Frontmatter",
+  "type": "object",
+  "required": [
+    "title",
+    "page_id",
+    "category",
+    "author",
+    "scope",
+    "created",
+    "updated",
+    "summary"
+  ],
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "page_id": {
+      "$ref": "common.schema.json#/$defs/PageId"
+    },
+    "category": {
+      "type": "string",
+      "const": "profile"
+    },
+    "author": {
+      "type": "string",
+      "const": "agent"
+    },
+    "scope": {
+      "const": "self"
+    },
+    "created": {
+      "type": "string",
+      "format": "date"
+    },
+    "updated": {
+      "type": "string",
+      "format": "date"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observation_count": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false
+}
