@@ -60,6 +60,19 @@ function ensureColumn(db: Database.Database, table: string, column: string, defi
 
 export class Layer0Index {
   private db: Database.Database;
+  /** Cached prepared statements — Layer0 per-obs lookups (getEffectiveStatus,
+   *  insertOrSkip, mutation replay) are the top per-call prepare() cost in the
+   *  compile hot path (§11.2b re-scope). Pattern mirrors ClaimStore.stmt(). */
+  private stmtCache = new Map<string, Database.Statement>();
+
+  private stmt(sql: string): Database.Statement {
+    let prepared = this.stmtCache.get(sql);
+    if (!prepared) {
+      prepared = this.db.prepare(sql);
+      this.stmtCache.set(sql, prepared);
+    }
+    return prepared;
+  }
 
   constructor(dbPath: string) {
     if (dbPath !== ':memory:') ensurePrivateDirectory(dirname(dbPath));
@@ -86,7 +99,7 @@ export class Layer0Index {
     let lastSeq = 0;
     for (const obs of readAll(evidenceDir)) {
       this.insertOrSkip(obs);
-      if (obs.type === 'tombstone' || obs.type === 'redaction' || obs.type === 'quarantine_review') {
+      if (obs.type === 'tombstone' || obs.type === 'redaction' || obs.type === 'quarantine_review' || obs.type === 'erasure') {
         this.applyMutationEvent(obs);
       }
       lastSeq = obs.integrity.sequence;
@@ -104,7 +117,7 @@ export class Layer0Index {
     for (const obs of readAll(evidenceDir)) {
       if (obs.integrity.sequence <= lastSeq) continue;
       this.insertOrSkip(obs);
-      if (obs.type === 'tombstone' || obs.type === 'redaction' || obs.type === 'quarantine_review') {
+      if (obs.type === 'tombstone' || obs.type === 'redaction' || obs.type === 'quarantine_review' || obs.type === 'erasure') {
         this.applyMutationEvent(obs);
       }
       newLastSeq = Math.max(newLastSeq, obs.integrity.sequence);
@@ -118,7 +131,7 @@ export class Layer0Index {
 
   insertOrSkip(obs: Observation): void {
     try {
-      this.db.prepare(`
+      this.stmt(`
         INSERT OR IGNORE INTO observations
           (id, type, effective_status, app, source_id, actor_id, actor_type,
            scope, visibility, sensitive, pii_detected, captured_at, observed_at, sequence, writer_id, hash,
@@ -150,14 +163,47 @@ export class Layer0Index {
     }
   }
 
-  /** Apply a mutation event (tombstone / redaction / quarantine_review) */
+  /** Apply a mutation event (tombstone / redaction / quarantine_review / erasure) */
   applyMutationEvent(event: Observation): void {
     const body = event.content.body as Record<string, unknown>;
-    const targetId = body['target_id'] as string | undefined;
     const targetKind = (body['target_kind'] as string | undefined) ?? 'observation';
+
+    // ── Scope-level mutations (FORGET.SCOPE, spec §10) ──────────────────────
+    // One audit observation carries the mutation for an ENTIRE scope. Replay
+    // applies it as a bulk derived-status update, which is what makes
+    // rebuild-equivalence hold: a REBUILT Layer-0 index replays the same
+    // marker and produces the identical erased/tombstoned state (spec §10a).
+    if (targetKind === 'scope' || body['scope'] !== undefined) {
+      const scope = body['scope'] as string | undefined;
+      if (!scope) return;
+      if (event.type === 'erasure') {
+        // reason distinguishes the semantics (spec §10): erasure → content
+        // is gone for good ('erased'); offboarding → tombstone, reversible
+        // at the data layer ('tombstoned', same status as a per-observation
+        // forget). Both are terminal; 'erased' is the stronger one.
+        const reason = body['reason'];
+        const statusToSet = reason === 'offboarding' ? 'tombstoned' : 'erased';
+        if (statusToSet === 'erased') {
+          this.db.prepare(
+            "UPDATE observations SET effective_status = 'erased' WHERE scope = ? AND effective_status != 'erased'",
+          ).run(scope);
+        } else {
+          this.db.prepare(
+            "UPDATE observations SET effective_status = 'tombstoned' WHERE scope = ? AND effective_status IN ('accepted', 'quarantined')",
+          ).run(scope);
+        }
+      } else if (event.type === 'tombstone' || event.type === 'redaction') {
+        this.db.prepare(
+          "UPDATE observations SET effective_status = 'tombstoned' WHERE scope = ? AND effective_status IN ('accepted', 'quarantined')",
+        ).run(scope);
+      }
+      return;
+    }
+
+    const targetId = body['target_id'] as string | undefined;
     if (!targetId || targetKind !== 'observation') return;
 
-    const target = this.db.prepare('SELECT effective_status FROM observations WHERE id = ?').get(targetId) as { effective_status: string } | undefined;
+    const target = this.stmt('SELECT effective_status FROM observations WHERE id = ?').get(targetId) as { effective_status: string } | undefined;
     if (!target) return;
 
     const currentStatus = target.effective_status as EffectiveStatus;
@@ -174,19 +220,19 @@ export class Layer0Index {
     const transitions = TRANSITIONS[currentStatus];
     const newStatus = transitions?.[transitionKey];
     if (newStatus) {
-      this.db.prepare('UPDATE observations SET effective_status = ? WHERE id = ?')
+      this.stmt('UPDATE observations SET effective_status = ? WHERE id = ?')
         .run(newStatus, targetId);
     }
   }
 
   /** Check dedup: return existing obs ID if source_id already seen for this app */
   checkDedup(app: string, sourceId: string): string | null {
-    const row = this.db.prepare('SELECT id FROM observations WHERE app = ? AND source_id = ?').get(app, sourceId) as { id: string } | undefined;
+    const row = this.stmt('SELECT id FROM observations WHERE app = ? AND source_id = ?').get(app, sourceId) as { id: string } | undefined;
     return row?.id ?? null;
   }
 
   checkIdempotency(actorId: string, key: string): { id: string; payload_hash: string } | null {
-    const row = this.db.prepare(
+    const row = this.stmt(
       'SELECT id, payload_hash FROM observations WHERE idempotency_actor_id = ? AND idempotency_key = ?'
     ).get(actorId, key) as { id: string; payload_hash: string } | undefined;
     return row ?? null;
@@ -194,29 +240,50 @@ export class Layer0Index {
 
   /** Get effective state of an observation */
   getEffectiveStatus(obsId: string): EffectiveStatus | null {
-    const row = this.db.prepare('SELECT effective_status FROM observations WHERE id = ?').get(obsId) as { effective_status: string } | undefined;
+    const row = this.stmt('SELECT effective_status FROM observations WHERE id = ?').get(obsId) as { effective_status: string } | undefined;
     return (row?.effective_status as EffectiveStatus) ?? null;
   }
 
+  /**
+   * §11.2b re-scope: one-query snapshot of every observation's effective
+   * status. The compile gather + reconcile stages call getEffectiveStatus per
+   * observation (100k cached-statement SELECTs at 50k obs ≈ 2.5-5% of the
+   * pipeline). A single SELECT over 50k rows + in-memory Map is strictly
+   * cheaper. Semantics: identical rows; snapshot is immutable for the run
+   * (statuses only transition via observe/mutation events, which a compile
+   * run does not issue for the same observations).
+   */
+  getEffectiveStatusMap(): Map<string, EffectiveStatus | null> {
+    const rows = this.stmt('SELECT id, effective_status FROM observations').all() as Array<{ id: string; effective_status: string }>;
+    const map = new Map<string, EffectiveStatus | null>();
+    for (const row of rows) map.set(row.id, (row.effective_status as EffectiveStatus) ?? null);
+    return map;
+  }
+
   getLastSequence(): number {
-    const row = this.db.prepare('SELECT MAX(sequence) as s FROM observations').get() as { s: number | null };
+    const row = this.stmt('SELECT MAX(sequence) as s FROM observations').get() as { s: number | null };
     return row?.s ?? 0;
   }
 
   getLatestHashForWriter(writerId: string): string | null {
-    const row = this.db.prepare(
+    const row = this.stmt(
       'SELECT hash FROM observations WHERE writer_id = ? ORDER BY sequence DESC LIMIT 1',
     ).get(writerId) as { hash: string } | undefined;
     return row?.hash ?? null;
   }
 
   countByStatus(): Record<string, number> {
-    const rows = this.db.prepare('SELECT effective_status, COUNT(*) as count FROM observations GROUP BY effective_status').all() as Array<{ effective_status: string; count: number }>;
+    const rows = this.stmt('SELECT effective_status, COUNT(*) as count FROM observations GROUP BY effective_status').all() as Array<{ effective_status: string; count: number }>;
     return Object.fromEntries(rows.map(row => [row.effective_status, row.count]));
   }
 
+  /** Total observations recorded for a scope (any effective status). */
+  countByScope(scope: string): number {
+    return (this.stmt('SELECT COUNT(*) as c FROM observations WHERE scope = ?').get(scope) as { c: number }).c;
+  }
+
   getByScope(scope: string): Array<{ id: string; type: string; captured_at: string; observed_at: string }> {
-    return this.db.prepare(`
+    return this.stmt(`
       SELECT id, type, captured_at, observed_at FROM observations
       WHERE scope = ? AND effective_status = 'accepted'
       ORDER BY sequence ASC

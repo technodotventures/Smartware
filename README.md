@@ -69,8 +69,8 @@ Smartware `0.6.x` is beta software.
 - Semantic and hybrid retrieval are opt-in protocol capabilities.
 - The deterministic retrieval kernel passes 9/9 scenarios with Hit@1 `1.0`,
   MRR `1.0`, and zero forbidden hits.
-- The standalone protocol and implementation suite passes 385 tests across
-  61 files with no skips.
+- The standalone protocol and implementation suite passes 446 tests across
+  64 files with no skips.
 - Semantic activation remains fail-closed until sealed held-out evaluation
   passes the configured quality, safety, latency, and cost gates.
 - The production dependency audit reports zero vulnerabilities.
@@ -127,6 +127,29 @@ remain supported through the documented
 
 The companion repositories are linked here as separate components. Their
 visibility and release readiness are managed independently from the protocol.
+
+## Integrate Smartware into any SaaS
+
+Smartware is deployable as an embeddable memory substrate. A SaaS host (Coffee,
+Pod, or any other) provisions one Smartware Pod per tenant and speaks to it
+through the published surface:
+
+- `import { SmartwareCore } from 'smartware'` — in-process memory engine
+  (`observe`, `recall`, `reflect`, `revise`, `forget`, `forget_scope`,
+  `export_scope`, `grant`, `revoke`, `session_*`, `status`).
+- `import { createSmartwareMcpServer } from 'smartware/mcp'` — transport-agnostic
+  MCP adapter with every tool, including the owner-only Coffee operations
+  `smartware_forget_scope` and `smartware_export_scope`.
+- `import { showAttributionByDefault, attributionLine, badge, whySentence } from 'smartware/render'`
+  — the staff-facing provenance renderer (spec §10d). Coffee must render
+  attribution through it.
+- Frozen schema sets under `schemas/v0.4.2/` and `schemas/v0.5.0/`.
+- The Coffee tenant config shape (`docs/competitive/coffee-tenant-config.example.json`)
+  and its executable proof (`scripts/verify-config-shape.mjs`).
+
+Read the full walk-through at
+[docs/integration/saas-integration.md](docs/integration/saas-integration.md).
+Run the end-to-end proof with `npm run verify:saas`.
 
 ## Install
 

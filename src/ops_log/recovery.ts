@@ -15,6 +15,7 @@ import {
   readOperationIntentRecords,
   removeOperationIntent,
   type ForgetOperationIntent,
+  type ForgetScopeOperationIntent,
   type EndorseOperationIntent,
   type ObservationOperationIntent,
   type ReviseOperationIntent,
@@ -179,6 +180,47 @@ function isExactForgetAudit(
   return position >= 0 && verifyChain(writerChain.slice(0, position + 1)).valid;
 }
 
+/**
+ * FORGET.SCOPE audit-marker exactness (protocol v0.5.0, spec §10): the
+ * single L0 observation of the operation's intent is the completion proof.
+ * The body must identify the same scope/reason the intent was prepared for
+ * — a marker with a different scope is NOT this operation's artifact.
+ */
+function isExactForgetScopeAudit(
+  intent: ForgetScopeOperationIntent,
+  observation: Observation,
+  allObservations: Observation[],
+): boolean {
+  if (observation.id !== intent.expected.audit.observation_id
+    || observation.operation_id !== intent.operation_id
+    || observation.actor_id !== intent.actor_id
+    || observation.integrity.hash !== intent.expected.audit.observation_hash
+    || observation.integrity.sequence !== intent.expected.audit.sequence
+    || computeHash(observation) !== observation.integrity.hash) {
+    return false;
+  }
+  const body = observation.content.body as Record<string, unknown> | undefined;
+  const bodyReason = body?.['reason'];
+  if (targetScopeFromAudit(body) !== intent.expected.scope
+    || bodyReason !== intent.expected.reason) {
+    return false;
+  }
+  const writerChain = allObservations
+    .filter(candidate => candidate.integrity.writer_id === observation.integrity.writer_id)
+    .sort((left, right) => left.integrity.sequence - right.integrity.sequence);
+  const position = writerChain.findIndex(candidate => candidate.id === observation.id);
+  return position >= 0 && verifyChain(writerChain.slice(0, position + 1)).valid;
+}
+
+/** The scope a scope-level audit/marker observation targets. */
+function targetScopeFromAudit(body: Record<string, unknown> | undefined): string | null {
+  if (!body) return null;
+  if (typeof body['scope'] === 'string') return body['scope'];
+  const target = body['target'] as Record<string, unknown> | undefined;
+  if (target && typeof target['scope'] === 'string') return target['scope'];
+  return null;
+}
+
 function isExactForgetClaim(
   intent: ForgetOperationIntent,
   version: ClaimVersionRecord,
@@ -325,6 +367,57 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           claims_retracted: intent.result.claims_retracted,
           claims_reduced: intent.result.claims_reduced,
           recovered: true,
+        },
+      });
+      committed.add(intent.operation_id);
+      completed.push(intent.operation_id);
+      removeOperationIntent(ctx.opsDir, intent.operation_id);
+      continue;
+    }
+
+    if (intent.op === 'forget.scope') {
+      const auditArtifacts = l0ByOperation.get(intent.operation_id) ?? [];
+      const exactAudit = auditArtifacts.length === 1
+        && isExactForgetScopeAudit(intent, auditArtifacts[0]!, observations);
+      if (existing.length > 0) {
+        const matchingCommit = existing.some(entry =>
+          entry.op === 'forget.scope'
+          && entry.actor_id === intent.actor_id
+          && entry.details?.['payload_hash'] === intent.payload_hash
+          && entry.details?.['audit_observation_id'] === intent.expected.audit.observation_id);
+        if (matchingCommit && exactAudit) {
+          removeOperationIntent(ctx.opsDir, intent.operation_id);
+        } else {
+          manualReview.add(intent.operation_id);
+        }
+        continue;
+      }
+      const hasAudit = auditArtifacts.length > 0;
+      if (hasAudit && !exactAudit) {
+        manualReview.add(intent.operation_id);
+        continue;
+      }
+      if (!hasAudit) {
+        pendingOperations.push(intent.operation_id);
+        continue;
+      }
+      appendOpLogEntry(ctx.opsDir, {
+        operation_id: intent.operation_id,
+        actor_id: intent.actor_id,
+        timestamp: intent.prepared_at,
+        op: 'forget.scope',
+        details: {
+          payload_hash: intent.payload_hash,
+          audit_observation_id: intent.result.audit_observation_id,
+          observation_hash: intent.expected.audit.observation_hash,
+          scope: intent.result.scope,
+          reason: intent.result.reason,
+          claims_retracted: intent.result.claims_retracted,
+          observations_retracted: intent.result.observations_retracted,
+          grants_revoked: intent.result.grants_revoked,
+          scope_entry_removed: intent.result.scope_entry_removed,
+          recovered: true,
+          export_id: intent.details.export_id ?? null,
         },
       });
       committed.add(intent.operation_id);

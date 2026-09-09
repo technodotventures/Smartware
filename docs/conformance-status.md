@@ -26,13 +26,13 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-08-29 (commit baseline f91a0a8 + uncommitted working tree):
+Verified 2026-09-07 (current working tree; supersedes the 2026-08-29 baseline):
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **431 tests across 62 files** with no skips.
+- The standalone suite passes **446 tests across 64 files** with no skips.
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
   "Learned from Maya, May 12; corrected by owner May 13.", badge set
@@ -56,6 +56,15 @@ Verified 2026-08-29 (commit baseline f91a0a8 + uncommitted working tree):
   markers; (d) provenance integrity — every recall hit resolves its source
   observation + ops entry, superseded claims never satisfy recall/get, and
   multi-version history is order-correct, including on rebuilt state.
+- The Coffee company-brain e2e suite (`test/conformance/coffee-company-brain.test.ts`,
+  3 tests) proves the multi-actor product flow on the real core (spec §10b/§10c/§25):
+  one business = one tenant; owner admin; clients as scopes under `workspace`
+  with `visibility_default: 'scope'`; staff granted per exact client cluster;
+  a staff member builds a client's company brain and the owner recalls it scoped
+  to that client with no cross-client leakage; EXACT grant clusters (Gigi → Acme,
+  never Bcau/Gate/`*`; owner bypasses grants); and EXPORT.SCOPE is exactly one
+  client — `scope_exclusive: true`, zero cross-client ids in the package, per-client
+  packages distinct, and idempotent by `operation_id`.
 - Tests exercise OBSERVE, RECALL, REFLECT, REVISE, FORGET, REVIVE, ENDORSE,
   FORGET.SCOPE (erasure and offboarding lanes, owner-only enforcement,
   same-commit grant revocation, exact retraction counts, idempotent retry,

@@ -12,12 +12,16 @@ export type ObservationType =
   | 'agent_action_proposed' | 'agent_action_approved' | 'agent_action_rejected'
   | 'workflow_run_started' | 'workflow_run_completed'
   | 'task_created' | 'task_completed'
-  | 'meeting_brief_created' | 'followup_drafted';
+  | 'meeting_brief_created' | 'followup_drafted'
+  | 'erasure';
 
 export type ObservationStatus = 'accepted' | 'quarantined';
 
-// Effective states are computed by the derived index — NOT stored in JSONL
-export type EffectiveStatus = 'accepted' | 'quarantined' | 'tombstoned' | 'redacted' | 'rejected';
+// Effective states are computed by the derived index — NOT stored in JSONL.
+// 'erased' is the FORGET.SCOPE{reason:erasure} terminal state (spec §10): it
+// excludes an observation from every derived lane on replay, so a REBUILT
+// index can never resurface purged content (rebuild-equivalence, §10a).
+export type EffectiveStatus = 'accepted' | 'quarantined' | 'tombstoned' | 'redacted' | 'rejected' | 'erased';
 
 export type ActorType = 'person' | 'agent' | 'system';
 export type Visibility = 'private' | 'scope' | 'workspace' | 'public';
@@ -117,7 +121,7 @@ export interface Observation {
 }
 
 // State transition matrix
-export const TERMINAL_STATES = new Set<EffectiveStatus>(['tombstoned', 'redacted', 'rejected']);
+export const TERMINAL_STATES = new Set<EffectiveStatus>(['tombstoned', 'redacted', 'rejected', 'erased']);
 
 export const TRANSITIONS: Record<string, Record<string, EffectiveStatus>> = {
   accepted: {

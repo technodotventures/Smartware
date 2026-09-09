@@ -4,8 +4,11 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { SmartwareCore } from '../../src/core.js';
+import { ClaimStore } from '../../src/layer1/store.js';
+import { SearchIndex, syncSearchFromClaims } from '../../src/layer3/search.js';
 import { SemanticRecordStore } from '../../src/layer3/semantic-store.js';
 import type { EmbeddingAdapter } from '../../src/layer3/semantic.js';
+import type { Claim, ClaimTimeValue } from '../../src/layer1/types.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -348,6 +351,161 @@ describe('SmartwareCore semantic document boundary', () => {
       )).rejects.toThrow(/does not support superseded or forgotten history/);
     } finally {
       semanticStore.close();
+      core.close();
+    }
+  });
+
+  it('q03-class entity-owner query: claim-level FTS lexical feed + semantic tiebreak (spec §11.1 D1+D2)', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smartware-hybrid-q03-'));
+    temporaryDirectories.push(dataDir);
+    const owner = {
+      type: 'person' as const,
+      id: 'person_owner',
+      display_name: 'Owner',
+    };
+    const scope = 'workspace/default';
+    const core = await SmartwareCore.open({ dataDir, ownerId: owner.id });
+    const dbPath = path.join(dataDir, 'smartware.db');
+
+    try {
+      // Ground-truth-controlled seeding of the q03 pair (same shape the G0
+      // spike used). The entity-name claim ("Project Aster" owning a kickoff
+      // date) must NOT outrank the claim-level text ("Cloudpeak Realty owns
+      // Project Aster") for the query "Who owns Project Aster?".
+      const store = new ClaimStore(dbPath);
+      store.insertEntity({
+        id: 'ent_cloudpeak',
+        canonical_name: 'Cloudpeak Realty',
+        aliases: [],
+        type: 'client',
+        scope,
+        created_at: '2026-02-01T00:00:00.000Z',
+      });
+      store.insertEntity({
+        id: 'ent_aster',
+        canonical_name: 'Project Aster',
+        aliases: [],
+        type: 'concept',
+        scope,
+        created_at: '2026-08-18T00:00:00.000Z',
+      });
+      const truth = (value: string | null): ClaimTimeValue => ({ value, state: 'known' });
+      const extractBase = {
+        method: 'deterministic' as const,
+        model: null,
+        compiler_version: '0.6.3',
+        prompt_hash: null,
+        extracted_at: '2026-02-01T10:00:00.000Z',
+      };
+      const base: Claim = {
+        id: '',
+        subject_id: 'ent_cloudpeak',
+        subject_name: 'Cloudpeak Realty',
+        predicate: 'owns',
+        object: { type: 'text', value: 'Project Aster' },
+        scope,
+        validity: { from: '2026-02-01T00:00:00.000Z', to: null },
+        t_ingested: truth('2026-02-01T10:00:00.000Z'),
+        t_invalidated: truth(null),
+        t_valid_from: truth('2026-02-01T00:00:00.000Z'),
+        t_valid_to: truth(null),
+        source_event_id: 'obs_aster_owner',
+        extraction_event_id: 'obs_aster_owner',
+        supporting_evidence: ['obs_aster_owner'],
+        extraction: extractBase,
+        status: 'active',
+        epistemic: 'observed',
+        confidence: 0.9,
+        sensitive: false,
+        superseded_by: null,
+        contested_by: [],
+        operation_id: 'op_aster_owner',
+        version_at: '2026-02-01T10:00:00.000Z',
+      } as Claim;
+      store.insertClaim({
+        ...base,
+        id: 'c_deliverable_aster',
+      });
+      store.insertClaim({
+        ...base,
+        id: 'c_aster_schedule',
+        subject_id: 'ent_aster',
+        subject_name: 'Project Aster',
+        predicate: 'kickoff',
+        object: { type: 'date', value: '2026-09-01' },
+        t_ingested: truth('2026-08-18T11:30:00.000Z'),
+        t_valid_from: truth('2026-08-18T00:00:00.000Z'),
+        validity: { from: '2026-08-18T00:00:00.000Z', to: null },
+        source_event_id: 'obs_aster_kickoff',
+        extraction_event_id: 'obs_aster_kickoff',
+        supporting_evidence: ['obs_aster_kickoff'],
+        extraction: { ...extractBase, extracted_at: '2026-08-18T11:30:00.000Z' },
+        operation_id: 'op_aster_kickoff',
+        version_at: '2026-08-18T11:30:00.000Z',
+      });
+      store.close();
+
+      // Sync Layer 3 claim-level FTS — the channel the hybrid lexical lane
+      // must rank by (searchClaims), not the canonical entity-aggregated feed.
+      const searchIndex = new SearchIndex(dbPath);
+      syncSearchFromClaims(new ClaimStore(dbPath), searchIndex);
+      searchIndex.close();
+
+      const semanticStore = new SemanticRecordStore(
+        path.join(dataDir, 'indices', 'semantic.db'),
+      );
+      // Deterministic 2-D adapter: the ownership claim is more similar to the
+      // query than the schedule claim (mirrors the measured 0.8365 vs 0.7385).
+      const adapter: EmbeddingAdapter = {
+        provider: 'fixture',
+        model: 'q03-v1',
+        dimensions: 2,
+        async embed(texts) {
+          const vectors: Record<string, number[]> = {
+            'Who owns Project Aster?': [1, 0],
+            'Cloudpeak Realty\nowns: Project Aster': [0.84, 0.2],
+            'Project Aster\nkickoff: 2026-09-01': [0.74, 0.3],
+          };
+          return texts.map(text => {
+            const vector = vectors[text];
+            if (!vector) throw new Error(`missing q03 fixture vector: ${JSON.stringify(text)}`);
+            return vector;
+          });
+        },
+      };
+      const synced = await core.syncSemanticIndex(
+        { actor: owner, scope },
+        { adapter, store: semanticStore },
+      );
+      expect(synced.embedded).toBe(2);
+
+      const result = await core.recallHybrid(
+        { actor: owner, query: 'Who owns Project Aster?', scope, limit: 10 },
+        { adapter, store: semanticStore, min_similarity: 0, limit: 10 },
+      );
+      expect(result.selected_channel).toBe('hybrid');
+      expect(result.semantic_status).toBe('ok');
+
+      // Exit condition for the D1+D2 fix: the q03-class query no longer
+      // mis-ranks — the ownership claim is #1 in the hybrid ranking.
+      expect(result.hybrid_results.map(hit => hit.claim_id)[0])
+        .toBe('c_deliverable_aster');
+      const byId = new Map(result.hybrid_results.map(hit => [hit.claim_id, hit]));
+      // D1: the lexical channel is claim-level FTS order (deliverable #1).
+      expect(byId.get('c_deliverable_aster')).toMatchObject({
+        lexical_rank: 1,
+        semantic_rank: 1,
+      });
+      expect(byId.get('c_aster_schedule')).toMatchObject({
+        lexical_rank: 2,
+        semantic_rank: 2,
+      });
+      // D2: when RRF ties, the higher semantic relevance wins.
+      const deliverable = byId.get('c_deliverable_aster')!;
+      const schedule = byId.get('c_aster_schedule')!;
+      expect(deliverable.semantic_relevance ?? -1)
+        .toBeGreaterThan(schedule.semantic_relevance ?? -1);
+    } finally {
       core.close();
     }
   });

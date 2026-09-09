@@ -7,11 +7,14 @@ export type { OpLogEntry, OpType } from './types.js';
 
 export {
   appendOpLogEntry,
+  appendOpLogEntries,
   dayOfTimestamp,
   loadCommittedOperationIds,
   readAllOpLogEntries,
   readOpLogDay,
 } from './log.js';
+
+export { OpsIndex, openOpsIndex, defaultOpsIndexPath } from './ops_index.js';
 
 export { runCommit, runCommitSync } from './commit.js';
 export type { CommitContext, CommitDescriptor, CommitResult } from './commit.js';
@@ -25,6 +28,7 @@ export {
 export type {
   EndorseOperationIntent,
   ForgetOperationIntent,
+  ForgetScopeOperationIntent,
   OperationIntent,
   ObservationOperationIntent,
   OperationIntentReadRecord,

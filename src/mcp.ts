@@ -392,6 +392,42 @@ export function createSmartwareMcpServer(
   );
 
   server.tool(
+    'smartware_forget_scope',
+    'Erase or offboard an entire client scope (owner only; protocol v0.5.0). reason=erasure purges content in every lane; reason=offboarding tombstones + revokes grants (reversible).',
+    {
+      actor_id: z.string(),
+      scope: z.string().describe('Scope id, e.g. client:acme#1 (non-reusable marker)'),
+      reason: z.enum(['erasure', 'offboarding']),
+      operation_id: z.string(),
+      owner_pointer: z.string().optional(),
+      export_id: z.string().optional().describe('Optional export package id (exp_<ulid>) produced by smartware_export_scope before erasure; surfaced in the ops entry (details.export_id) for auditability'),
+    },
+    async args => wrap(() => core.forgetScope({
+      actor: actor(args.actor_id, 'person'),
+      scope: args.scope,
+      reason: args.reason,
+      operation_id: args.operation_id,
+      owner_pointer: args.owner_pointer,
+      export_id: args.export_id,
+    }), 'forget_scope'),
+  );
+
+  server.tool(
+    'smartware_export_scope',
+    'Export every canonical record for exactly one scope (owner only; spec §10c.4). Package: <data_dir>/exports/<export_id>/ with observations/claims/evidence/operations/entities .jsonl + manifest.json; derived indexes excluded. Idempotent per operation_id. Read-only to pod data.',
+    {
+      actor_id: z.string(),
+      scope: z.string().describe('Scope id, e.g. client:acme#1'),
+      operation_id: z.string().optional().describe('Idempotency key — retry returns the same export_id'),
+    },
+    async args => wrap(() => core.exportScope({
+      actor: actor(args.actor_id, 'person'),
+      scope: args.scope,
+      operation_id: args.operation_id,
+    }), 'export_scope'),
+  );
+
+  server.tool(
     'smartware_quarantine_review',
     'Approve or reject quarantined evidence',
     {

@@ -16,7 +16,18 @@ import { backfillTombstones } from './layer1/tombstone-backfill.js';
 import { writeRegistryMarkdown } from './auth/registry-md.js';
 import { ensureDefaultAliases } from './auth/alias-map.js';
 import { CascadePreviewStore } from './preview_store/index.js';
-import { SearchIndex, syncSearchFromClaims } from './layer3/search.js';
+import {
+  SearchIndex,
+  syncSearchFromClaims,
+  syncObservationsFromEvidence,
+  observationToIndexRow,
+  searchObservationQueryTerms,
+  makeObservationSnippet,
+} from './layer3/search.js';
+import type {
+  ObservationFreshness,
+  ObservationSearchResult as IndexedObservationSearchResult,
+} from './layer3/search.js';
 import {
   claimToSemanticDocument,
   semanticDocumentSetHash,
@@ -63,6 +74,16 @@ import { handleExplain, type ExplainParams, type ExplainResult } from './protoco
 import { handleCorrect, type CorrectParams, type CorrectResult } from './protocol/correct.js';
 import { handleRevise as handleReviseSpec, type ReviseParams, type ReviseResult } from './protocol/revise.js';
 import { handleForget, handleRevive, type ForgetParams, type ForgetResult, type ReviveParams, type ReviveResult } from './protocol/forget.js';
+import {
+  handleForgetScope,
+  type ForgetScopeParams,
+  type ForgetScopeResult,
+} from './protocol/forget_scope.js';
+import {
+  handleExportScope,
+  type ExportScopeParams,
+  type ExportScopeResult,
+} from './protocol/export_scope.js';
 import { handleEndorse, type EndorseParams, type EndorseResult } from './protocol/endorse.js';
 import {
   handleQuarantineReview,
@@ -82,6 +103,15 @@ import { handleContext, type ContextParams, type ContextBundle } from './protoco
 import { SessionStore } from './session/store.js';
 import { createGrant, getGrantForActor, isOwner } from './auth/grants.js';
 import { ProtocolError, requireGrant } from './auth/middleware.js';
+import {
+  openCompileQueue,
+  runCompileBatch,
+  type CompileBatchResult,
+  type CompileJobStatus,
+  type CompileQueue,
+  type CompileWorkerContext,
+  type FingerprintIndex,
+} from './compile_queue/index.js';
 
 export interface SmartwareCoreOptions {
   dataDir: string;
@@ -173,6 +203,10 @@ export interface SmartwareObservationSearchResult {
   snippet: string;
   source_app: string;
   source_id: string | null;
+  /** Effective status (accepted / quarantined / tombstoned / redacted / rejected). */
+  status: string;
+  /** State-based raw-freshness label: unverified | EXTRACTED | FAILED (spec §10a). */
+  freshness: ObservationFreshness;
 }
 
 export interface SmartwareObservationEvidence extends SmartwareActivityEvent {
@@ -265,6 +299,9 @@ export class SmartwareCore {
   private searchIndex: SearchIndex;
   private sessionStore: SessionStore;
   private previewGcInterval: NodeJS.Timeout | null = null;
+  /** Durable compile queue + fingerprint index (async-compile path, §9.1). */
+  private compileQueue: CompileQueue | null = null;
+  private fingerprintIndex: FingerprintIndex | null = null;
 
   private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore) {
     this.dataDir = dataDir;
@@ -311,6 +348,26 @@ export class SmartwareCore {
     // Backfill derived search structures on upgrade/open. Older databases do
     // not have the claim-granular FTS table until this version creates it.
     syncSearchFromClaims(store, searchIndex);
+    // Backfill the raw-observation FTS window (spec §10a). Regenerable from
+    // the evidence JSONL; terminal-state observations are excluded here so a
+    // wipe-and-rebuild equals the live index (rebuild-equivalence contract).
+    syncObservationsFromEvidence(core.evidenceDir, layer0, searchIndex);
+
+    // Durable compile queue (spec §9.1): open the derived ledger + O(1)
+    // fingerprint index, reconcile running/pending jobs with the evidence
+    // log and ops receipts, and re-apply EXTRACTED/FAILED labels after a
+    // rebuild. Derived state — a wiped indices/ dir regenerates at open.
+    const openedQueue = await openCompileQueue({
+      evidenceDir: core.evidenceDir,
+      dataDir: core.dataDir,
+      layer0,
+      searchIndex,
+      opsDir: core.opsDir,
+    });
+    if (openedQueue) {
+      core.compileQueue = openedQueue.queue;
+      core.fingerprintIndex = openedQueue.fingerprintIndex;
+    }
 
     // PR-4 (A3): backfill tombstones for legacy `retracted` claims. Idempotent.
     // Do not synthesize lifecycle artifacts while an intent-backed mutation
@@ -426,7 +483,29 @@ export class SmartwareCore {
   }
 
   async observe(params: ObserveParams): Promise<ObserveResult> {
-    return handleObserve(params, this.evidenceDir, this.layer0, this.getConfig(), this.sessionStore, this.opsDir);
+    return handleObserve(
+      params,
+      this.evidenceDir,
+      this.layer0,
+      this.getConfig(),
+      this.sessionStore,
+      this.opsDir,
+      {
+        // Sync-raw freshness (spec §10a): index the raw observation at commit
+        // time so the raw window is searchable before any compile job runs.
+        // Status at this moment is the observation's own (accepted or
+        // quarantined); the search query filters status='accepted'.
+        afterObservation: (obs) => {
+          this.searchIndex.indexObservation(observationToIndexRow(obs));
+          // Async-compile (spec §9.1): enqueue accepted observations on the
+          // durable queue — the write path never runs the LLM, never blocks
+          // on extraction, and never silently omits the raw window.
+          if (obs.status === 'accepted') {
+            this.compileQueue?.enqueue(obs.id, obs.scope);
+          }
+        },
+      },
+    );
   }
 
   async query(params: QueryParams): Promise<QueryResult> {
@@ -579,9 +658,26 @@ export class SmartwareCore {
       if (loaded.status === 'ready') records = loaded.records;
     }
 
+    // Spec §11.1 D1 (BINDING): the RRF lexical channel must be claim-level
+    // FTS ranks (searchClaims), not the canonical RECALL order. Canonical
+    // order is entity-aggregated: an exact entity-name match ("Project
+    // Aster") outranks a claim-level text match ("owns: Project Aster"),
+    // which pushed `c_aster_schedule` ahead of `c_deliverable_aster` on q03.
+    // Claim-level FTS ranks the correct claim #1 (9.70 vs 6.66, measured).
+    // Claims the claim FTS missed keep a canonical-order tail so an empty
+    // claim index degrades to the pre-fix feed instead of dropping lexical
+    // coverage entirely.
+    const ftsClaimIds = params.query.trim()
+      ? this.searchIndex.searchClaims(params.query, params.scope).map(result => result.claim_id)
+      : [];
+    const canonicalClaimIds = canonical.results.flatMap(result => result.claim ? [result.claim.id] : []);
+    const lexicalClaimIds = [
+      ...ftsClaimIds,
+      ...canonicalClaimIds.filter(id => !ftsClaimIds.includes(id)),
+    ];
     const ranked = await rankHybridDocuments(
       params.query,
-      canonical.results.flatMap(result => result.claim ? [result.claim.id] : []),
+      lexicalClaimIds,
       documents,
       records,
       options.adapter,
@@ -669,38 +765,68 @@ export class SmartwareCore {
       limit?: number;
       includeSensitive?: boolean;
       temporalRange?: { from: string; to: string };
+      /** Restrict to these state-based freshness labels (spec §10a). */
+      freshness?: ObservationFreshness[];
     } = {},
   ): SmartwareObservationSearchResult[] {
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = searchObservationQueryTerms(query);
+    // The legacy substring matcher returned [] for a blank query with no
+    // temporal anchor; keep that contract (the FTS fallback would otherwise
+    // scan the whole scope).
     if (terms.length === 0 && !options.temporalRange) return [];
-    const limit = options.limit ?? 10;
-    const results: SmartwareObservationSearchResult[] = [];
 
-    for (const obs of readAll(this.evidenceDir)) {
-      if (obs.scope !== scope || obs.status !== 'accepted') continue;
-      if (obs.policy.sensitive && !options.includeSensitive) continue;
-      if (options.temporalRange
-        && (obs.source.observed_at < options.temporalRange.from
-          || obs.source.observed_at >= options.temporalRange.to)) continue;
-      const body = typeof obs.content.body === 'string' ? obs.content.body : JSON.stringify(obs.content.body);
-      const lower = body.toLowerCase();
-      if (!terms.every(term => lower.includes(term))) continue;
+    // Time bound vs. state bound: the FTS window is state-based — the
+    // freshness label, never a timestamp. Layer 0 is the authoritative
+    // effective-status source, so hits are re-checked live: a mutation that
+    // landed after indexing (tombstone/redaction/reject/approve) drops the
+    // row immediately rather than after the next rebuild.
+    const hits: IndexedObservationSearchResult[] = this.searchIndex.searchObservations(
+      query,
+      scope,
+      {
+        limit: options.limit,
+        includeSensitive: options.includeSensitive,
+        temporalRange: options.temporalRange,
+        freshness: options.freshness,
+      },
+    );
+
+    const results: SmartwareObservationSearchResult[] = [];
+    for (const hit of hits) {
+      const effectiveStatus = this.layer0.getEffectiveStatus(hit.obs_id);
+      if (effectiveStatus !== null && effectiveStatus !== 'accepted') continue;
       results.push({
-        id: obs.id,
-        type: obs.type,
-        scope: obs.scope,
-        actor_id: obs.source.actor.id,
-        observed_at: obs.source.observed_at,
-        captured_at: obs.source.captured_at,
-        snippet: makeSnippet(body, terms[0]),
-        source_app: obs.source.app,
-        source_id: obs.source.source_id,
+        id: hit.obs_id,
+        type: hit.type,
+        scope: hit.scope,
+        actor_id: hit.actor_id,
+        observed_at: hit.observed_at,
+        captured_at: hit.captured_at,
+        snippet: makeObservationSnippet(hit.content, terms),
+        source_app: hit.source_app,
+        source_id: hit.source_id,
+        status: hit.status,
+        freshness: hit.freshness,
       });
     }
 
     return results
       .sort((a, b) => b.observed_at.localeCompare(a.observed_at))
-      .slice(0, limit);
+      .slice(0, options.limit ?? 10);
+  }
+
+  /**
+   * Mark the state-based freshness label of one indexed observation.
+   * Compile-queue callers transition unverified → EXTRACTED / FAILED as jobs
+   * resolve (spec §10a — never time-based).
+   */
+  markObservationFreshness(obsId: string, freshness: ObservationFreshness): void {
+    this.searchIndex.updateObservationFreshness(obsId, freshness);
+  }
+
+  /** Current state-based freshness label of an indexed observation (or null). */
+  getObservationFreshness(obsId: string): ObservationFreshness | null {
+    return this.searchIndex.getObservationFreshness(obsId);
   }
 
   readObservationEvidence(params: {
@@ -748,6 +874,44 @@ export class SmartwareCore {
 
   async reflect(params: CompileParams): Promise<CompileHandlerResult> {
     return this.compile(params);
+  }
+
+  /**
+   * Drain one batch of the durable compile queue (async-compile, spec §9.1).
+   * The host decides when this runs — the MCP server starts a background
+   * loop; embedded hosts may call this on an interval of their own. Returns
+   * null when the compile queue is unavailable (derived-DB failure).
+   */
+  async drainCompileQueue(
+    opts: { limit?: number; useLLM?: boolean } = {},
+  ): Promise<CompileBatchResult | null> {
+    if (!this.compileQueue || !this.fingerprintIndex) return null;
+    const ctx: CompileWorkerContext = {
+      evidenceDir: this.evidenceDir,
+      dataDir: this.dataDir,
+      layer0: this.layer0,
+      store: this.store,
+      searchIndex: this.searchIndex,
+      config: this.getConfig(),
+      opsDir: this.opsDir,
+      queue: this.compileQueue,
+      fingerprintIndex: this.fingerprintIndex,
+    };
+    return runCompileBatch(ctx, opts);
+  }
+
+  /** Queue ledger + freshness surface for the compile payload contract. */
+  compileQueueStats(): {
+    statuses: Record<CompileJobStatus, number>;
+    pending_count: number;
+    freshness: { unverified: number; extracted: number; failed: number };
+  } | null {
+    if (!this.compileQueue) return null;
+    return {
+      statuses: this.compileQueue.stats(),
+      pending_count: this.compileQueue.countPending(),
+      freshness: this.searchIndex.countObservationsByFreshness(),
+    };
   }
 
   /**
@@ -945,7 +1109,7 @@ export class SmartwareCore {
   }
 
   async forget(params: ForgetParams): Promise<ForgetResult> {
-    return handleForget(
+    const result = await handleForget(
       params,
       this.evidenceDir,
       this.layer0,
@@ -953,6 +1117,70 @@ export class SmartwareCore {
       this.getConfig(),
       { opsDir: this.opsDir },
     );
+    // Keep the raw-search window truthful after mutations: a terminal
+    // observation (tombstone/redaction → tombstoned/redacted) must leave the
+    // raw window immediately, not after the next rebuild.
+    const targetId = params.target?.type === 'observation'
+      ? params.target.id
+      : params.target_obs_id;
+    if (targetId) this.reconcileObservationIndexRow(targetId);
+    return result;
+  }
+
+  /**
+   * FORGET.SCOPE (protocol v0.5.0, spec §10): erasure or offboarding of a
+   * whole scope. Owner-only. `semanticStore` is optional — when the host owns
+   * a persisted vector index, pass the store so erasure removes the
+   * embeddings too (they are part of the leak surface, §10).
+   */
+  async forgetScope(
+    params: ForgetScopeParams,
+    options: { semanticStore?: SemanticRecordStore | null } = {},
+  ): Promise<ForgetScopeResult> {
+    const config = this.getConfig();
+    return handleForgetScope(params, {
+      evidenceDir: this.evidenceDir,
+      dataDir: this.dataDir,
+      layer0: this.layer0,
+      store: this.store,
+      searchIndex: this.searchIndex,
+      config,
+      commitCtx: { opsDir: this.opsDir },
+      semanticStore: options.semanticStore ?? null,
+      compileQueue: this.compileQueue,
+      fingerprintIndex: this.fingerprintIndex,
+    });
+  }
+
+  /**
+   * EXPORT.SCOPE (spec §10c.4, G3.1): one consumer's exact-scope canonical
+   * record package under `<data_dir>/exports/<export_id>/`. Owner-only,
+   * read-only to pod data; derived indexes are excluded (regenerable).
+   * `operation_id` makes the export idempotent (retry ⇒ same export_id).
+   */
+  async exportScope(params: ExportScopeParams): Promise<ExportScopeResult> {
+    const config = this.getConfig();
+    return handleExportScope(params, {
+      evidenceDir: this.evidenceDir,
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      store: this.store,
+      config,
+    });
+  }
+
+  /**
+   * Reconcile one observation's raw-index row with its Layer-0 effective
+   * status. Terminal states leave the index (matching wipe-and-rebuild
+   * semantics); accepted/quarantined rows only update the status column.
+   */
+  private reconcileObservationIndexRow(obsId: string): void {
+    const effective = this.layer0.getEffectiveStatus(obsId);
+    if (effective === null || effective === 'accepted' || effective === 'quarantined') {
+      if (effective) this.searchIndex.updateObservationStatus(obsId, effective);
+      return;
+    }
+    this.searchIndex.removeObservation(obsId);
   }
 
   async revive(params: ReviveParams): Promise<ReviveResult> {
@@ -980,13 +1208,17 @@ export class SmartwareCore {
   async quarantineReview(
     params: QuarantineReviewParams,
   ): Promise<QuarantineReviewResult> {
-    return handleQuarantineReview(
+    const result = await handleQuarantineReview(
       params,
       this.evidenceDir,
       this.layer0,
       this.store,
       this.getConfig(),
     );
+    // Quarantine approval flips quarantined → accepted: the row must move
+    // into the raw-search window; rejection removes it.
+    this.reconcileObservationIndexRow(params.target_obs_id);
+    return result;
   }
 
   async grant(params: GrantParams): Promise<GrantResult> {
@@ -1050,6 +1282,8 @@ export class SmartwareCore {
       clearInterval(this.previewGcInterval);
       this.previewGcInterval = null;
     }
+    this.compileQueue?.close();
+    this.fingerprintIndex?.close();
     this.layer0.close();
     this.store.close();
     this.searchIndex.close();
@@ -1194,13 +1428,3 @@ export * from './protocol/session.js';
 export * from './protocol/status.js';
 export * from './session/types.js';
 export * from './session/checkpoint.js';
-
-function makeSnippet(text: string, term: string): string {
-  const index = text.toLowerCase().indexOf(term);
-  if (index < 0) return text.slice(0, 240);
-  const start = Math.max(0, index - 80);
-  const end = Math.min(text.length, index + term.length + 160);
-  const prefix = start > 0 ? '...' : '';
-  const suffix = end < text.length ? '...' : '';
-  return `${prefix}${text.slice(start, end)}${suffix}`;
-}

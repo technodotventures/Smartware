@@ -23,23 +23,51 @@ export function dayOfTimestamp(iso8601: string): string {
  * pattern; malformed entries throw.
  */
 export function appendOpLogEntry(opsDir: string, entry: OpLogEntry): void {
-  if (!OPERATION_ID_PATTERN.test(entry.operation_id)) {
-    throw new Error(
-      `Operations log entry rejected: operation_id '${entry.operation_id}' does not match ${OPERATION_ID_PATTERN}`,
-    );
-  }
-  if (!entry.actor_id || !entry.timestamp || !entry.op) {
-    throw new Error('Operations log entry rejected: actor_id, timestamp, and op are required');
+  appendOpLogEntries(opsDir, [entry]);
+}
+
+/**
+ * Append many operations-log entries with one filesystem append per UTC day
+ * (one fsync per day file per call). This is the batching primitive the
+ * compile queue needs: compile at 50k claims allocates one ops entry per
+ * claim plus one terminal receipt per observation, and per-entry fsync was
+ * measured as a binding cost (spec §11.2 — batched appends, one fsync per N).
+ *
+ * Entries are validated per-entry exactly like appendOpLogEntry; a malformed
+ * entry throws before any file is touched. Entries are grouped by their
+ * timestamp's UTC day; the canonical (day, insertion order) ordering is
+ * preserved because a day is appended to exactly once, in array order.
+ */
+export function appendOpLogEntries(opsDir: string, entries: OpLogEntry[]): void {
+  if (entries.length === 0) return;
+  for (const entry of entries) {
+    if (!OPERATION_ID_PATTERN.test(entry.operation_id)) {
+      throw new Error(
+        `Operations log entry rejected: operation_id '${entry.operation_id}' does not match ${OPERATION_ID_PATTERN}`,
+      );
+    }
+    if (!entry.actor_id || !entry.timestamp || !entry.op) {
+      throw new Error('Operations log entry rejected: actor_id, timestamp, and op are required');
+    }
   }
 
   mkdirSync(opsDir, { recursive: true, mode: 0o700 });
-  const path = dateToPath(opsDir, dayOfTimestamp(entry.timestamp));
-  const fd = openSync(path, 'a', 0o600);
-  try {
-    writeFileSync(fd, JSON.stringify(entry) + '\n', 'utf8');
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+  const byDay = new Map<string, string[]>();
+  for (const entry of entries) {
+    const day = dayOfTimestamp(entry.timestamp);
+    const lines = byDay.get(day) ?? [];
+    lines.push(JSON.stringify(entry));
+    byDay.set(day, lines);
+  }
+  for (const [day, lines] of byDay) {
+    const path = dateToPath(opsDir, day);
+    const fd = openSync(path, 'a', 0o600);
+    try {
+      writeFileSync(fd, lines.join('\n') + '\n', 'utf8');
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
   }
 }
 

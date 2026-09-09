@@ -63,14 +63,28 @@ export async function replayAll(evidenceDir: string, layer0: Layer0Index, store:
   store.setLastReplayedSequence(lastSeq);
 }
 
-export async function replayCatchUp(evidenceDir: string, store: ClaimStore, layer0?: Layer0Index, config?: SmartwareConfig): Promise<void> {
+export async function replayCatchUp(
+  evidenceDir: string,
+  store: ClaimStore,
+  layer0?: Layer0Index,
+  config?: SmartwareConfig,
+  observations?: Observation[],
+  /**
+   * §11.2b: one-query status snapshot from the caller (compile gather builds
+   * it) — replaces 50k per-obs getEffectiveStatus SELECTs in reconcile.
+   */
+  statusMap?: Map<string, import('../layer0/types.js').EffectiveStatus | null>,
+): Promise<void> {
   const lastSeq = store.getLastReplayedSequence();
   let newLastSeq = lastSeq;
   let processed = 0;
 
-  for (const obs of readAll(evidenceDir)) {
+  // §11.2b re-scope: reusing the caller's parsed evidence list avoids a second
+  // full JSONL read of a 48MB log (measured ~8% of the 50k pipeline).
+  const allObservations = observations ?? [...readAll(evidenceDir)];
+  for (const obs of allObservations) {
     if (obs.integrity.sequence <= lastSeq) continue;
-    processEvent(obs, store, layer0, config);
+    processEvent(obs, store, layer0, config, statusMap);
     newLastSeq = Math.max(newLastSeq, obs.integrity.sequence);
     if (++processed % YIELD_EVERY === 0) await yieldEventLoop();
   }
@@ -80,9 +94,11 @@ export async function replayCatchUp(evidenceDir: string, store: ClaimStore, laye
   }
 }
 
-function processEvent(obs: Observation, store: ClaimStore, layer0?: Layer0Index, config?: SmartwareConfig): void {
+function processEvent(obs: Observation, store: ClaimStore, layer0?: Layer0Index, config?: SmartwareConfig, statusMap?: Map<string, import('../layer0/types.js').EffectiveStatus | null>): void {
   if (layer0) {
-    const effective = layer0.getEffectiveStatus(obs.id);
+    const effective = statusMap
+      ? (statusMap.get(obs.id) ?? obs.status)
+      : layer0.getEffectiveStatus(obs.id);
     if (effective !== null && effective !== 'accepted') return;
   }
 

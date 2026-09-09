@@ -14,6 +14,7 @@ export type OpType =
   | 'endorse'
   | 'revive'
   | 'forget'
+  | 'forget.scope'
   | 'session.start'
   | 'session.end'
   | 'watch.subscribe'
