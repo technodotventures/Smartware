@@ -36,3 +36,9 @@ data/
 # Spike measurement artifacts (large, regenerable)
 .spike/
 .spike-h2h/
+
+# Kanban worker worktrees (per-task scratch checkouts, never part of the repo)
+.worktrees/
+
+# Packaged release artifacts (npm pack output)
+*.tgz
