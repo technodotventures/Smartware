@@ -7,6 +7,7 @@ import { checkIdempotency, checkLegacySourceDedup, computePayloadHash } from '..
 import { detectSecrets } from '../layer0/secrets.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { SmartwareConfig } from '../config.js';
+import { resolveRetention, toRetentionDurationString } from '../config.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { quarantineForGrants } from '../auth/trust.js';
 import { isOwner, getAuthorizingGrants } from '../auth/grants.js';
@@ -40,6 +41,8 @@ export interface ObserveParams {
   sensitive?: boolean;
   pii_detected?: boolean;
   retention?: Observation['policy']['retention'];
+  /** ISO 8601 duration (e.g. "P90D"). When omitted, derived from scope retention policy. */
+  retention_duration?: string | null;
   /** @deprecated Rejected in v1.6.16. OBSERVE writes L0 only; claim extraction is reflect.auto's job. */
   claims?: Observation['claims'];
   idempotency_key?: string;
@@ -68,8 +71,12 @@ export interface ObserveCommitHooks {
   afterCommit?: () => void;
 }
 
-function observePayload(params: ObserveParams): Record<string, unknown> {
-  return {
+function observePayload(
+  params: ObserveParams,
+  retention: Observation['policy']['retention'],
+  retentionDuration: string | null,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
     actor_id: params.actor.id,
     type: params.type,
     scope: params.scope,
@@ -82,11 +89,15 @@ function observePayload(params: ObserveParams): Record<string, unknown> {
     informed_by: params.informed_by ?? [],
     sensitive: params.sensitive ?? false,
     pii_detected: params.pii_detected ?? false,
-    retention: params.retention ?? 'forever',
+    retention,
     idempotency_key: params.idempotency_key ?? null,
     content: params.content,
     claims: params.claims ?? [],
   };
+  // Only emit retention_duration when non-null so the default `forever` payload
+  // (and thus its observation id) is byte-identical to pre-retention builds.
+  if (retentionDuration != null) payload['retention_duration'] = retentionDuration;
+  return payload;
 }
 
 export async function handleObserve(
@@ -149,7 +160,16 @@ export async function handleObserve(
 
   requireGrant(params.actor.id, 'observe', params.scope, config);
 
-  const payloadHash = computePayloadHash(observePayload(params));
+  // Resolve retention once, before the payload hash, so the derived policy +
+  // duration are part of the canonical observation (id + idempotency) exactly as
+  // written. Explicit param wins; otherwise scope override → default → `forever`.
+  const retentionSetting = resolveRetention(config, params.scope);
+  const retention: Observation['policy']['retention'] = params.retention ?? retentionSetting.policy;
+  const retentionDuration: string | null = params.retention_duration !== undefined
+    ? params.retention_duration
+    : (retention === 'duration' ? toRetentionDurationString(retentionSetting) : null);
+
+  const payloadHash = computePayloadHash(observePayload(params, retention, retentionDuration));
   if (params.operation_id && !OPERATION_ID_PATTERN.test(params.operation_id)) {
     throw new ProtocolError('invalid_parameter', `Invalid operation_id '${params.operation_id}'`);
   }
@@ -280,8 +300,8 @@ export async function handleObserve(
         }
       : null,
     policy: {
-      retention: params.retention ?? 'forever',
-      retention_duration: null,
+      retention,
+      retention_duration: retentionDuration,
       sensitive: params.sensitive ?? false,
       pii_detected: params.pii_detected ?? false,
     },
