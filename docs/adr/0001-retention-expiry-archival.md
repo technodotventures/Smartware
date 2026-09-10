@@ -112,9 +112,14 @@ retention: {
   purge its derived lanes (claim rows, FTS, vectors, pages) exactly as the
   existing tombstone/erasure paths do, and write one ops entry
   `{ op: 'retention.expire', reason, counts }`. Idempotent per `operation_id`.
-- **Purge (`purge`, owner-gated):** physically remove tombstoned/expired records
-  and their L0 evidence bytes + all lanes, write a deletion certificate — reusing
-  FORGET.SCOPE erasure's lane-exhaustive mechanics at record granularity.
+- **Purge (`purge`, owner-gated):** physical reclaim is **scope-level erasure** via
+  the already-shipped FORGET.SCOPE `erasure` (purges L1 claims + every derived
+  lane, marks L0 `erased`, writes the deletion certificate). Record-level
+  byte-purge of individual L0 evidence records is **deferred**: the append-only
+  hash chain (each record's `previous_hash`) makes in-place byte removal unsafe
+  by construction. The sweep already makes expired records non-retrievable; the
+  scope-erasure path reclaims storage. A `purge` convenience surface is
+  therefore unnecessary — `forgetScope({ reason: 'erasure' })` IS the purge.
 - **Archive (reserved, not v0.6.0):** move L0 evidence to cold storage, retain a
   tombstone pointer. Deferred; `expire_action` locked to `'tombstone'` for now.
 - Scheduler is **host-owned** (Coffee runs it, like `drainCompileQueue`); the
@@ -136,8 +141,9 @@ retention: {
 3. `expire` sweep tombstones elapsed records, excludes them from recall/context,
    purges derived lanes, writes one ops entry with exact counts; idempotent.
 4. Rebuild-equivalence holds after expiry (wipe + rebuild excludes expired).
-5. `purge` (owner-only) physically removes L0 evidence + all lanes, writes a
-   deletion certificate; refused for non-owner; refused under hold.
+5. `forgetScope({ reason: 'erasure' })` (owner-only, already shipped) is the
+   physical purge + deletion certificate; refused for non-owner, refused under
+   hold. No separate record-level purge surface in v0.6.0.
 6. Hold scope is skipped by the sweep; erasure still overrides retention.
 7. `staleness` config remains round-trippable (backward compatible).
 

@@ -428,6 +428,23 @@ export function createSmartwareMcpServer(
   );
 
   server.tool(
+    'smartware_expire_retention',
+    'Retention expiry sweep (ADR-0001). Tombstones elapsed duration-policy observations in one scope and retracts their sole-evidence claims. Idempotent; host-triggered like compile. Requires a forget grant on the scope (or owner).',
+    {
+      actor_id: z.string(),
+      scope: z.string().describe('Scope id to sweep'),
+      operation_id: z.string().optional().describe('Idempotency key — retry returns the same counts'),
+      as_of: z.string().optional().describe('ISO 8601 instant to evaluate expiry against (default: now)'),
+    },
+    async args => wrap(() => core.expireRetention({
+      actor: actor(args.actor_id, 'person'),
+      scope: args.scope,
+      operation_id: args.operation_id,
+      as_of: args.as_of,
+    }), 'expire_retention'),
+  );
+
+  server.tool(
     'smartware_quarantine_review',
     'Approve or reject quarantined evidence',
     {

@@ -74,6 +74,7 @@ import { handleExplain, type ExplainParams, type ExplainResult } from './protoco
 import { handleCorrect, type CorrectParams, type CorrectResult } from './protocol/correct.js';
 import { handleRevise as handleReviseSpec, type ReviseParams, type ReviseResult } from './protocol/revise.js';
 import { handleForget, handleRevive, type ForgetParams, type ForgetResult, type ReviveParams, type ReviveResult } from './protocol/forget.js';
+import { handleExpireRetention, type ExpireRetentionParams, type ExpireRetentionResult } from './protocol/retention.js';
 import {
   handleForgetScope,
   type ForgetScopeParams,
@@ -1170,6 +1171,24 @@ export class SmartwareCore {
   }
 
   /**
+   * Retention expiry sweep (ADR-0001). Tombstones elapsed `duration`-policy
+   * observations in one scope and retracts their sole-evidence claims, with a
+   * single `retention.expire` ops entry. Naturally idempotent: re-running finds
+   * no new expired records. Host-triggered, like `drainCompileQueue`.
+   */
+  async expireRetention(params: ExpireRetentionParams): Promise<ExpireRetentionResult> {
+    const config = this.getConfig();
+    return handleExpireRetention(params, {
+      evidenceDir: this.evidenceDir,
+      dataDir: this.dataDir,
+      layer0: this.layer0,
+      store: this.store,
+      config,
+      opsDir: this.opsDir,
+    });
+  }
+
+  /**
    * Reconcile one observation's raw-index row with its Layer-0 effective
    * status. Terminal states leave the index (matching wipe-and-rebuild
    * semantics); accepted/quarantined rows only update the status column.
@@ -1424,6 +1443,7 @@ export * from './protocol/correct.js';
 export * from './protocol/revise.js';
 export * from './protocol/endorse.js';
 export * from './protocol/forget.js';
+export * from './protocol/retention.js';
 export * from './protocol/session.js';
 export * from './protocol/status.js';
 export * from './session/types.js';
