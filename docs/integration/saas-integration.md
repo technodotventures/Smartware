@@ -125,7 +125,7 @@ Worked example (ship this as your default tenant template):
 {
   "instance_id": "smartware_01kxw9f2v3",
   "owner_id": "user:ava",                       // the business owner
-  "version": "0.6.3",
+  "version": "0.7.0",
   "scopes": [
     { "id": "self", "parent": null, "visibility_default": "private" },
     { "id": "workspace", "parent": null, "visibility_default": "workspace" },
@@ -307,7 +307,7 @@ npm ci
 npm run build        # tsc → dist/
 npm run verify:schemas
 npm test             # 446 tests across 64 files, no skips
-npm pack             # → smartware-0.6.3.tgz
+npm pack             # → smartware-0.7.0.tgz
 ```
 
 The tarball carries `dist/`, both frozen schema sets (`schemas/v0.4.2`,

@@ -24,9 +24,23 @@ Specification v1.6.16 conformance.
   between them blocks conformance until corrected. See the
   [v0.5.0 contract change history](protocol/smartware-protocol-v0.5.0.md).
 
+## Release identity
+
+- The package version is **0.7.0**; `package.json` and `src/version.ts` are kept
+  in sync and are the single source of truth for the version string.
+- 0.7.0 carries the v0.5.0 protocol surface. The earlier published `0.6.3` on
+  the npm registry **predates that surface** and does not contain
+  `schemas/v0.5.0`; integrators following the v0.5.0 documentation must not
+  pin `0.6.3`.
+
 ## Verified baseline
 
-Verified 2026-09-07 (current working tree; supersedes the 2026-08-29 baseline):
+Verified 2026-09-10 for the 0.7.0 release cut on Node v26.5.1 (CI re-runs the
+same gate via `npm ci` from `package-lock.json` on Node 22 and 24, so the two
+runtime lines are verified by CI rather than by this local run), superseding
+the 2026-09-07 baseline: the counts below are unchanged — **446 tests across
+64 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
+contract still fails closed.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
@@ -81,6 +95,11 @@ Verified 2026-09-07 (current working tree; supersedes the 2026-08-29 baseline):
 - The activation contract fails closed on public development evidence, as
   required.
 - `npm audit --omit=dev` reports zero production dependency vulnerabilities.
+  This required a lock refresh in the 0.7.0 cut: the pre-0.7.0 lock still
+  resolved `fast-uri@3.1.5`, `hono@4.13.0`, and `qs@6.15.3`, each covered by
+  published advisories (1 high, 2 moderate). The fix moved exactly those three
+  transitive packages to `3.1.7`, `4.13.7`, and `6.16.0` within their parents'
+  existing semver ranges — no direct dependency, protocol, or source change.
 
 Host products must separately test their adapters, transports, persistence,
 and user-facing authorization against the exact Smartware version they ship.

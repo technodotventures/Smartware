@@ -23,7 +23,7 @@ const fail = [];
 // 1. Provision a Coffee tenant: one business = one Pod, client = scope, staff = exact-id grants.
 const cfg = createDefaultConfig(dataDir);
 cfg.owner_id = 'user:ava';
-cfg.version = '0.6.3';
+cfg.version = '0.7.0';
 cfg.scopes = [
   { id: 'self', parent: null, visibility_default: 'private' },
   { id: 'workspace', parent: null, visibility_default: 'workspace' },

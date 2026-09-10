@@ -2,7 +2,7 @@
   "instance_id": "smartware_01kxw9f2v3",
   "owner_id": "user:ava",
   "writer_id": "writer_local_01kxw9f2v4",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "data_dir": "/var/lib/smartware/harbor-lane",
   "scopes": [
     { "id": "self", "parent": null, "visibility_default": "private" },
