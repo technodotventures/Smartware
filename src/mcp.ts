@@ -445,6 +445,31 @@ export function createSmartwareMcpServer(
   );
 
   server.tool(
+    'smartware_consolidate',
+    'Consolidate 2+ active claims into one reviewed current-understanding claim (ADR-0002). Preserves evidence lineage; tombstones inputs. User-only.',
+    {
+      actor_id: z.string(),
+      claim_ids: z.array(z.string()).min(2).describe('2+ active claim ids to consolidate'),
+      summary: z.string().describe('Human/LLM-authored, human-reviewed consolidated text'),
+      subject_name: z.string(),
+      predicate: z.string(),
+      scope: z.string(),
+      reason: z.string().optional(),
+      operation_id: z.string(),
+    },
+    async args => wrap(() => core.consolidate({
+      actor: actor(args.actor_id, 'person'),
+      claim_ids: args.claim_ids,
+      summary: args.summary,
+      subject_name: args.subject_name,
+      predicate: args.predicate,
+      scope: args.scope,
+      reason: args.reason,
+      operation_id: args.operation_id,
+    }), 'consolidate'),
+  );
+
+  server.tool(
     'smartware_quarantine_review',
     'Approve or reject quarantined evidence',
     {

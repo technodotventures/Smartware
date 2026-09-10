@@ -75,6 +75,7 @@ import { handleCorrect, type CorrectParams, type CorrectResult } from './protoco
 import { handleRevise as handleReviseSpec, type ReviseParams, type ReviseResult } from './protocol/revise.js';
 import { handleForget, handleRevive, type ForgetParams, type ForgetResult, type ReviveParams, type ReviveResult } from './protocol/forget.js';
 import { handleExpireRetention, type ExpireRetentionParams, type ExpireRetentionResult } from './protocol/retention.js';
+import { handleConsolidate, type ConsolidateParams, type ConsolidateResult } from './protocol/consolidate.js';
 import {
   handleForgetScope,
   type ForgetScopeParams,
@@ -1189,6 +1190,25 @@ export class SmartwareCore {
   }
 
   /**
+   * CONSOLIDATE (ADR-0002): collapse 2+ active claims into one reviewed
+   * "current understanding" claim, preserving the evidence lineage and
+   * tombstoning (not deleting) the inputs.
+   */
+  async consolidate(params: ConsolidateParams): Promise<ConsolidateResult> {
+    const result = await handleConsolidate(
+      params,
+      this.dataDir,
+      this.store,
+      this.getConfig(),
+      { opsDir: this.opsDir },
+    );
+    // Keep the claim-FTS surface truthful: the consolidated claim must be
+    // findable and the tombstoned inputs must leave the index.
+    syncSearchFromClaims(this.store, this.searchIndex, params.scope);
+    return result;
+  }
+
+  /**
    * Reconcile one observation's raw-index row with its Layer-0 effective
    * status. Terminal states leave the index (matching wipe-and-rebuild
    * semantics); accepted/quarantined rows only update the status column.
@@ -1444,6 +1464,7 @@ export * from './protocol/revise.js';
 export * from './protocol/endorse.js';
 export * from './protocol/forget.js';
 export * from './protocol/retention.js';
+export * from './protocol/consolidate.js';
 export * from './protocol/session.js';
 export * from './protocol/status.js';
 export * from './session/types.js';

@@ -16,6 +16,7 @@ export type OpType =
   | 'forget'
   | 'forget.scope'
   | 'retention.expire'
+  | 'consolidate'
   | 'session.start'
   | 'session.end'
   | 'watch.subscribe'
