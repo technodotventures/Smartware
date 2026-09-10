@@ -1,6 +1,6 @@
 # ADR-0002 — Consolidation of claim clusters
 
-**Status:** Proposed (owner sign-off required before freeze)
+**Status:** Implemented (`consolidate` + MCP + tests) — **awaiting owner sign-off on the Tier-1 invariant (§2.2)**
 **Author:** @smarty-pants
 **Date:** 2026-09-10
 **Supersedes:** none

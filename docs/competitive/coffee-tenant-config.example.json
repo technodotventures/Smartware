@@ -75,5 +75,12 @@
     "default_half_life_days": 90,
     "scope_overrides": {},
     "stale_threshold": 0.3
+  },
+  "retention": {
+    "default": { "policy": "forever", "duration_days": null },
+    "scope_overrides": {
+      "client:gate#2": { "policy": "duration", "duration_days": 30 }
+    },
+    "expire_action": "tombstone"
   }
 }

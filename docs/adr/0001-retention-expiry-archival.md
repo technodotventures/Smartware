@@ -1,6 +1,6 @@
 # ADR-0001 — Retention, Expiry & Archival
 
-**Status:** Proposed (recommendation made; owner sign-off required before freeze)
+**Status:** Implemented (increments 1–2: config + `retention_duration` population, `expire` sweep) — **awaiting owner sign-off on Tier-1 invariants (§2.2) and `staleness` deprecation (§2.4)**
 **Author:** @smarty-pants
 **Date:** 2026-09-10
 **Supersedes:** none

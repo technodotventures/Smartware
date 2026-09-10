@@ -159,4 +159,18 @@ describe('expireRetention sweep', () => {
       c.expireRetention({ actor: { type: 'person', id: 'user:stranger', display_name: 'S' }, scope: ACME, as_of: '2026-09-10T00:00:00.000Z' }),
     ).rejects.toThrow();
   });
+
+  it('survives reopen (tombstone replays from JSONL, rebuild-equivalence)', async () => {
+    const c = await open();
+    const past = await c.observe({
+      actor: OWNER, type: 'message', content: { format: 'text/plain', body: 'old Acme note' },
+      scope: ACME, observed_at: '2026-08-01T00:00:00.000Z',
+    });
+    await c.expireRetention({ actor: OWNER, scope: ACME, as_of: '2026-09-10T00:00:00.000Z' });
+
+    core?.close();
+    core = await SmartwareCore.open({ dataDir, ownerId: 'user:owner' });
+
+    expect(core.readObservationEvidence({ actor: OWNER, observation_id: past.id })?.status).toBe('tombstoned');
+  });
 });
