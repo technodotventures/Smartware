@@ -105,6 +105,54 @@ export.
 
 ---
 
+### 1d. Host-side claim persistence (when you already own extraction)
+
+If your product already has an extractor — for example an LLM pipeline you already run — you do
+not have to use Smartware's compile path. You can persist claims yourself and index them. This is
+the path with the fewest moving parts, and it is the one to choose if you do not want a model
+credential inside the memory layer.
+
+Everything below is reachable from the **published package** — that is deliberate, and the
+repository's own smoke test imports exactly these paths so they cannot silently stop being public:
+
+```ts
+import { SmartwareCore, knownTime, nullTime } from 'smartware';  // core + claim time helpers
+import { ClaimStore } from 'smartware/layer1';                   // claim persistence
+import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3'; // indexing for recall
+```
+
+Four things that will otherwise cost you an afternoon:
+
+1. **Index, or recall returns nothing.** Inserting claims is not enough — call
+   `syncSearchFromClaims(store, index, scope)` after inserting, or `recall` has nothing to rank.
+   The observable symptom is a claim you can read by id but that no query ever returns.
+
+2. **`setDataDir` exists on `ClaimStore` and NOT on `SearchIndex`.** They look symmetric and are
+   not: the claim store needs the data directory for the canonical JSONL surfaces, the search
+   index takes its database path in the constructor and nothing else. Calling `setDataDir` on the
+   index throws `TypeError: index.setDataDir is not a function`.
+
+3. **Build the time fields with the exported helpers** — `knownTime(value)` and `nullTime()`.
+   `ClaimTimeValue` is `{ value, state }` with `state: 'known' | 'inferred' | 'null'`, so it is
+   constructible by hand, but using the helpers keeps you aligned if the shape moves.
+
+4. **Re-observed evidence must not mint a second claim.** `observe` deduplicates: re-observing the
+   same content returns the original observation with `status: 'duplicate'` rather than creating a
+   new one. `insertClaim` does **not** merge on canonical key, so an extractor that mints a claim
+   per observation will accumulate duplicate claims for a single piece of evidence — measurably, a
+   re-sent message took a scope from 3 claims to 4 with the observation count unchanged.
+
+   Guard it in your extraction step:
+
+   ```ts
+   const obs = await memory.observe({ /* … */ });
+   if (obs.status === 'duplicate') return;      // same evidence, already in the brain
+   // and/or check the canonical key before minting:
+   //   canonicalKey(subjectId, predicate, scope, validityFrom)
+   ```
+
+   `canonicalKey` is exported from the package root for exactly this check.
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by

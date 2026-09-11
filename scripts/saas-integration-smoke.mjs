@@ -1,14 +1,12 @@
 // Public-API smoke: prove a SaaS can embed Smartware via the published package
-// surface (dist/) and run the Coffee tenant shape end to end — provision a
-// tenant (owner + client-as-scope + exact-id staff grant), observe a client
-// message, hit the sync-raw window, persist+recall a structured claim, render
-// attribution, and owner-export the scope. Runs against the built dist.
-import { SmartwareCore } from '../dist/core.js';
-import { showAttributionByDefault, attributionLine, whySentence } from '../dist/render/provenance.js';
-import { createDefaultConfig } from '../dist/config.js';
-import { ClaimStore } from '../dist/layer1/store.js';
-import { SearchIndex, syncSearchFromClaims } from '../dist/layer3/search.js';
-import { knownTime, nullTime } from '../dist/layer1/types.js';
+// surface — these imports are the ones a CONSUMER can actually make. Self-reference
+// resolves through package.json "exports", so this file fails to run if any of these
+// paths stop being public. (It previously imported ../dist/... deep paths, which
+// "exports" enforcement blocks for consumers: the example could not be reproduced.)
+import { SmartwareCore, createDefaultConfig, knownTime, nullTime } from 'smartware';
+import { showAttributionByDefault, attributionLine, whySentence } from 'smartware/render';
+import { ClaimStore } from 'smartware/layer1';
+import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -1412,6 +1412,15 @@ export {
   statusToState,
   epistemicToTag,
   confidenceToBucket,
+  // Host-side claim persistence: a consumer that persists claims itself (rather than relying on
+  // the LLM compile path) needs to build ClaimTimeValue fields and to test whether a claim
+  // already exists for the same canonical key — otherwise re-observed evidence mints duplicates.
+  // These existed in source but were unreachable from the published package.
+  knownTime,
+  inferredTime,
+  nullTime,
+  canonicalKey,
+  compatibilityValidity,
 } from './layer1/types.js';
 export * from './layer3/semantic.js';
 export * from './layer3/semantic-store.js';
