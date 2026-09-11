@@ -3,6 +3,7 @@
 // This is derived — delete and rebuild from JSONL at any time.
 
 import Database from 'better-sqlite3';
+import { ensureColumn } from '../storage/schema.js';
 import type { Observation, EffectiveStatus } from './types.js';
 import { TERMINAL_STATES, TRANSITIONS } from './types.js';
 import { readAll } from './log.js';
@@ -46,17 +47,6 @@ CREATE TABLE IF NOT EXISTS replay_state (
   value TEXT NOT NULL
 );
 `;
-
-function hasColumn(db: Database.Database, table: string, column: string): boolean {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  return rows.some(row => row.name === column);
-}
-
-function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
-  if (!hasColumn(db, table, column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-}
 
 export class Layer0Index {
   private db: Database.Database;

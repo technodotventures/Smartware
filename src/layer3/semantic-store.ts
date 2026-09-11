@@ -1,6 +1,7 @@
 import { dirname } from 'node:path';
 
 import Database from 'better-sqlite3';
+import { ensureColumn } from '../storage/schema.js';
 
 import {
   SEMANTIC_INDEX_VERSION,
@@ -124,18 +125,6 @@ function errorMessage(error: unknown): string {
 function validIndexVersion(indexVersion: number): void {
   if (!Number.isInteger(indexVersion) || indexVersion < 1) {
     throw new Error('Semantic index version must be a positive integer');
-  }
-}
-
-function ensureColumn(
-  db: Database.Database,
-  table: string,
-  column: string,
-  definition: string,
-): void {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  if (!columns.some(candidate => candidate.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
 
