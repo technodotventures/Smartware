@@ -11,16 +11,16 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `docs/project-substrate` · **Trunk:** `main` (this branch is 6 ahead / 0 behind)
-**Version:** 0.6.3 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
+**Branch:** `docs/project-substrate` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
 
 - **Mission:** One memory for every app and agent: an open, user-owned memory protocol with provenance, bitemporal truth, policy-first retrieval, and deterministic fallback. Reference implementation in TypeScript, local-first, SQLite + JSONL + compiled Markdown.
-- **Phase:** Beta. Protocol v0.5.0 surface shipped (FORGET.SCOPE erasure/offboarding, EXPORT.SCOPE, durable compile queue, claim/hybrid retrieval, provenance rendering) as 0.6.3 on main; 0.7.x retention/expiry + consolidation work in flight on feature/retention-expiry, unmerged. Next queued work: consolidation/compaction operation, retention/expiry enforcement.
+- **Phase:** 0.7.0 release cut on release/coffee-v050-surface (PR #3, open, pending human merge). Retention + consolidation landed via #4, closing the ADR-0001 / ADR-0002 archive loop. feature/retention-expiry carries 6 further commits (owner sign-off freezing Tier-1 invariants, HQ competitive corpus entry) awaiting their own PR.
 - **Owner:** Stevie G (Techno Ventures)
-- **Next action (declared):** Land feature/retention-expiry, then implement the two queued operations: retention/expiry enforcement (t_a0d2171c) and consolidation/compaction (t_0f787dcb).
-- Declared: 2026-09-10 · source: `docs/substrate.json`
+- **Next action (declared):** Merge PR #3 (0.7.0 cut) to main, then land the project-substrate change (#6). Then open a PR for the 6 outstanding commits on feature/retention-expiry.
+- Declared: 2026-09-11 · source: `docs/substrate.json`
 
 ## Latest material change
 
@@ -49,7 +49,10 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Decisions
 
-- No ADRs in this tree yet (see `docs/adr/README.md`).
+| ADR | Title | Status | Date |
+|---|---|---|---|
+| [0001](adr/0001-retention-expiry-archival.md) | ADR-0001 — Retention, Expiry & Archival | Approved (owner sign-off 2026-09-10 — Tier-1 invariants §2.2 frozen; `staleness` block deprecated §2.4) | 2026-09-10 |
+| [0002](adr/0002-consolidation.md) | ADR-0002 — Consolidation of claim clusters | Approved (owner sign-off 2026-09-10 — Tier-1 invariant §2.2 frozen) | 2026-09-10 |
 
 ## Verification state
 
@@ -60,7 +63,7 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Health
 
-- ✅ declared block fresh (1d old)
+- ✅ declared block fresh (0d old)
 - ✅ kanban board readable (20 tasks, 780 events)
 - ✅ every completed task has a journal entry
 

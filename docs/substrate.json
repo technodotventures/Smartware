@@ -1,10 +1,10 @@
 {
   "_comment": "Declared project contract — the only hand-owned block in docs/STATUS.md. Everything a machine can derive is NOT declared here. Update declared_at when you re-validate; docs/STATUS.md flags this block STALE once it ages past stale_after_days.",
   "mission": "One memory for every app and agent: an open, user-owned memory protocol with provenance, bitemporal truth, policy-first retrieval, and deterministic fallback. Reference implementation in TypeScript, local-first, SQLite + JSONL + compiled Markdown.",
-  "phase": "Beta. Protocol v0.5.0 surface shipped (FORGET.SCOPE erasure/offboarding, EXPORT.SCOPE, durable compile queue, claim/hybrid retrieval, provenance rendering) as 0.6.3 on main; 0.7.x retention/expiry + consolidation work in flight on feature/retention-expiry, unmerged. Next queued work: consolidation/compaction operation, retention/expiry enforcement.",
+  "phase": "0.7.0 release cut on release/coffee-v050-surface (PR #3, open, pending human merge). Retention + consolidation landed via #4, closing the ADR-0001 / ADR-0002 archive loop. feature/retention-expiry carries 6 further commits (owner sign-off freezing Tier-1 invariants, HQ competitive corpus entry) awaiting their own PR.",
   "owner": "Stevie G (Techno Ventures)",
-  "next_action": "Land feature/retention-expiry, then implement the two queued operations: retention/expiry enforcement (t_a0d2171c) and consolidation/compaction (t_0f787dcb).",
-  "declared_at": "2026-09-10",
+  "next_action": "Merge PR #3 (0.7.0 cut) to main, then land the project-substrate change (#6). Then open a PR for the 6 outstanding commits on feature/retention-expiry.",
+  "declared_at": "2026-09-11",
   "stale_after_days": 21,
   "open_questions": [],
   "approvals_pending": []

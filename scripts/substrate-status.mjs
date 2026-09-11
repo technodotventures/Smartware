@@ -190,7 +190,11 @@ L.push("> This is a *projection*, not a source of truth. Every line is regenerat
 L.push("> canonical state; if it disagrees with a canonical source, this file is wrong.");
 L.push("> A fresh agent should be able to read this file alone and know where the project is.");
 L.push("");
-L.push(`**Branch:** \`${branch}\` · **Trunk:** \`${TRUNK || "none"}\`${TRUNK ? ` (this branch is ${ahead} ahead / ${behind} behind)` : ""}`);
+// NOTE: deliberately no ahead/behind count for the CURRENT branch. That number
+// changes with every commit, so the projection would invalidate itself on the very
+// commit that lands it. Divergence of *other* branches is real information and lives
+// in the In-flight table below; the current branch's position is `git log`'s job.
+L.push(`**Branch:** \`${branch}\` · **Trunk:** \`${TRUNK || "none"}\`${TRUNK && behind !== "0" ? ` (trunk has moves this tree does not — run \`git log ${TRUNK}..HEAD\` / \`git log HEAD..${TRUNK}\`)` : ""}`);
 L.push(`**Version:** ${pkg.version ?? "?"} · **Spec:** ${specFile || "none"} · **Protocol:** ${protoFile || "none"} · **Schemas:** ${schemaVersions.join(", ") || "none"}`);
 L.push("");
 L.push("## Declared (human-owned; the only non-derived block)");
