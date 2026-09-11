@@ -428,6 +428,48 @@ export function createSmartwareMcpServer(
   );
 
   server.tool(
+    'smartware_expire_retention',
+    'Retention expiry sweep (ADR-0001). Tombstones elapsed duration-policy observations in one scope and retracts their sole-evidence claims. Idempotent; host-triggered like compile. Requires a forget grant on the scope (or owner).',
+    {
+      actor_id: z.string(),
+      scope: z.string().describe('Scope id to sweep'),
+      operation_id: z.string().optional().describe('Idempotency key — retry returns the same counts'),
+      as_of: z.string().optional().describe('ISO 8601 instant to evaluate expiry against (default: now)'),
+    },
+    async args => wrap(() => core.expireRetention({
+      actor: actor(args.actor_id, 'person'),
+      scope: args.scope,
+      operation_id: args.operation_id,
+      as_of: args.as_of,
+    }), 'expire_retention'),
+  );
+
+  server.tool(
+    'smartware_consolidate',
+    'Consolidate 2+ active claims into one reviewed current-understanding claim (ADR-0002). Preserves evidence lineage; tombstones inputs. User-only.',
+    {
+      actor_id: z.string(),
+      claim_ids: z.array(z.string()).min(2).describe('2+ active claim ids to consolidate'),
+      summary: z.string().describe('Human/LLM-authored, human-reviewed consolidated text'),
+      subject_name: z.string(),
+      predicate: z.string(),
+      scope: z.string(),
+      reason: z.string().optional(),
+      operation_id: z.string(),
+    },
+    async args => wrap(() => core.consolidate({
+      actor: actor(args.actor_id, 'person'),
+      claim_ids: args.claim_ids,
+      summary: args.summary,
+      subject_name: args.subject_name,
+      predicate: args.predicate,
+      scope: args.scope,
+      reason: args.reason,
+      operation_id: args.operation_id,
+    }), 'consolidate'),
+  );
+
+  server.tool(
     'smartware_quarantine_review',
     'Approve or reject quarantined evidence',
     {

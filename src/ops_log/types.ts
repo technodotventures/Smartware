@@ -15,6 +15,8 @@ export type OpType =
   | 'revive'
   | 'forget'
   | 'forget.scope'
+  | 'retention.expire'
+  | 'consolidate'
   | 'session.start'
   | 'session.end'
   | 'watch.subscribe'

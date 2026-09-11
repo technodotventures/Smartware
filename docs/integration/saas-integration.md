@@ -364,6 +364,22 @@ on the exact version you ship:
 
 ---
 
+## 11. Retention lifecycle + consolidation (post-0.7.0)
+
+Two host-triggered lifecycle surfaces, both owner/staff-gated and receipt-backed
+(see `docs/adr/0001-retention-expiry-archival.md` and `docs/adr/0002-consolidation.md`):
+
+- **Retention expiry** — `memory.expireRetention({ actor, scope, operation_id?, as_of? })`
+  (MCP `smartware_expire_retention`). Optional `retention` config (additive; absent ⇒
+  `forever`, today's behavior). Tombstones elapsed `duration`-policy observations and
+  retracts their sole-evidence claims, with one `retention.expire` ops entry. Idempotent;
+  run it on a host scheduler (like `drainCompileQueue`). Physical storage reclaim is
+  `forgetScope({ reason: 'erasure' })` — there is no separate record-level purge.
+- **Consolidation** — `memory.consolidate({ actor, claim_ids[], summary, subject_name,
+  predicate, scope, operation_id })` (MCP `smartware_consolidate`, user-only). Collapses
+  2+ active claims into one reviewed current-understanding claim whose `derived_from` is
+  a superset of the inputs' evidence lineage; inputs are tombstoned, never deleted.
+
 ## References
 
 - Specification v1.6.16: `docs/spec/smartware-spec-v1.6.16.md`
