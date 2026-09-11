@@ -35,7 +35,6 @@
 | `feature/retention-expiry` | 14 | 2026-09-11 | adr: owner sign-off — freeze Tier-1 invariants (retention + consolidation) |
 | `release/coffee-v050-surface` | 8 | 2026-09-10 | release: 0.7.0 — v0.5.0 protocol surface cut on the upstream Node 22/24 gate |
 | `agent/hermes-onboarding` | 3 | 2026-08-25 | [verified] docs: name complete retrieval CI gate |
-| `agent/v0.5.0-surface` | 2 | 2026-09-11 | Merge remote-tracking branch 'origin/main' into agent/v0.5.0-surface |
 
 Unmerged work — read the branch before assuming this tree is current.
 
