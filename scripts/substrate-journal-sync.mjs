@@ -24,6 +24,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -62,6 +63,19 @@ const tasks = all(
 
 const iso = (epoch) => new Date(epoch * 1000).toISOString();
 const yamlStr = (s) => JSON.stringify(String(s ?? ""));
+
+// Journal entries are committed to public repositories. Absolute local paths leak
+// the host layout without adding meaning, so normalise them at generation time:
+// the repo root becomes <repo>/ and the Hermes data dir becomes <data>/.
+// (ADR 0003 rule 6 — journal content is publishable content.)
+const sanitize = (text) => {
+  if (!text) return "";
+  return String(text)
+    .split(ROOT).join("<repo>")
+    .replace(/\/opt\/data\/dev-workspaces\/repos\/([A-Za-z0-9._-]+)/g, "<checkout>/$1")
+    .replace(/\/opt\/data\/dev-workspaces\/[A-Za-z0-9._-]+/g, "<data>/dev-workspaces/<ws>")
+    .split(`${homedir()}`).join("<data>");
+};
 
 function completion(taskId) {
   const ev = all(
@@ -114,34 +128,34 @@ for (const t of tasks) {
   L.push(`created: ${iso(t.created_at)}`);
   L.push(`assignee: ${yamlStr(t.assignee || "unassigned")}`);
   L.push(`created_by: ${yamlStr(t.created_by || "")}`);
-  L.push(`artifacts: ${JSON.stringify(artifacts)}`);
+  L.push(`artifacts: ${JSON.stringify(artifacts.map(sanitize))}`);
   L.push("---");
   L.push("");
-  L.push(`# ${t.title}`);
+  L.push(`# ${sanitize(t.title)}`);
   L.push("");
   L.push("## Intent");
   L.push("");
   if (t.body && t.body.trim()) {
-    L.push(t.body.trim().split("\n").map((l) => (l.trim() ? l : "")).join("\n"));
+    L.push(sanitize(t.body.trim()).split("\n").map((l) => (l.trim() ? l : "")).join("\n"));
   } else {
     L.push("_(no task body recorded)_");
   }
   L.push("");
   L.push("## Resulting state");
   L.push("");
-  L.push(summary ? summary.trim() : "_(no completion summary recorded on the board)_");
+  L.push(summary ? sanitize(summary).trim() : "_(no completion summary recorded on the board)_");
   L.push("");
   if (artifacts.length) {
     L.push("**Artifacts recorded:**");
     L.push("");
-    for (const a of artifacts) L.push(`- \`${a}\``);
+    for (const a of artifacts) L.push(`- \`${sanitize(a)}\``);
     L.push("");
   }
   if (comments.length) {
     L.push("## Recorded notes");
     L.push("");
     for (const c of comments) {
-      L.push(`- **${c.author}** (${iso(c.created_at).slice(0, 16).replace("T", " ")}Z): ${String(c.body).trim().replace(/\n+/g, " ").slice(0, 400)}`);
+      L.push(`- **${c.author}** (${iso(c.created_at).slice(0, 16).replace("T", " ")}Z): ${sanitize(String(c.body).trim().replace(/\n+/g, " ").slice(0, 400))}`);
     }
     L.push("");
   }
