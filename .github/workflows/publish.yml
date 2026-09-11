@@ -1,0 +1,47 @@
+name: publish
+
+# Publishes the package when a version tag is pushed. Deliberately tag-triggered: the tag, the
+# published artifact, and the release identity in docs/conformance-status.md must be one object,
+# which is exactly how 0.6.3 drifted away from the documented surface.
+#
+# Requires a trusted publisher configured for this repository on npmjs.com (OIDC — no token
+# secret is stored here). Until that exists, `npm publish` will fail and publish nothing.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write   # OIDC for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - run: npm ci
+
+      # Never publish something that has not passed the gate this repo already trusts.
+      - run: npm run build
+      - run: npm run verify:schemas
+      - run: npm run verify:saas
+
+      - name: Publish with provenance
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          if [ "$VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
+            exit 1
+          fi
+          npm publish --provenance --access public
