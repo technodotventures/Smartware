@@ -77,6 +77,27 @@ const sanitize = (text) => {
     .split(`${homedir()}`).join("<data>");
 };
 
+// Task bodies are internal design briefs. Keep a bounded excerpt (owner decision
+// 2026-09-11) so the entry still carries intent without republishing the whole
+// contract, acceptance criteria and internal product detail.
+const EXCERPT_LINES = 15;
+const EXCERPT_CHARS = 1800;
+const excerpt = (text, taskId) => {
+  const clean = sanitize(String(text || "").trim());
+  if (!clean) return "";
+  const lines = clean.split("\n").map((l) => l.trim()).filter(Boolean);
+  let out = lines.slice(0, EXCERPT_LINES).join("\n");
+  let truncated = lines.length > EXCERPT_LINES;
+  if (out.length > EXCERPT_CHARS) {
+    out = out.slice(0, EXCERPT_CHARS).replace(/\s+\S*$/, "");
+    truncated = true;
+  }
+  if (truncated) {
+    out += `\n\n_(excerpt — first ${EXCERPT_LINES} lines. Full brief lives in the canonical board record: task \`${taskId}\`.)_`;
+  }
+  return out;
+};
+
 function completion(taskId) {
   const ev = all(
     "select payload from task_events where task_id = ? and kind = 'completed' order by id desc limit 1",
@@ -136,7 +157,7 @@ for (const t of tasks) {
   L.push("## Intent");
   L.push("");
   if (t.body && t.body.trim()) {
-    L.push(sanitize(t.body.trim()).split("\n").map((l) => (l.trim() ? l : "")).join("\n"));
+    L.push(excerpt(t.body, t.id));
   } else {
     L.push("_(no task body recorded)_");
   }

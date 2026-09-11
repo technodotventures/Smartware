@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `docs/project-substrate` · **Trunk:** `main` (this branch is 2 ahead / 0 behind)
+**Branch:** `docs/project-substrate` · **Trunk:** `main` (this branch is 6 ahead / 0 behind)
 **Version:** 0.6.3 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -32,9 +32,10 @@
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
-| `feature/retention-expiry` | 13 | 2026-09-11 | docs: HQ for Work competitive corpus entry (hqforwork.com vs Coffee+Smartware) |
+| `feature/retention-expiry` | 14 | 2026-09-11 | adr: owner sign-off — freeze Tier-1 invariants (retention + consolidation) |
 | `release/coffee-v050-surface` | 8 | 2026-09-10 | release: 0.7.0 — v0.5.0 protocol surface cut on the upstream Node 22/24 gate |
 | `agent/hermes-onboarding` | 3 | 2026-08-25 | [verified] docs: name complete retrieval CI gate |
+| `agent/v0.5.0-surface` | 2 | 2026-09-11 | Merge remote-tracking branch 'origin/main' into agent/v0.5.0-surface |
 
 Unmerged work — read the branch before assuming this tree is current.
 
