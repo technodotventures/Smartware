@@ -7,7 +7,7 @@ app and agent" substrate — the same shape as a company brain from GBrain /
 mem0, but with provenance, bitemporal truth, policy-first retrieval, and
 deletion semantics the product promises.
 
-**Audience:** a SaaS backend engineer integrating Smartware v0.6.x (protocol
+**Audience:** a SaaS backend engineer integrating Smartware 0.7.0 (protocol
 v0.5.0, specification v1.6.16, schemas v0.5.0).
 
 ---
