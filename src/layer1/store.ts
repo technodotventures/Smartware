@@ -1,6 +1,7 @@
 // Layer 1 — SQLite Claim Store
 
 import Database from 'better-sqlite3';
+import { ensureColumn, hasColumn } from '../storage/schema.js';
 import type {
   Claim,
   ClaimAuthor,
@@ -116,17 +117,6 @@ CREATE INDEX IF NOT EXISTS idx_rel_source ON claim_relations(source_claim_id);
 CREATE INDEX IF NOT EXISTS idx_rel_target ON claim_relations(target_claim_id);
 CREATE INDEX IF NOT EXISTS idx_rel_kind ON claim_relations(kind);
 `;
-
-function hasColumn(db: Database.Database, table: string, column: string): boolean {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  return rows.some(row => row.name === column);
-}
-
-function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
-  if (!hasColumn(db, table, column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-}
 
 function serialiseTime(value: ClaimTimeValue): [string | null, string, string | null] {
   return [value.value, value.state, value.basis ?? null];
