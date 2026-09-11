@@ -1,9 +1,10 @@
 # Identifier and scope compatibility
 
-The v0.4.2 JSON Schemas define the canonical wire conventions:
+The v0.5.0 JSON Schemas define the canonical wire conventions:
 
 - actors: `user:…`, `agent:…`, `sidecar:…`, or `substrate:…`;
-- scopes: `self`, `workspace`, `project:…`, or `agent:…`;
+- scopes: `self`, `workspace`, `project:…`, `agent:…`, or the Coffee tenant
+  boundary scopes `client:<id>` / `client:<id>#n` (non-reusable markers);
 - observations: `obs_<content-hash>`.
 
 New standalone Smartware instances use those conventions. The embedded Core

@@ -1,0 +1,61 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.0/forget-scope-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FORGET.SCOPE Request",
+  "description": "Scope erasure / offboarding request (protocol v0.5.0, spec \u00a710). Owner-only: FORGET.SCOPE is an owner decision and is NEVER a staff capability (\u00a710b.2). Targets client scopes only \u2014 self/workspace are pod-internal and rejected by the handler.",
+  "type": "object",
+  "required": [
+    "scope",
+    "reason",
+    "operation_id",
+    "actor_id"
+  ],
+  "properties": {
+    "scope": {
+      "$ref": "common.schema.json#/$defs/Scope",
+      "description": "The client scope boundary, e.g. `client:acme#1`. Scope ids are non-reusable versioned markers: `#1` is permanently retired on erasure (\u00a710b.1)."
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "erasure",
+        "offboarding"
+      ],
+      "description": "reason DETERMINES behavior: erasure = physical content purge across every lane (L0/L1/L2/L3 + vector + compile queue + fingerprint) with zero-result conformance; offboarding = tombstone + grant revoke, auditably REVIVE-able, scope entry retained."
+    },
+    "operation_id": {
+      "$ref": "common.schema.json#/$defs/OperationId"
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId",
+      "description": "Owner actor (`user:<slug>` per spec \u00a710b.1). The handler requires the requesting actor to BE the config owner; staff never invoke this operation."
+    },
+    "owner_pointer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional owner-approved NON-PII pointer (e.g. \"client since 2023, 4 jobs, no disputes\") carried into the next `client:<id>#n` marker. Valid ONLY for reason=offboarding \u2014 an audited choice, never a silent resurrection."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "reason": {
+            "const": "erasure"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "owner_pointer"
+          ]
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

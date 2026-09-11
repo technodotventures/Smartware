@@ -61,14 +61,16 @@ Smartware `0.6.x` is beta software.
 
 - The normative baseline is
   [Specification v1.6.16](docs/spec/smartware-spec-v1.6.16.md),
-  [Protocol v0.4.2](docs/protocol/smartware-protocol-v0.4.2.md), and
-  Schemas v0.4.2.
+  [Protocol v0.5.0](docs/protocol/smartware-protocol-v0.5.0.md), and
+  Schemas v0.5.0. Protocol v0.4.2 and schemas v0.4.2 are retained and remain
+  valid for five-verb conformance claims (migration note, not a break — see the
+  v0.5.0 contract change history).
 - Claim-granular SQLite FTS5 is the canonical production retrieval path.
 - Semantic and hybrid retrieval are opt-in protocol capabilities.
 - The deterministic retrieval kernel passes 9/9 scenarios with Hit@1 `1.0`,
   MRR `1.0`, and zero forbidden hits.
-- The standalone protocol and implementation suite passes 316 tests across
-  48 files with no skips.
+- The standalone protocol and implementation suite passes 446 tests across
+  64 files with no skips.
 - Semantic activation remains fail-closed until sealed held-out evaluation
   passes the configured quality, safety, latency, and cost gates.
 - The production dependency audit reports zero vulnerabilities.
@@ -107,8 +109,9 @@ MCP and embedded-core consumers
 The protocol remains the authority. Pod, Coffee, and other hosts may supply
 model credentials, embedding adapters, and index persistence, but they do not
 redefine claim eligibility, temporal meaning, provenance, or activation rules.
-New standalone instances use the v0.4.2 actor and scope conventions; existing
-Pod-style IDs remain supported through the documented
+New standalone instances use the v0.5.0 actor and scope conventions (including
+client tenant scopes `client:<id>` / `client:<id>#n`); existing Pod-style IDs
+remain supported through the documented
 [compatibility profile](docs/compatibility.md).
 
 ## Ecosystem
@@ -124,6 +127,29 @@ Pod-style IDs remain supported through the documented
 
 The companion repositories are linked here as separate components. Their
 visibility and release readiness are managed independently from the protocol.
+
+## Integrate Smartware into any SaaS
+
+Smartware is deployable as an embeddable memory substrate. A SaaS host (Coffee,
+Pod, or any other) provisions one Smartware Pod per tenant and speaks to it
+through the published surface:
+
+- `import { SmartwareCore } from 'smartware'` — in-process memory engine
+  (`observe`, `recall`, `reflect`, `revise`, `forget`, `forget_scope`,
+  `export_scope`, `grant`, `revoke`, `session_*`, `status`).
+- `import { createSmartwareMcpServer } from 'smartware/mcp'` — transport-agnostic
+  MCP adapter with every tool, including the owner-only Coffee operations
+  `smartware_forget_scope` and `smartware_export_scope`.
+- `import { showAttributionByDefault, attributionLine, badge, whySentence } from 'smartware/render'`
+  — the staff-facing provenance renderer (spec §10d). Coffee must render
+  attribution through it.
+- Frozen schema sets under `schemas/v0.4.2/` and `schemas/v0.5.0/`.
+- The Coffee tenant config shape (`docs/competitive/coffee-tenant-config.example.json`)
+  and its executable proof (`scripts/verify-config-shape.mjs`).
+
+Read the full walk-through at
+[docs/integration/saas-integration.md](docs/integration/saas-integration.md).
+Run the end-to-end proof with `npm run verify:saas`.
 
 ## Install
 

@@ -45,6 +45,12 @@ export interface CompileOptions {
   scope?: string;
   entityId?: string;
   useLLM?: boolean;
+  /**
+   * §11.2b re-scope: observations already parsed by the caller (reflect
+   * production). Without it, compile() re-reads the whole evidence JSONL in
+   * gather — measured ~2s of the 50k pipeline. Defaults to a fresh read.
+   */
+  observations?: Observation[];
 }
 
 export interface CompileResult {
@@ -73,12 +79,18 @@ export async function compile(
 
   // ── Stage 1: GATHER ──────────────────────────────────────────────────────
   const stageGatherStart = Date.now();
-  // Reload raw observations for the target scope
+  // Reload raw observations for the target scope — callers that already
+  // parsed the log (reflect production) pass them to avoid a second full
+  // JSONL parse (§11.2b re-scope). Iterate a source array and collect into a
+  // separate output list (never mutate the array under iteration).
+  const sourceObservations: Observation[] = options.observations ?? [...readAll(evidenceDir)];
   const observations: Observation[] = [];
+  // §11.2b: one-query status snapshot replaces 50k per-obs SELECTs.
+  const statusMap = layer0.getEffectiveStatusMap();
   let gatherCount = 0;
-  for (const obs of readAll(evidenceDir)) {
+  for (const obs of sourceObservations) {
     if (options.scope && obs.scope !== options.scope) continue;
-    const effectiveStatus = layer0.getEffectiveStatus(obs.id);
+    const effectiveStatus = statusMap.get(obs.id) ?? obs.status;
     if (effectiveStatus !== 'accepted') continue;
     observations.push(obs);
     if (++gatherCount % 100 === 0) await new Promise(r => setImmediate(r));
@@ -123,7 +135,7 @@ export async function compile(
   // ── Stage 3 & 4: RECONCILE + TAG (via replay) ───────────────────────────
   const stageReconcileStart = Date.now();
   resetEntityTelemetry();
-  await replayCatchUp(evidenceDir, store, layer0, config);
+  await replayCatchUp(evidenceDir, store, layer0, config, sourceObservations, statusMap);
   stageDurations['reconcile'] = Date.now() - stageReconcileStart;
 
   // ── Stage 4.5: SEARCH INDEX (L3 from L1 — decoupled from L2) ──────────

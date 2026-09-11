@@ -1,0 +1,118 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.0/page-frontmatter.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Page Frontmatter",
+  "type": "object",
+  "required": [
+    "title",
+    "page_id",
+    "category",
+    "author",
+    "sources",
+    "supporting_claims",
+    "created",
+    "updated",
+    "scope",
+    "confidence",
+    "epistemic_tag",
+    "summary"
+  ],
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "page_id": {
+      "$ref": "common.schema.json#/$defs/PageId"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "concept",
+        "entity",
+        "decision",
+        "synthesis"
+      ]
+    },
+    "author": {
+      "$ref": "common.schema.json#/$defs/Author"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/ClaimId"
+      }
+    },
+    "supporting_claims": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/ClaimId"
+      }
+    },
+    "created": {
+      "type": "string",
+      "format": "date"
+    },
+    "updated": {
+      "type": "string",
+      "format": "date"
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/Scope"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Tag"
+      }
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "confidence": {
+      "$ref": "common.schema.json#/$defs/ConfidenceBucket"
+    },
+    "epistemic_tag": {
+      "$ref": "common.schema.json#/$defs/EpistemicTag"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "notices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "message"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "retracted_reference",
+              "contradiction",
+              "staleness",
+              "guardian_alert"
+            ]
+          },
+          "claim_id": {
+            "$ref": "common.schema.json#/$defs/ClaimId"
+          },
+          "tombstone_id": {
+            "$ref": "common.schema.json#/$defs/TombstoneId"
+          },
+          "message": {
+            "type": "string"
+          },
+          "posted_at": {
+            "$ref": "common.schema.json#/$defs/Iso8601"
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

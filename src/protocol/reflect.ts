@@ -7,7 +7,7 @@
 //     Does NOT admit epistemic relations or elevate confidence/tag.
 //   - Explicit review/commit: rides REVISE in beta (§9).
 
-import { ulid } from 'ulid';
+import { dirname } from 'node:path';
 
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
@@ -16,12 +16,13 @@ import type { SmartwareConfig } from '../config.js';
 import type { Actor, PreExtractedClaim } from '../layer0/types.js';
 import type { ClaimRole, ClaimType, EpistemicLabel } from '../layer1/types.js';
 import { compile, isContextOnlyObservation, type CompileResult, type CompileOptions } from '../layer2/compiler.js';
+import { syncSearchFromClaims } from '../layer3/search.js';
 import type { CompileTelemetry } from '../layer2/types.js';
 import { writeManifest, countWikiPages } from '../layer2/manifest.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { isOwner } from '../auth/grants.js';
 import {
-  appendClaimVersion,
+  appendClaimVersions,
   readLatestVersion,
   iterAllClaimVersions,
   type ActiveClaimVersion,
@@ -32,15 +33,22 @@ import { extractDeterministic } from '../extraction/deterministic.js';
 import { extractClaimsLLM } from '../extraction/llm.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import {
+  appendOpLogEntries,
   appendOpLogEntry,
+  defaultOpsIndexPath,
+  openOpsIndex,
   OPERATION_ID_PATTERN,
-  persistOperationIntent,
   readAllOpLogEntries,
-  removeOperationIntent,
   type CommitContext,
   type OpLogEntry,
-  type ReflectClaimOperationIntent,
+  type OpsIndex,
 } from '../ops_log/index.js';
+import {
+  defaultFingerprintIndexPath,
+  openFingerprintIndex,
+  type FingerprintIndex,
+} from '../compile_queue/fingerprint.js';
+import { nextClaimId, nextOperationId } from '../compile_queue/ids.js';
 import {
   isSessionCheckpointContent,
   renderSessionCheckpoint,
@@ -53,6 +61,13 @@ export interface CompileParams {
   entity_id?: string;
   use_llm?: boolean;
   operation_id?: string;
+  /**
+   * §11.2b re-scope: defer L2 wiki synthesis out of the synchronous handler.
+   * When true, handleCompile runs claim production + L1/L3/freshness +
+   * manifest and returns pages_compiled: 0 with telemetry.synthesis_deferred:
+   * true; the L2 synthesis stage is run separately (compile queue worker).
+   */
+  defer_synthesis?: boolean;
 }
 
 export interface CompileHandlerResult {
@@ -64,7 +79,7 @@ export interface CompileHandlerResult {
 }
 
 export interface ReflectCommitHooks {
-  afterIntent?: (intent: ReflectClaimOperationIntent) => void;
+  afterIntent?: (intent: import('../ops_log/intent.js').ReflectClaimOperationIntent) => void;
   afterClaimVersion?: (record: ActiveClaimVersion) => void;
   afterCommit?: () => void;
 }
@@ -158,12 +173,25 @@ export function isReflectAutoTerminalReceipt(
     );
 }
 
-function commitReflectClaim(
-  dataDir: string,
-  record: ActiveClaimVersion,
-  commitCtx: CommitContext,
-  hooks?: ReflectCommitHooks,
-): void {
+// ── Batched claim commit (spec §11.2 binding) ────────────────────────────────
+//
+// The old path committed each claim version with its own intent file, L1
+// append, and ops append — four fsyncs per claim, which scaled to
+// 9,468,298ms @50k (189ms/claim, O(N²) with the scan-based dedup). The
+// compile path now:
+//   1. dedups through the derived fingerprint index (O(1) per claim);
+//   2. flushes all L1 version appends in one fsync per month file;
+//   3. flushes all ops entries in one fsync per UTC day file.
+// Crash durability is carried by the durable compile queue (a job left
+// 'running' after a crash is reset and re-processed; the fingerprint dedup
+// makes re-processing idempotent) and by recovery's existing stance for
+// reflect.auto: an unprepared claim with no artifact is safe to recompute
+// (recovery.ts aborts such intents). Per-claim reflect intents are therefore
+// not written on this path; the per-claim ops entry (payload_hash + claim_id
+// + record_hash + fingerprint) is preserved for provenance consumers.
+
+/** Per-claim ops-log entry for one committed reflect.auto version. */
+export function buildReflectClaimOpEntry(record: ActiveClaimVersion): OpLogEntry {
   const recordHash = computePayloadHash(record);
   const payloadHash = computePayloadHash({
     claim_id: record.claim_id,
@@ -171,27 +199,7 @@ function commitReflectClaim(
     fingerprint: record.fingerprint,
     derived_from: record.derived_from,
   });
-  const intent: ReflectClaimOperationIntent = {
-    version: 1,
-    operation_id: record.operation_id,
-    actor_id: record.actor_id,
-    op: 'reflect.auto',
-    payload_hash: payloadHash,
-    prepared_at: record.version_at,
-    expected: {
-      surface: 'l1',
-      claim_id: record.claim_id,
-      version: record.version,
-      record_hash: recordHash,
-    },
-    result: { claim_id: record.claim_id, version: record.version, status: 'reflected' },
-    details: { claim_id: record.claim_id, fingerprint: record.fingerprint },
-  };
-  persistOperationIntent(commitCtx.opsDir, intent);
-  hooks?.afterIntent?.(intent);
-  appendClaimVersion(dataDir, record);
-  hooks?.afterClaimVersion?.(record);
-  appendOpLogEntry(commitCtx.opsDir, {
+  return {
     operation_id: record.operation_id,
     actor_id: record.actor_id,
     timestamp: record.version_at,
@@ -203,9 +211,228 @@ function commitReflectClaim(
       fingerprint: record.fingerprint,
       record_hash: recordHash,
     },
-  });
-  hooks?.afterCommit?.();
-  removeOperationIntent(commitCtx.opsDir, record.operation_id);
+  };
+}
+
+/**
+ * Commit a batch of claim versions with one filesystem append per month file
+ * (L1) and per UTC day file (ops) — the batched-appends binding of §11.2.
+ * `opEntries` runs before the receipt entries in canonical order.
+ */
+export function commitReflectClaimBatch(
+  dataDir: string,
+  records: ActiveClaimVersion[],
+  opEntries: OpLogEntry[],
+  commitCtx: CommitContext | undefined,
+  hooks?: ReflectCommitHooks,
+): void {
+  if (records.length > 0) appendClaimVersions(dataDir, records);
+  if (commitCtx && opEntries.length > 0) appendOpLogEntries(commitCtx.opsDir, opEntries);
+  for (const record of records) hooks?.afterClaimVersion?.(record);
+  if (records.length > 0 || opEntries.length > 0) hooks?.afterCommit?.();
+}
+
+/** One record produced for an observation, flagged new vs. extension. */
+export interface ProducedClaim {
+  record: ActiveClaimVersion;
+  isNew: boolean;
+}
+
+/** Result of producing claim versions for a single raw observation. */
+export interface ObservationProduction {
+  outcome: ReflectAutoTerminalOutcome;
+  candidates_found: number;
+  records: ProducedClaim[];
+  llm_tried: boolean;
+  llm_failed: boolean;
+  llm_skippedsensitive: boolean;
+}
+
+/** Shared extraction context for one observation (single commit timestamp). */
+export interface ProduceObservationContext {
+  dataDir: string;
+  store: ClaimStore;
+  config: SmartwareConfig;
+  useLLM: boolean;
+  podActorId: string;
+  /** One timestamp per run — the A0 single-commit-timestamp discipline. */
+  commitTs: string;
+  entityHints?: Map<string, { name: string; type: string; predicate?: string; sensitive?: boolean }>;
+  /** O(1) fingerprint dedup (spec §11.2). Falls back to JSONL/store scans. */
+  fingerprintIndex?: FingerprintIndex;
+}
+
+/**
+ * Extract claim versions from one raw observation without committing them.
+ * Shared by the synchronous REFLECT handler and the background compile queue
+ * so both paths produce identical claim records, receipts, and dedup
+ * decisions. Returns records in commit order; new claims carry `isNew: true`.
+ * Never throws on per-observation extraction issues — outcome 'no_claims'
+ * or LLM degradation is recorded, not raised.
+ */
+export async function produceObservationClaims(
+  obs: import('../layer0/types.js').Observation,
+  bodyText: string,
+  ctx: ProduceObservationContext,
+): Promise<ObservationProduction> {
+  const subjectName = obs.scope.split('/').pop() ?? obs.scope;
+  let detClaims: ReflectionCandidate[];
+  let extractedEntities: Array<{ name: string; type: string }>;
+  if (isSessionCheckpointContent(obs.content.body)) {
+    try {
+      const checkpoint = validateSessionCheckpoint(obs.content.body);
+      if (checkpoint.scope !== obs.scope) {
+        throw new Error('checkpoint scope does not match observation scope');
+      }
+      detClaims = [{
+        subject_name: checkpoint.session_id,
+        subject_type: 'session',
+        predicate: `checkpoint:${checkpoint.trigger}`,
+        object: { type: 'any', value: checkpoint },
+        scope: checkpoint.scope,
+        t_valid_from: { value: obs.source.observed_at, state: 'known' },
+        t_valid_to: { value: null, state: 'null' },
+        epistemic: 'system_generated',
+        confidence: 0.5,
+        sensitive: obs.policy.sensitive,
+        extraction: {
+          method: 'deterministic',
+          model: null,
+          compiler_version: 'session-checkpoint-v1',
+          prompt_hash: null,
+        },
+        claim_type: 'checkpoint',
+        claim_role: 'checkpoint',
+        rendered_content: renderSessionCheckpoint(checkpoint),
+      }];
+      extractedEntities = [{ name: checkpoint.session_id, type: 'session' }];
+    } catch {
+      return { outcome: 'no_claims', candidates_found: 0, records: [], llm_tried: false, llm_failed: false, llm_skippedsensitive: false };
+    }
+  } else {
+    const extracted = extractDeterministic(
+      bodyText, obs.scope, subjectName, obs.source.observed_at,
+    );
+    detClaims = extracted.claims;
+    extractedEntities = extracted.entities;
+  }
+
+  let llmClaims: ReflectionCandidate[] = [];
+  let llm_tried = false;
+  let llm_failed = false;
+  let llm_skippedsensitive = false;
+  if (!isSessionCheckpointContent(obs.content.body) && ctx.useLLM && ctx.config.llm.provider !== 'none') {
+    if (obs.policy.sensitive) {
+      llm_skippedsensitive = true;
+    } else {
+      llm_tried = true;
+      try {
+        const llmResult = await extractClaimsLLM(
+          bodyText, obs.scope, obs.source.observed_at,
+          ctx.store.getAllEntities(obs.scope), ctx.config,
+        );
+        llmClaims = llmResult.claims;
+      } catch {
+        llm_failed = true;
+        // Deterministic extraction remains available; telemetry records degradation.
+      }
+    }
+  }
+
+  const allClaims = [...detClaims, ...llmClaims];
+  const records: ProducedClaim[] = [];
+
+  for (const claim of allClaims) {
+    const content = claim.rendered_content ?? (typeof claim.object.value === 'string'
+      ? claim.object.value
+      : JSON.stringify(claim.object.value));
+    const claimType = claim.claim_type ?? 'hypothesis';
+    const claimRole = claim.claim_role ?? 'memory';
+    const fp = computeStructuredClaimFingerprint(
+      claim.subject_name,
+      claim.predicate,
+      claim.object,
+      obs.scope,
+      claimType,
+    );
+    const extractedEntity = extractedEntities.find(e => e.name === claim.subject_name);
+    const entityInfo = {
+      name: claim.subject_name,
+      type: claim.subject_type ?? extractedEntity?.type ?? 'concept',
+    };
+    const sensitive = obs.policy.sensitive || claim.sensitive;
+
+    const existingByFp = ctx.fingerprintIndex
+      ? ctx.fingerprintIndex.activeByFingerprint(fp)
+      : findByFingerprint(ctx.dataDir, fp)
+        ?? findSemanticMatch(ctx.dataDir, ctx.store, fp);
+    if (existingByFp) {
+      if (existingByFp.epistemic_owner === 'user') continue;
+      const existingClaim = ctx.store.getClaim(existingByFp.claim_id);
+      const existingEntity = existingClaim ? ctx.store.getEntity(existingClaim.subject_id) : undefined;
+      const existingHint = ctx.entityHints?.get(existingByFp.claim_id);
+      ctx.entityHints?.set(existingByFp.claim_id, {
+        name: existingClaim?.subject_name ?? existingHint?.name ?? entityInfo.name,
+        type: existingEntity?.type ?? existingHint?.type ?? entityInfo.type,
+        predicate: existingClaim?.predicate ?? existingHint?.predicate ?? claim.predicate,
+        sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
+      });
+      if (!existingByFp.derived_from.includes(obs.id)) {
+        const extended: ActiveClaimVersion = {
+          ...existingByFp,
+          version: existingByFp.version + 1,
+          derived_from: [...existingByFp.derived_from, obs.id],
+          version_at: ctx.commitTs,
+          operation_id: nextOperationId(),
+          actor_id: ctx.podActorId,
+          supersedes: existingByFp.version,
+        };
+        ctx.fingerprintIndex?.upsertVersion(extended);
+        records.push({ record: extended, isNew: false });
+      }
+      continue;
+    }
+
+    const record: ActiveClaimVersion = {
+      claim_id: nextClaimId(),
+      version: 1,
+      state: 'active',
+      content,
+      claim_type: claimType,
+      claim_role: claimRole,
+      author: 'agent',
+      epistemic_owner: 'agent',
+      fingerprint: fp,
+      confidence: 'low',
+      epistemic_tag: 'inference',
+      scope: obs.scope,
+      derived_from: [obs.id],
+      relations: [],
+      created_at: ctx.commitTs,
+      version_at: ctx.commitTs,
+      operation_id: nextOperationId(),
+      actor_id: ctx.podActorId,
+      tags: [],
+      semantic: materializeSemantic(claim, entityInfo.type, ctx.commitTs, sensitive),
+    };
+    ctx.fingerprintIndex?.upsertVersion(record);
+    records.push({ record, isNew: true });
+    ctx.entityHints?.set(record.claim_id, {
+      name: entityInfo.name,
+      type: entityInfo.type,
+      predicate: claim.predicate,
+      sensitive,
+    });
+  }
+
+  return {
+    outcome: allClaims.length === 0 ? 'no_claims' : 'claims_processed',
+    candidates_found: allClaims.length,
+    records,
+    llm_tried,
+    llm_failed,
+    llm_skippedsensitive,
+  };
 }
 
 export async function handleCompile(
@@ -241,9 +468,26 @@ export async function handleCompile(
     entity_id: params.entity_id ?? null,
     use_llm: params.use_llm ?? false,
   });
+  // Intent matching via the derived SQLite ops index (spec §7 landmine):
+  // resolve the parent entry by PK instead of a full JSONL scan per compile.
+  // Falls back to the canonical scan only when the index cannot be opened.
+  let opsIndex: OpsIndex | null = null;
+  if (commitCtx) {
+    try {
+      opsIndex = openOpsIndex(
+        commitCtx.opsDir,
+        defaultOpsIndexPath(dataDir ?? dirname(commitCtx.opsDir)),
+      );
+    } catch {
+      // Derived index unavailable (e.g. read-only pod) — slow path, still correct.
+      opsIndex = null;
+    }
+  }
   const parentEntry = params.operation_id && commitCtx
-    ? [...readAllOpLogEntries(commitCtx.opsDir)]
-      .find(entry => entry.operation_id === params.operation_id)
+    ? (opsIndex
+      ? opsIndex.getByOperationId(params.operation_id) ?? undefined
+      : [...readAllOpLogEntries(commitCtx.opsDir)]
+        .find(entry => entry.operation_id === params.operation_id))
     : undefined;
   if (parentEntry && (parentEntry.op !== 'reflect.explicit'
     || parentEntry.actor_id !== params.actor.id
@@ -258,30 +502,142 @@ export async function handleCompile(
     llmSkippedSensitive: 0,
   };
   const entityHints = new Map<string, { name: string; type: string; predicate?: string; sensitive?: boolean }>();
+  /** One evidence parse for the whole pipeline (§11.2b re-scope) — set when
+   *  dataDir is present; compile/replay reuse it instead of re-reading. */
+  let observations: import('../layer0/types.js').Observation[] | undefined;
 
   if (dataDir) {
-    reflectionStats = await reflectAutoCreateClaims(
-      evidenceDir,
-      dataDir,
-      layer0,
-      store,
-      targetScope,
-      config,
-      params.use_llm === true,
-      commitCtx,
-      entityHints,
-      commitHooks,
-    );
-    for (const v of iterAllClaimVersions(dataDir)) {
-      store.syncFromJsonlVersion(v, entityHints.get(v.claim_id));
+    // O(1) fingerprint dedup (spec §11.2): the derived index replaces the
+    // per-claim JSONL/store scans that made compile O(N²). Regenerable from
+    // the canonical L1 JSONL, so open-failure degrades to the scan path.
+    let fingerprintIndex: FingerprintIndex | null = null;
+    try {
+      fingerprintIndex = openFingerprintIndex(dataDir, defaultFingerprintIndexPath(dataDir));
+    } catch {
+      fingerprintIndex = null;
     }
+    // One evidence parse for the whole pipeline (spec §11.2b re-scope):
+    // reflect production, L2 gather and reconcile each used to re-read the
+    // full JSONL — ~8% of the timed pipeline at 50k.
+    observations = [...readAll(evidenceDir)];
+    try {
+      reflectionStats = await reflectAutoCreateClaims(
+        evidenceDir,
+        dataDir,
+        layer0,
+        store,
+        targetScope,
+        config,
+        params.use_llm === true,
+        commitCtx,
+        entityHints,
+        commitHooks,
+        opsIndex ?? undefined,
+        fingerprintIndex ?? undefined,
+        observations,
+      );
+      // Sync only what this run committed into the L1 JSONL — the store is a
+      // latest-active view, so pre-existing versions were already synced.
+      // (§11.2b) One transaction + chunked multi-row INSERT + entity memo:
+      // the per-row path measured ~20% of the 50k pipeline.
+      const reflectResult = reflectionStats as ReflectAutoCreateResult;
+      store.syncFromJsonlVersionsBatch(
+        reflectResult.committed_records,
+        reflectResult.committed_new_ids,
+        entityHints,
+      );
+      // Sync-path freshness (spec §10a): observations that reached a terminal
+      // outcome are EXTRACTED — claims now rank above the retained raw
+      // evidence. Per-observation failures never occur here (outcomes are
+      // recorded); a hard failure surfaces as an error while observations
+      // stay 'unverified' (raw-searchable, not silently dropped). Batched —
+      // this loop was the measured compile bottleneck at 50k (§11.2 re-run).
+      searchIndex.updateObservationsFreshness(
+        (reflectionStats as ReflectAutoCreateResult).processed_observation_ids,
+        'EXTRACTED',
+      );
+    } finally {
+      opsIndex?.close();
+      fingerprintIndex?.close();
+    }
+  } else {
+    opsIndex?.close();
   }
 
   const options: CompileOptions = {
     scope: params.scope,
     entityId: params.entity_id,
     useLLM: params.use_llm ?? false,
+    observations: dataDir ? observations : undefined,
   };
+
+  const statusCounts = layer0.countByStatus();
+
+  // §11.2b re-scope: deferred wiki synthesis. The L2 stage (gather + page
+  // synthesis + git commit) is the synchronous handler's largest residual
+  // cost; the compile queue worker produces claims per-observation without
+  // it. Claim production + L1/L3 + freshness remain the handler's contract;
+  // pages are compiled separately afterwards and the manifest below
+  // reflects the pre-synthesis page count until that runs.
+  if (params.defer_synthesis === true) {
+    // L3 claim window is part of the deferred handler's contract ("claim
+    // production + L1/L3 + freshness"): without this, claims produced by the
+    // handler would not be searchable until the deferred L2 step runs.
+    const l3Synced = syncSearchFromClaims(store, searchIndex, targetScope);
+    writeManifest(wikiDir, config, {
+      layer0: {
+        total: layer0.totalCount(),
+        accepted: statusCounts['accepted'] ?? 0,
+        quarantined: statusCounts['quarantined'] ?? 0,
+        tombstoned: statusCounts['tombstoned'] ?? 0,
+      },
+      layer1: { claims: store.claimCount(), entities: store.entityCount() },
+      layer2: { pages: countWikiPages(wikiDir) },
+    });
+
+    const handlerResult: CompileHandlerResult = {
+      pages_compiled: 0,
+      claims_created: typeof parentEntry?.details?.['claims_created'] === 'number'
+        ? parentEntry.details['claims_created']
+        : reflectionStats.claimsCreated,
+      audit: [],
+      telemetry: {
+        observations_processed: 0,
+        claims_extracted_per_observation: {},
+        observations_with_zero_claims: [],
+        entity_merges: [],
+        entities_created_new: [],
+        layer3_indexed_count: l3Synced,
+        duration_ms: 0,
+        timed_out: false,
+        stage_durations_ms: {},
+        llm_extraction_attempted: reflectionStats.llmAttempted,
+        llm_extraction_failed: reflectionStats.llmFailed,
+        llm_extraction_skipped_sensitive: reflectionStats.llmSkippedSensitive,
+        llm_synthesis_attempted: 0,
+        llm_synthesis_failed: 0,
+        llm_synthesis_skipped_sensitive: 0,
+        freshness: searchIndex.countObservationsByFreshness(),
+        synthesis_deferred: true,
+      },
+    };
+    if (params.operation_id && commitCtx && !parentEntry) {
+      appendOpLogEntry(commitCtx.opsDir, {
+        operation_id: params.operation_id,
+        actor_id: params.actor.id,
+        timestamp: new Date().toISOString(),
+        op: 'reflect.explicit',
+        details: {
+          payload_hash: parentPayloadHash,
+          scope: targetScope,
+          claims_created: reflectionStats.claimsCreated,
+          pages_compiled: 0,
+          synthesis_deferred: true,
+        },
+      });
+    }
+    return handlerResult;
+  }
 
   const compiled = await compile(evidenceDir, wikiDir, layer0, store, config, options, searchIndex);
 
@@ -289,7 +645,6 @@ export async function handleCompile(
     searchIndex.indexPage(page);
   }
 
-  const statusCounts = layer0.countByStatus();
   writeManifest(wikiDir, config, {
     layer0: {
       total: layer0.totalCount(),
@@ -301,19 +656,15 @@ export async function handleCompile(
     layer2: { pages: countWikiPages(wikiDir) },
   });
 
-  const handlerResult: CompileHandlerResult = {
-    pages_compiled: compiled.pages.length,
-    claims_created: typeof parentEntry?.details?.['claims_created'] === 'number'
-      ? parentEntry.details['claims_created']
-      : reflectionStats.claimsCreated,
-    git_sha: compiled.gitSha,
-    audit: compiled.audit,
-    telemetry: {
-      ...compiled.telemetry,
-      llm_extraction_attempted: reflectionStats.llmAttempted,
-      llm_extraction_failed: reflectionStats.llmFailed,
-      llm_extraction_skipped_sensitive: reflectionStats.llmSkippedSensitive,
-    },
+  const telemetry: CompileHandlerResult['telemetry'] = {
+    ...compiled.telemetry,
+    // State-based freshness payload contract (spec §10a): literal
+    // unverified / EXTRACTED / FAILED counts on the compile result so
+    // clients assert compile state instead of inferring it from search.
+    freshness: searchIndex.countObservationsByFreshness(),
+    llm_extraction_attempted: reflectionStats.llmAttempted,
+    llm_extraction_failed: reflectionStats.llmFailed,
+    llm_extraction_skipped_sensitive: reflectionStats.llmSkippedSensitive,
   };
   if (params.operation_id && commitCtx && !parentEntry) {
     appendOpLogEntry(commitCtx.opsDir, {
@@ -329,7 +680,26 @@ export async function handleCompile(
       },
     });
   }
+
+  const handlerResult: CompileHandlerResult = {
+    pages_compiled: compiled.pages.length,
+    claims_created: typeof parentEntry?.details?.['claims_created'] === 'number'
+      ? parentEntry.details['claims_created']
+      : reflectionStats.claimsCreated,
+    git_sha: compiled.gitSha,
+    audit: compiled.audit,
+    telemetry,
+  };
   return handlerResult;
+}
+
+export interface ReflectAutoCreateResult extends ReflectAutoStats {
+  /** Observation IDs that reached a terminal outcome during this run. */
+  processed_observation_ids: string[];
+  /** Claim versions committed during this run (new + extended). */
+  committed_records: ActiveClaimVersion[];
+  /** Fresh claim ids created by this run (never existed in the store). */
+  committed_new_ids: Set<string>;
 }
 
 async function reflectAutoCreateClaims(
@@ -343,7 +713,10 @@ async function reflectAutoCreateClaims(
   commitCtx?: CommitContext,
   entityHints?: Map<string, { name: string; type: string; predicate?: string; sensitive?: boolean }>,
   commitHooks?: ReflectCommitHooks,
-): Promise<ReflectAutoStats> {
+  opsIndex?: OpsIndex,
+  fingerprintIndex?: FingerprintIndex,
+  observations?: import('../layer0/types.js').Observation[],
+): Promise<ReflectAutoCreateResult> {
   const podActorId = `substrate:${config.instance_id.replace('smartware_', '')}`;
   let created = 0;
   let llmAttempted = 0;
@@ -352,7 +725,10 @@ async function reflectAutoCreateClaims(
 
   const processedObsIds = new Set<string>();
   if (commitCtx) {
-    for (const entry of readAllOpLogEntries(commitCtx.opsDir)) {
+    const entries = opsIndex
+      ? opsIndex.entriesByOp('reflect.auto')
+      : [...readAllOpLogEntries(commitCtx.opsDir)];
+    for (const entry of entries) {
       if (isReflectAutoTerminalReceipt(entry)) {
         processedObsIds.add(entry.details['observation_id']);
       }
@@ -368,6 +744,14 @@ async function reflectAutoCreateClaims(
       .map((claim) => claim.id),
   );
 
+  // Batched commit surface (spec §11.2): claim versions and ops entries
+  // accumulate for the whole run and flush with one fsync per month/day file.
+  const pendingRecords: ActiveClaimVersion[] = [];
+  const pendingOpEntries: OpLogEntry[] = [];
+  const processedObservationIds: string[] = [];
+  /** Claim ids created fresh by this run — known-new (no store lookups). */
+  const committedNewIds = new Set<string>();
+
   const markComplete = (
     observationId: string,
     observationScope: string,
@@ -382,8 +766,8 @@ async function reflectAutoCreateClaims(
         reflection_complete: true,
         outcome,
       };
-      appendOpLogEntry(commitCtx.opsDir, {
-        operation_id: `op_${ulid()}`,
+      pendingOpEntries.push({
+        operation_id: nextOperationId(),
         actor_id: podActorId,
         timestamp: new Date().toISOString(),
         op: 'reflect.auto',
@@ -391,194 +775,86 @@ async function reflectAutoCreateClaims(
       });
     }
     processedObsIds.add(observationId);
+    processedObservationIds.push(observationId);
   };
 
-  for (const obs of readAll(evidenceDir)) {
-    if (obs.status !== 'accepted') continue;
-    if (obs.type === 'claim_extracted' || obs.type === 'correction' || obs.type === 'tombstone') continue;
-    if (scope && obs.scope !== scope && !obs.scope.endsWith('/' + scope) && !obs.scope.startsWith(scope + '/')) continue;
-    if (processedObsIds.has(obs.id)) continue;
-    if (isContextOnlyObservation(obs, contextClaimIds)) {
-      markComplete(obs.id, obs.scope, 'ignored_context_only');
-      continue;
-    }
+  // One evidence parse for the whole pipeline (spec §11.2b re-scope): the
+  // gather/reconcile stages re-read the same JSONL — at 50k obs that was
+  // ~8% of the timed pipeline. Callers that already parsed evidence pass it.
+  const allObservations = observations ?? [...readAll(evidenceDir)];
 
-    let bodyText: string;
-    if (typeof obs.content.body === 'string') {
-      bodyText = obs.content.body;
-    } else if (obs.content.body && typeof obs.content.body === 'object' && 'body' in obs.content.body) {
-      const inner = (obs.content.body as { body: unknown }).body;
-      bodyText = typeof inner === 'string' ? inner : JSON.stringify(inner);
-    } else {
-      bodyText = JSON.stringify(obs.content.body);
-    }
-
-    if (!bodyText || bodyText.length < 10) {
-      markComplete(obs.id, obs.scope, 'ignored_short_content');
-      continue;
-    }
-
-    const subjectName = obs.scope.split('/').pop() ?? obs.scope;
-    let detClaims: ReflectionCandidate[];
-    let extractedEntities: Array<{ name: string; type: string }>;
-    if (isSessionCheckpointContent(obs.content.body)) {
-      try {
-        const checkpoint = validateSessionCheckpoint(obs.content.body);
-        if (checkpoint.scope !== obs.scope) {
-          throw new Error('checkpoint scope does not match observation scope');
-        }
-        detClaims = [{
-          subject_name: checkpoint.session_id,
-          subject_type: 'session',
-          predicate: `checkpoint:${checkpoint.trigger}`,
-          object: { type: 'any', value: checkpoint },
-          scope: checkpoint.scope,
-          t_valid_from: { value: obs.source.observed_at, state: 'known' },
-          t_valid_to: { value: null, state: 'null' },
-          epistemic: 'system_generated',
-          confidence: 0.5,
-          sensitive: obs.policy.sensitive,
-          extraction: {
-            method: 'deterministic',
-            model: null,
-            compiler_version: 'session-checkpoint-v1',
-            prompt_hash: null,
-          },
-          claim_type: 'checkpoint',
-          claim_role: 'checkpoint',
-          rendered_content: renderSessionCheckpoint(checkpoint),
-        }];
-        extractedEntities = [{ name: checkpoint.session_id, type: 'session' }];
-      } catch {
-        markComplete(obs.id, obs.scope, 'no_claims');
+  // Fingerprint upserts in one transaction: 50k autocommits measured ~13%.
+  if (fingerprintIndex) fingerprintIndex.beginBatch();
+  try {
+    for (const obs of allObservations) {
+      if (obs.status !== 'accepted') continue;
+      if (obs.type === 'claim_extracted' || obs.type === 'correction' || obs.type === 'tombstone') continue;
+      if (scope && obs.scope !== scope && !obs.scope.endsWith('/' + scope) && !obs.scope.startsWith(scope + '/')) continue;
+      if (processedObsIds.has(obs.id)) continue;
+      if (isContextOnlyObservation(obs, contextClaimIds)) {
+        markComplete(obs.id, obs.scope, 'ignored_context_only');
         continue;
       }
-    } else {
-      const extracted = extractDeterministic(
-        bodyText, obs.scope, subjectName, obs.source.observed_at,
-      );
-      detClaims = extracted.claims;
-      extractedEntities = extracted.entities;
-    }
 
-    let llmClaims: ReflectionCandidate[] = [];
-    if (!isSessionCheckpointContent(obs.content.body) && useLLM && config.llm.provider !== 'none') {
-      if (obs.policy.sensitive) {
-        llmSkippedSensitive++;
+      let bodyText: string;
+      if (typeof obs.content.body === 'string') {
+        bodyText = obs.content.body;
+      } else if (obs.content.body && typeof obs.content.body === 'object' && 'body' in obs.content.body) {
+        const inner = (obs.content.body as { body: unknown }).body;
+        bodyText = typeof inner === 'string' ? inner : JSON.stringify(inner);
       } else {
-        llmAttempted++;
-        try {
-          const llmResult = await extractClaimsLLM(
-            bodyText, obs.scope, obs.source.observed_at,
-            store.getAllEntities(obs.scope), config,
-          );
-          llmClaims = llmResult.claims;
-        } catch {
-          llmFailed++;
-          // Deterministic extraction remains available and telemetry records the degradation.
-        }
+        bodyText = JSON.stringify(obs.content.body);
       }
-    }
 
-    const allClaims = [...detClaims, ...llmClaims];
-    let claimVersionsWritten = 0;
-
-    for (const claim of allClaims) {
-      const content = claim.rendered_content ?? (typeof claim.object.value === 'string'
-        ? claim.object.value
-        : JSON.stringify(claim.object.value));
-      const claimType = claim.claim_type ?? 'hypothesis';
-      const claimRole = claim.claim_role ?? 'memory';
-      const fp = computeStructuredClaimFingerprint(
-        claim.subject_name,
-        claim.predicate,
-        claim.object,
-        obs.scope,
-        claimType,
-      );
-      const extractedEntity = extractedEntities.find(e => e.name === claim.subject_name);
-      const entityInfo = {
-        name: claim.subject_name,
-        type: claim.subject_type ?? extractedEntity?.type ?? 'concept',
-      };
-      const sensitive = obs.policy.sensitive || claim.sensitive;
-
-      const existingByFp = findByFingerprint(dataDir, fp)
-        ?? findSemanticMatch(dataDir, store, fp);
-      if (existingByFp) {
-        if (existingByFp.epistemic_owner === 'user') continue;
-        const existingClaim = store.getClaim(existingByFp.claim_id);
-        const existingEntity = existingClaim ? store.getEntity(existingClaim.subject_id) : undefined;
-        const existingHint = entityHints?.get(existingByFp.claim_id);
-        entityHints?.set(existingByFp.claim_id, {
-          name: existingClaim?.subject_name ?? existingHint?.name ?? entityInfo.name,
-          type: existingEntity?.type ?? existingHint?.type ?? entityInfo.type,
-          predicate: existingClaim?.predicate ?? existingHint?.predicate ?? claim.predicate,
-          sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
-        });
-        if (!existingByFp.derived_from.includes(obs.id)) {
-          const extended: ActiveClaimVersion = {
-            ...existingByFp,
-            version: existingByFp.version + 1,
-            derived_from: [...existingByFp.derived_from, obs.id],
-            version_at: new Date().toISOString(),
-            operation_id: `op_${ulid()}`,
-            actor_id: podActorId,
-            supersedes: existingByFp.version,
-          };
-          if (commitCtx) commitReflectClaim(dataDir, extended, commitCtx, commitHooks);
-          else appendClaimVersion(dataDir, extended);
-          claimVersionsWritten++;
-        }
+      if (!bodyText || bodyText.length < 10) {
+        markComplete(obs.id, obs.scope, 'ignored_short_content');
         continue;
       }
 
-      const opId = `op_${ulid()}`;
-      const commitTs = new Date().toISOString();
-      const record: ActiveClaimVersion = {
-        claim_id: `claim_${ulid()}`,
-        version: 1,
-        state: 'active',
-        content,
-        claim_type: claimType,
-        claim_role: claimRole,
-        author: 'agent',
-        epistemic_owner: 'agent',
-        fingerprint: fp,
-        confidence: 'low',
-        epistemic_tag: 'inference',
-        scope: obs.scope,
-        derived_from: [obs.id],
-        relations: [],
-        created_at: commitTs,
-        version_at: commitTs,
-        operation_id: opId,
-        actor_id: podActorId,
-        tags: [],
-        semantic: materializeSemantic(claim, entityInfo.type, commitTs, sensitive),
-      };
-
-      if (commitCtx) commitReflectClaim(dataDir, record, commitCtx, commitHooks);
-      else appendClaimVersion(dataDir, record);
-      claimVersionsWritten++;
-      entityHints?.set(record.claim_id, {
-        name: entityInfo.name,
-        type: entityInfo.type,
-        predicate: claim.predicate,
-        sensitive,
+      // Shared per-observation production — identical records, dedup decisions,
+      // and receipts on the synchronous reflect path and the compile queue.
+      const production = await produceObservationClaims(obs, bodyText, {
+        dataDir,
+        store,
+        config,
+        useLLM,
+        podActorId,
+        commitTs: new Date().toISOString(),
+        entityHints,
+        fingerprintIndex,
       });
-      created++;
+      for (const { record, isNew } of production.records) {
+        pendingRecords.push(record);
+        pendingOpEntries.push(buildReflectClaimOpEntry(record));
+        if (isNew) {
+          created++;
+          committedNewIds.add(record.claim_id);
+        }
+      }
+      if (production.llm_tried) llmAttempted++;
+      if (production.llm_failed) llmFailed++;
+      if (production.llm_skippedsensitive) llmSkippedSensitive++;
+
+      markComplete(
+        obs.id,
+        obs.scope,
+        production.outcome,
+        {
+          candidates_found: production.candidates_found,
+          claim_versions_written: production.records.length,
+        },
+      );
     }
 
-    markComplete(
-      obs.id,
-      obs.scope,
-      allClaims.length === 0 ? 'no_claims' : 'claims_processed',
-      {
-        candidates_found: allClaims.length,
-        claim_versions_written: claimVersionsWritten,
-      },
-    );
+    // One flush per run: L1 version appends batched per month file, ops entries
+    // batched per UTC day file (spec §11.2: one fsync per N).
+    commitReflectClaimBatch(dataDir, pendingRecords, pendingOpEntries, commitCtx, commitHooks);
+    fingerprintIndex?.flushBatch();
+  } catch (error) {
+    // Never leave a partial overlay: nothing was committed — the derived
+    // index must not claim versions the L1 JSONL doesn't hold.
+    fingerprintIndex?.discardBatch();
+    throw error;
   }
 
   return {
@@ -586,6 +862,9 @@ async function reflectAutoCreateClaims(
     llmAttempted,
     llmFailed,
     llmSkippedSensitive,
+    processed_observation_ids: processedObservationIds,
+    committed_records: pendingRecords,
+    committed_new_ids: committedNewIds,
   };
 }
 

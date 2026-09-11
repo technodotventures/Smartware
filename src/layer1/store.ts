@@ -187,6 +187,24 @@ export class ClaimStore {
    *  for the L1 JSONL canonical surface (PR-14). When null, JSONL writes
    *  are skipped (test/legacy paths). */
   private dataDir: string | null = null;
+  /** Cached prepared statements — per-call prepare() measured as the largest
+   *  single cost in the compile hot loop (spec §11.2 re-run). */
+  private stmtCache = new Map<string, Database.Statement>();
+
+  /** Prepare (and cache) a statement — use in per-row hot paths. */
+  private stmt(sql: string): Database.Statement {
+    let prepared = this.stmtCache.get(sql);
+    if (!prepared) {
+      prepared = this.db.prepare(sql);
+      this.stmtCache.set(sql, prepared);
+    }
+    return prepared;
+  }
+
+  /** Run fn inside one SQLite transaction (compile-path batched syncs). */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
 
   constructor(dbPath: string) {
     if (dbPath !== ':memory:') ensurePrivateDirectory(dirname(dbPath));
@@ -338,7 +356,7 @@ export class ClaimStore {
   }
 
   getEntity(id: string): Entity | undefined {
-    const row = this.db.prepare('SELECT * FROM entities WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    const row = this.stmt('SELECT * FROM entities WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? this.rowToEntity(row) : undefined;
   }
 
@@ -346,7 +364,7 @@ export class ClaimStore {
     let sql = 'SELECT * FROM entities WHERE canonical_name = ?';
     const params: unknown[] = [name];
     if (scope) { sql += ' AND scope = ?'; params.push(scope); }
-    const row = this.db.prepare(sql).get(...params) as Record<string, unknown> | undefined;
+    const row = this.stmt(sql).get(...params) as Record<string, unknown> | undefined;
     return row ? this.rowToEntity(row) : undefined;
   }
 
@@ -355,8 +373,8 @@ export class ClaimStore {
       ? 'SELECT * FROM entities WHERE scope = ? ORDER BY canonical_name'
       : 'SELECT * FROM entities ORDER BY canonical_name';
     const rows = scope
-      ? this.db.prepare(sql).all(scope) as Record<string, unknown>[]
-      : this.db.prepare(sql).all() as Record<string, unknown>[];
+      ? this.stmt(sql).all(scope) as Record<string, unknown>[]
+      : this.stmt(sql).all() as Record<string, unknown>[];
     return rows.map(row => this.rowToEntity(row));
   }
 
@@ -525,12 +543,161 @@ export class ClaimStore {
   }
 
   /**
+   * §11.2b re-scope: batch-sync a compile run's committed records in one
+   * transaction with chunked multi-row INSERTs. The per-row version measured
+   * ~20% of the 50k pipeline (each row: entity SELECT + 44-column INSERT OR
+   * REPLACE + adjacency maintenance).
+   *
+   * `newIds` marks claim ids minted by THIS run. They are known-new, so:
+   *   - the getClaim SELECT is elided (nothing can exist yet), and
+   *   - adjacency maintenance is skipped for relations-less records (no prior
+   *     adjacency rows can exist for a brand-new claim).
+   * Entity resolution consults a per-batch memo (keyed scope|name|type) that
+   * is populated only when resolveEntity CREATES the entity — a repeat of the
+   * exact serial call sequence would find that entity by exact canonical_name
+   * match anyway, so derived rows are identical and creation-log telemetry is
+   * preserved. Extension/forgotten rows run the full path.
+   */
+  syncFromJsonlVersionsBatch(
+    records: import('./jsonl.js').ClaimVersionRecord[],
+    newIds?: ReadonlySet<string>,
+    entityHints?: ReadonlyMap<string, { name: string; type: string; predicate?: string; sensitive?: boolean }>,
+  ): void {
+    if (records.length === 0) return;
+    const isNew = newIds
+      ? (record: import('./jsonl.js').ClaimVersionRecord) => newIds.has(record.claim_id)
+      : () => false;
+    this.transaction(() => {
+      /** resolveEntity outcomes for entity creations — batch-local memo. */
+      const entityMemo = new Map<string, string>();
+      // Chunked multi-row INSERT: 45 columns × 200 rows = 9,000 binds, well
+      // under SQLite's 32,767 default limit.
+      const CHUNK = 200;
+      let chunkVals: unknown[][] = [];
+      let chunkRecords: import('./jsonl.js').ClaimVersionRecord[] = [];
+      const flushChunk = (): void => {
+        if (chunkVals.length === 0) return;
+        const placeholders = chunkVals
+          .map((row) => `(${row.map(() => '?').join(', ')})`)
+          .join(', ');
+        const stmt = this.stmt(
+          `INSERT OR REPLACE INTO claims
+            (id, subject_id, subject_name, predicate, object_type, object_value,
+             scope, validity_from, validity_to,
+             t_ingested_value, t_ingested_state, t_ingested_basis,
+             t_invalidated_value, t_invalidated_state, t_invalidated_basis,
+             t_valid_from_value, t_valid_from_state, t_valid_from_basis,
+             t_valid_to_value, t_valid_to_state, t_valid_to_basis,
+             source_event_id, extraction_event_id,
+             supporting_evidence, extraction_method, extraction_model, compiler_version,
+             prompt_hash, extracted_at, status, epistemic, confidence, sensitive,
+             superseded_by, contested_by,
+             state, author, epistemic_owner, claim_type, claim_role,
+             version_at, created_at, operation_id, actor_id, relations)
+          VALUES ${placeholders}`,
+        );
+        const flat: unknown[] = [];
+        for (const row of chunkVals) for (const v of row) flat.push(v);
+        stmt.run(...flat);
+        for (let i = 0; i < chunkRecords.length; i++) {
+          const record = chunkRecords[i]!;
+          if (isNew(record) && record.relations.length === 0) continue;
+          this.refreshAdjacency(record.claim_id, record.relations);
+        }
+        chunkVals = [];
+        chunkRecords = [];
+      };
+
+      for (const record of records) {
+        const entityHint = entityHints?.get(record.claim_id);
+        chunkVals.push(this.claimVersionVals(record, entityHint, isNew(record), entityMemo));
+        chunkRecords.push(record);
+        if (chunkVals.length >= CHUNK) flushChunk();
+      }
+      flushChunk();
+    });
+  }
+
+  /**
+   * Build the 45 bound values for a claims-table row from a canonical
+   * version record. Existing-row fallbacks (source_event_id, extraction,
+   * superseded_by, contested_by) only apply when `existing` is supplied; the
+   * caller elides the lookup for known-new records.
+   */
+  private claimVersionVals(
+    v: import('./jsonl.js').ClaimVersionRecord,
+    entityHint: { name: string; type: string; predicate?: string; sensitive?: boolean } | undefined,
+    assumeNew: boolean,
+    entityMemo?: Map<string, string>,
+  ): unknown[] {
+    const existing = assumeNew ? undefined : this.getClaim(v.claim_id);
+    const content = v.state === 'active' ? v.content : '';
+    const semantic = v.state === 'active' ? v.semantic : undefined;
+    const confNum = v.confidence === 'high' ? 0.9 : v.confidence === 'medium' ? 0.5 : 0.2;
+    const epist = v.epistemic_tag === 'fact' ? 'user_confirmed' : 'inferred';
+    const status = v.state === 'active' ? 'active' : 'retracted';
+    const now = v.created_at;
+    const existingEntity = existing ? this.getEntity(existing.subject_id) : undefined;
+    const entityName = semantic?.subject_name
+      ?? entityHint?.name
+      ?? existing?.subject_name
+      ?? (content.slice(0, 50) || 'observation');
+    const entityType = semantic?.subject_type ?? entityHint?.type ?? existingEntity?.type ?? 'concept';
+    const predicate = semantic?.predicate ?? entityHint?.predicate ?? existing?.predicate ?? 'content_is';
+    const object = semantic?.object ?? { type: 'text' as const, value: content };
+    const tValidFrom = semantic?.t_valid_from ?? existing?.t_valid_from ?? knownTime(now);
+    const tValidTo = semantic?.t_valid_to ?? existing?.t_valid_to ?? nullTime();
+    const [tValidFromValue, tValidFromState, tValidFromBasis] = serialiseTime(tValidFrom);
+    const [tValidToValue, tValidToState, tValidToBasis] = serialiseTime(tValidTo);
+    const validityFrom = tValidFrom.value ?? now;
+    const validityTo = tValidTo.value;
+    const sensitive = Number(
+      semantic?.sensitive
+      ?? entityHint?.sensitive
+      ?? existing?.sensitive
+      ?? false,
+    );
+    const extraction = semantic?.extraction ?? existing?.extraction;
+
+    const memoKey = `${v.scope}|${entityName}|${entityType}`;
+    let entityId: string;
+    const memoEntityId = entityMemo?.get(memoKey);
+    if (memoEntityId) {
+      entityId = memoEntityId;
+    } else {
+      const resolved = resolveEntity(entityName, entityType, v.scope, this);
+      entityId = resolved.id;
+      // Memoize only creations: a repeat of this exact call would hit the
+      // canonical_name exact-match path and return the same id; fuzzy-repeat
+      // telemetry (merge logs) still runs every time, matching serial order.
+      if (resolved.isNew) entityMemo?.set(memoKey, entityId);
+    }
+
+    return [
+      v.claim_id, entityId, entityName, predicate, object.type, JSON.stringify(object.value),
+      v.scope, validityFrom, validityTo,
+      now, 'known', null,
+      null, 'null', null,
+      tValidFromValue, tValidFromState, tValidFromBasis,
+      tValidToValue, tValidToState, tValidToBasis,
+      existing?.source_event_id ?? v.derived_from[0] ?? '',
+      existing?.extraction_event_id ?? '',
+      JSON.stringify(v.derived_from), extraction?.method ?? 'deterministic',
+      extraction?.model ?? null, extraction?.compiler_version ?? '0.6.1',
+      extraction?.prompt_hash ?? null, extraction?.extracted_at ?? now, status, epist, confNum, sensitive,
+      existing?.superseded_by ?? null, JSON.stringify(existing?.contested_by ?? []),
+      v.state, v.author, v.epistemic_owner, v.claim_type, v.claim_role,
+      v.version_at, v.created_at, v.operation_id, v.actor_id, JSON.stringify(v.relations),
+    ];
+  }
+
+  /**
    * Replace adjacency rows for a single claim with the supplied relations.
    * Always invoked from insertClaim; safe to call standalone.
    */
   refreshAdjacency(claimId: string, relations: ClaimRelation[]): void {
-    this.db.prepare('DELETE FROM claim_relations WHERE source_claim_id = ?').run(claimId);
-    const insertRel = this.db.prepare(`
+    this.stmt('DELETE FROM claim_relations WHERE source_claim_id = ?').run(claimId);
+    const insertRel = this.stmt(`
       INSERT OR IGNORE INTO claim_relations
         (relation_id, source_claim_id, source_version, kind, target_claim_id,
          valid_at, invalid_at, origin, asserted_in_source_version,
@@ -582,7 +749,7 @@ export class ClaimStore {
   }
 
   getClaim(id: string): Claim | undefined {
-    const row = this.db.prepare('SELECT * FROM claims WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    const row = this.stmt('SELECT * FROM claims WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? this.rowToClaim(row) : undefined;
   }
 
@@ -623,57 +790,17 @@ export class ClaimStore {
   syncFromJsonlVersion(
     v: import('./jsonl.js').ClaimVersionRecord,
     entityHint?: { name: string; type: string; predicate?: string; sensitive?: boolean },
+    /**
+     * §11.2b re-scope fast path: claim_id was minted by THIS run (known-new) —
+     * skip the getClaim/getEntity SELECTs (nothing can exist yet) and skip the
+     * adjacency DELETE (no prior rows for a brand-new claim). Equivalent rows
+     * to the general path; only the lookups are elided.
+     */
+    assumeNew = false,
   ): void {
-    const existing = this.getClaim(v.claim_id);
-    const content = v.state === 'active' ? v.content : '';
-    const semantic = v.state === 'active' ? v.semantic : undefined;
-    const confNum = v.confidence === 'high' ? 0.9 : v.confidence === 'medium' ? 0.5 : 0.2;
-    const epist = v.epistemic_tag === 'fact' ? 'user_confirmed' : 'inferred';
-    const status = v.state === 'active' ? 'active' : 'retracted';
-    const now = v.created_at;
-    const existingEntity = existing ? this.getEntity(existing.subject_id) : undefined;
-    const entityName = semantic?.subject_name
-      ?? entityHint?.name
-      ?? existing?.subject_name
-      ?? (content.slice(0, 50) || 'observation');
-    const entityType = semantic?.subject_type ?? entityHint?.type ?? existingEntity?.type ?? 'concept';
-    const predicate = semantic?.predicate ?? entityHint?.predicate ?? existing?.predicate ?? 'content_is';
-    const object = semantic?.object ?? { type: 'text' as const, value: content };
-    const tValidFrom = semantic?.t_valid_from ?? existing?.t_valid_from ?? knownTime(now);
-    const tValidTo = semantic?.t_valid_to ?? existing?.t_valid_to ?? nullTime();
-    const [tValidFromValue, tValidFromState, tValidFromBasis] = serialiseTime(tValidFrom);
-    const [tValidToValue, tValidToState, tValidToBasis] = serialiseTime(tValidTo);
-    const validityFrom = tValidFrom.value ?? now;
-    const validityTo = tValidTo.value;
-    const sensitive = Number(
-      semantic?.sensitive
-      ?? entityHint?.sensitive
-      ?? existing?.sensitive
-      ?? false,
-    );
-    const extraction = semantic?.extraction ?? existing?.extraction;
-
-    const resolved = resolveEntity(entityName, entityType, v.scope, this);
-    const entityId = resolved.id;
-
-    const vals = [
-      v.claim_id, entityId, entityName, predicate, object.type, JSON.stringify(object.value),
-      v.scope, validityFrom, validityTo,
-      now, 'known', null,
-      null, 'null', null,
-      tValidFromValue, tValidFromState, tValidFromBasis,
-      tValidToValue, tValidToState, tValidToBasis,
-      existing?.source_event_id ?? v.derived_from[0] ?? '',
-      existing?.extraction_event_id ?? '',
-      JSON.stringify(v.derived_from), extraction?.method ?? 'deterministic',
-      extraction?.model ?? null, extraction?.compiler_version ?? '0.6.1',
-      extraction?.prompt_hash ?? null, extraction?.extracted_at ?? now, status, epist, confNum, sensitive,
-      existing?.superseded_by ?? null, JSON.stringify(existing?.contested_by ?? []),
-      v.state, v.author, v.epistemic_owner, v.claim_type, v.claim_role,
-      v.version_at, v.created_at, v.operation_id, v.actor_id, JSON.stringify(v.relations),
-    ];
+    const vals = this.claimVersionVals(v, entityHint, assumeNew);
     const placeholders = vals.map(() => '?').join(', ');
-    this.db.prepare(`
+    this.stmt(`
       INSERT OR REPLACE INTO claims
         (id, subject_id, subject_name, predicate, object_type, object_value,
          scope, validity_from, validity_to,
@@ -689,7 +816,11 @@ export class ClaimStore {
          version_at, created_at, operation_id, actor_id, relations)
       VALUES (${placeholders})
     `).run(...vals);
-    this.refreshAdjacency(v.claim_id, v.relations);
+    // §11.2b fast path: brand-new claim + no relations → nothing to maintain
+    // (prior adjacency rows cannot exist; nothing to insert either).
+    if (!(assumeNew && v.relations.length === 0)) {
+      this.refreshAdjacency(v.claim_id, v.relations);
+    }
   }
 
   updateClaimStatus(id: string, status: ClaimStatus, supersededBy?: string, invalidatedAt?: ClaimTimeValue): void {
@@ -745,6 +876,33 @@ export class ClaimStore {
   deleteAllClaims(): void {
     this.db.exec('DELETE FROM claims');
     this.db.exec('DELETE FROM entities');
+  }
+
+  /**
+   * FORGET.SCOPE{reason:erasure} physical purge (spec §10): remove every
+   * claim row, scope-owned entity row, and relation edge (source OR target)
+   * for the scope's claims. Caller is responsible for the L1 JSONL purge —
+   * this SQLite surface is derived, and the canonical log must agree so a
+   * wipe-and-rebuild cannot resurrect erased content (rebuild-equivalence).
+   */
+  purgeByScope(scope: string): { claims: number; entities: number; relations: number } {
+    const result = { claims: 0, entities: 0, relations: 0 };
+    this.transaction(() => {
+      const claimRows = this.stmt('SELECT id FROM claims WHERE scope = ?').all(scope) as Array<{ id: string }>;
+      const ids = claimRows.map(row => row.id);
+      result.claims = this.stmt('DELETE FROM claims WHERE scope = ?').run(scope).changes;
+      result.entities = this.stmt('DELETE FROM entities WHERE scope = ?').run(scope).changes;
+      if (ids.length > 0) {
+        const relationDelete = this.stmt(
+          'DELETE FROM claim_relations WHERE source_claim_id IN (SELECT value FROM json_each(?)) OR target_claim_id IN (SELECT value FROM json_each(?))',
+        );
+        for (let i = 0; i < ids.length; i += 500) {
+          const chunk = JSON.stringify(ids.slice(i, i + 500));
+          result.relations += relationDelete.run(chunk, chunk).changes;
+        }
+      }
+    });
+    return result;
   }
 
   setLastReplayedSequence(seq: number): void {

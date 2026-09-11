@@ -20,6 +20,8 @@ import { handleQuery } from './protocol/query.js';
 import { handleCompile } from './protocol/compile.js';
 import { handleCorrect } from './protocol/correct.js';
 import { handleForget } from './protocol/forget.js';
+import { handleForgetScope } from './protocol/forget_scope.js';
+import { handleExportScope } from './protocol/export_scope.js';
 import { handleQuarantineReview } from './protocol/quarantine_review.js';
 import { handleGrant } from './protocol/grant.js';
 import { handleRevoke } from './protocol/revoke.js';
@@ -34,9 +36,10 @@ import { writeManifest } from './layer2/manifest.js';
 import { ensureGitRepo } from './layer2/git.js';
 import { replayCatchUp } from './layer1/replay.js';
 import { ProtocolError } from './auth/middleware.js';
-import { syncSearchFromClaims } from './layer3/search.js';
+import { syncSearchFromClaims, syncObservationsFromEvidence, observationToIndexRow } from './layer3/search.js';
 import { runRecovery } from './ops_log/recovery.js';
 import { ensurePrivateDirectory } from './storage/private-fs.js';
+import { openCompileQueue, runCompileBatch, startCompileWorker } from './compile_queue/index.js';
 
 // ── Initialisation ───────────────────────────────────────────────────────────
 
@@ -135,6 +138,22 @@ async function start(): Promise<void> {
   const l3Count = syncSearchFromClaims(store, searchIndex);
   console.error(`Layer 3 search index synced: ${l3Count} entities indexed from claims`);
 
+  // Sync the raw-observation FTS window (spec §10a): derived, regenerable —
+  // wipe-and-rebuild from the canonical JSONL, terminal states excluded.
+  const obsCount = syncObservationsFromEvidence(evidenceDir, layer0, searchIndex);
+  console.error(`Raw observation search index synced: ${obsCount} observations indexed`);
+
+  // Durable compile queue (spec §9.1): ledger + O(1) fingerprint index,
+  // reconciled with evidence + ops receipts, freshness labels re-applied.
+  const compileQueueState = await openCompileQueue({
+    evidenceDir, dataDir, layer0, searchIndex, opsDir,
+  });
+  if (compileQueueState) {
+    console.error(`Compile queue ready: ${JSON.stringify(compileQueueState.queue.stats())}`);
+  } else {
+    console.error('Compile queue unavailable — async compile disabled for this pod');
+  }
+
   const registry = new ScopeRegistry(config);
 
   // ── MCP Server ─────────────────────────────────────────────────────────────
@@ -147,6 +166,22 @@ async function start(): Promise<void> {
   // Helper: wrap handlers to return MCP content format with a global timeout
   const HANDLER_TIMEOUT_MS = 60_000;
   type MCPContent = { content: [{ type: 'text'; text: string }] };
+
+  // Keep the raw-observation FTS row in step with Layer-0 effective status:
+  // terminal states leave the index, quarantined/accepted rows only flip the
+  // status column (mirrors wipe-and-rebuild semantics of the derived index).
+  function reconcileObservationIndexRow(
+    idx: SearchIndex,
+    l0: Layer0Index,
+    obsId: string,
+  ): void {
+    const effective = l0.getEffectiveStatus(obsId);
+    if (effective === null || effective === 'accepted' || effective === 'quarantined') {
+      if (effective) idx.updateObservationStatus(obsId, effective);
+      return;
+    }
+    idx.removeObservation(obsId);
+  }
   function wrap<T>(fn: () => Promise<T>, label?: string): Promise<MCPContent> {
     const timeout = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error(`Handler '${label ?? 'unknown'}' timed out after ${HANDLER_TIMEOUT_MS / 1000}s`)), HANDLER_TIMEOUT_MS);
@@ -250,6 +285,18 @@ async function start(): Promise<void> {
         freshConfig,
         sessionStore,
         opsDir,
+        {
+          // Sync-raw freshness: index the raw observation at commit time so
+          // it is searchable before any compile job resolves, and enqueue it
+          // on the durable compile queue (async compile — never the LLM on
+          // the write path, never silent omission of the raw window).
+          afterObservation: (obs) => {
+            searchIndex.indexObservation(observationToIndexRow(obs));
+            if (obs.status === 'accepted') {
+              compileQueueState?.queue.enqueue(obs.id, obs.scope);
+            }
+          },
+        },
       );
     }, 'observe'),
   );
@@ -569,7 +616,7 @@ async function start(): Promise<void> {
     },
     async (args) => wrap(async () => {
       const freshConfig = loadConfig(dataDir);
-      return handleForget(
+      const result = await handleForget(
         {
           actor: { type: 'person', id: args.actor_id, display_name: args.actor_id },
           target: { type: 'observation', id: args.target_obs_id },
@@ -583,7 +630,77 @@ async function start(): Promise<void> {
         freshConfig,
         { opsDir },
       );
+      reconcileObservationIndexRow(searchIndex, layer0, args.target_obs_id);
+      return result;
     }, 'forget'),
+  );
+
+  // ── Tool: smartware_forget_scope ──────────────────────────────────────────
+  server.tool(
+    'smartware_forget_scope',
+    'Erase or offboard an entire client scope (owner only; protocol v0.5.0). reason=erasure purges content in every lane; reason=offboarding tombstones + revokes grants (reversible).',
+    {
+      actor_id: z.string().describe('Owner actor ID'),
+      scope: z.string().describe('Scope id, e.g. client:acme#1 (non-reusable marker)'),
+      reason: z.enum(['erasure', 'offboarding']),
+      operation_id: z.string(),
+      owner_pointer: z.string().optional().describe('Owner-approved non-PII pointer (offboarding only; carried into #2)'),
+      export_id: z.string().optional().describe('Optional export package id (exp_<ulid>) produced by smartware_export_scope before erasure; surfaced in the ops entry (details.export_id) for auditability'),
+    },
+    async (args) => wrap(async () => {
+      const freshConfig = loadConfig(dataDir);
+      const result = await handleForgetScope(
+        {
+          actor: { type: 'person', id: args.actor_id, display_name: args.actor_id },
+          scope: args.scope,
+          reason: args.reason,
+          operation_id: args.operation_id,
+          owner_pointer: args.owner_pointer,
+          export_id: args.export_id,
+        },
+        {
+          evidenceDir,
+          dataDir,
+          layer0,
+          store,
+          searchIndex,
+          config: freshConfig,
+          commitCtx: { opsDir },
+          semanticStore: null,
+          compileQueue: compileQueueState?.queue ?? null,
+          fingerprintIndex: compileQueueState?.fingerprintIndex ?? null,
+        },
+      );
+      return result;
+    }, 'forget_scope'),
+  );
+
+  // ── Tool: smartware_export_scope ─────────────────────────────────────────
+  server.tool(
+    'smartware_export_scope',
+    'Export every canonical record for exactly one scope (owner only; spec §10c.4). Package: <data_dir>/exports/<export_id>/ with observations/claims/evidence/operations/entities .jsonl + manifest.json; derived indexes excluded. Idempotent per operation_id. Read-only to pod data.',
+    {
+      actor_id: z.string().describe('Owner actor ID'),
+      scope: z.string().describe('Scope id, e.g. client:acme#1'),
+      operation_id: z.string().optional().describe('Idempotency key — retry returns the same export_id'),
+    },
+    async (args) => wrap(async () => {
+      const freshConfig = loadConfig(dataDir);
+      return handleExportScope(
+        {
+          actor: { type: 'person', id: args.actor_id, display_name: args.actor_id },
+          scope: args.scope,
+          operation_id: args.operation_id,
+        },
+        {
+          evidenceDir,
+          dataDir,
+          opsDir,
+          store,
+          config: freshConfig,
+        },
+      );
+    }, 'export_scope'),
   );
 
   // ── Tool: smartware_quarantine_review ──────────────────────────────────────
@@ -598,7 +715,7 @@ async function start(): Promise<void> {
     },
     async (args) => wrap(async () => {
       const freshConfig = loadConfig(dataDir);
-      return handleQuarantineReview(
+      const result = await handleQuarantineReview(
         {
           actor: { type: 'person', id: args.actor_id, display_name: args.actor_id },
           target_obs_id: args.target_obs_id,
@@ -610,6 +727,8 @@ async function start(): Promise<void> {
         store,
         freshConfig,
       );
+      reconcileObservationIndexRow(searchIndex, layer0, args.target_obs_id);
+      return result;
     }, 'quarantine_review'),
   );
 
@@ -772,6 +891,23 @@ async function start(): Promise<void> {
   );
 
   // ── Start server ──────────────────────────────────────────────────────────
+  // Background compile loop: drain the durable queue on an interval so raw
+  // observations compound into claims without blocking the write path. The
+  // timer is unref'd — it never holds the stdio server open by itself.
+  const compileWorker = compileQueueState
+    ? startCompileWorker({
+        evidenceDir,
+        dataDir,
+        layer0,
+        store,
+        searchIndex,
+        config,
+        opsDir,
+        queue: compileQueueState.queue,
+        fingerprintIndex: compileQueueState.fingerprintIndex,
+      }, { intervalMs: 1000 })
+    : null;
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -779,6 +915,9 @@ async function start(): Promise<void> {
 
   // Graceful shutdown
   process.on('SIGINT', () => {
+    compileWorker?.stop();
+    compileQueueState?.queue.close();
+    compileQueueState?.fingerprintIndex.close();
     layer0.close();
     store.close();
     searchIndex.close();

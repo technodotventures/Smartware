@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  fuseHybridRankings,
   rankHybridDocuments,
   type HybridRankOptions,
 } from '../../src/layer3/hybrid.js';
@@ -8,6 +9,7 @@ import {
   syncSemanticRecords,
   type EmbeddingAdapter,
   type SemanticDocument,
+  type SemanticMatch,
 } from '../../src/layer3/semantic.js';
 
 function document(
@@ -198,5 +200,59 @@ describe('Layer 3 hybrid retrieval', () => {
       adapter,
       { ...options, rrf_k: 0 },
     )).rejects.toThrow(/RRF k/);
+  });
+
+  it('breaks exact RRF ties by semantic relevance descending before id (spec §11.1 D2)', () => {
+    const alpha = document('claim_alpha', 'Alpha policy');
+    const beta = document('claim_beta', 'Beta policy');
+    const gamma = document('claim_gamma', 'Gamma policy');
+    // q03-class construction: alpha wins lexical #1 + semantic #2; beta wins
+    // lexical #2 + semantic #1 — with equal weights and k=60 both sums are
+    // exactly 1/61 + 1/62, so channels and bestRank also tie. The only
+    // principled ordering signal is semantic_relevance: beta 0.84 > alpha
+    // 0.74. The old alphabetical tiebreak would have put claim_alpha first.
+    const semanticMatches: SemanticMatch[] = [
+      { ...beta, semantic_relevance: 0.84 },
+      { ...alpha, semantic_relevance: 0.74 },
+    ];
+    const fused = fuseHybridRankings(
+      ['claim_alpha', 'claim_beta', 'claim_gamma'],
+      semanticMatches,
+      [alpha, beta, gamma],
+      { limit: 5, rrf_k: 60 },
+    );
+
+    expect(fused.map(match => match.id)).toEqual([
+      'claim_beta',
+      'claim_alpha',
+      'claim_gamma',
+    ]);
+    // gamma is lexical-only (no semantic channel) — null relevance sorts last.
+    expect(fused.map(match => match.semantic_rank)).toEqual([1, 2, null]);
+    expect(fused[0]?.semantic_relevance).toBe(0.84);
+  });
+
+  it('keeps the id tiebreak when semantic relevance is exactly equal (determinism)', () => {
+    const alpha = document('claim_alpha', 'Alpha policy');
+    const beta = document('claim_beta', 'Beta policy');
+    const semanticMatches: SemanticMatch[] = [
+      { ...beta, semantic_relevance: 0.80 },
+      { ...alpha, semantic_relevance: 0.80 },
+    ];
+    const fused = fuseHybridRankings(
+      ['claim_alpha', 'claim_beta'],
+      semanticMatches,
+      [alpha, beta],
+      { limit: 5, rrf_k: 60 },
+    );
+
+    // Exact tie (lex1/sem2 vs lex2/sem1, equal relevance) falls through to
+    // the alphabetical id tiebreak — order must stay deterministic.
+    expect(fused.map(match => match.id)).toEqual([
+      'claim_alpha',
+      'claim_beta',
+    ]);
+    expect(fused[0]?.semantic_rank).toBe(2);
+    expect(fused[1]?.semantic_rank).toBe(1);
   });
 });

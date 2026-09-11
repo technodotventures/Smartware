@@ -106,6 +106,49 @@ export interface ForgetOperationIntent {
   };
 }
 
+/**
+ * FORGET.SCOPE operation intent (protocol v0.5.0, spec §10). The exact
+ * L0 audit observation (scope-level mutation marker) is the artifact the
+ * recovery layer verifies and finalizes — the derived purges (Layer1 rows +
+ * JSONL, claim/entity/obs FTS, vector records, L2 pages) are destructive
+ * side-effects the intent's existence vouches for; a matching audit marker
+ * + ops-log entry is the completion proof (same pattern as FORGET).
+ */
+export interface ForgetScopeOperationIntent {
+  version: 1;
+  operation_id: string;
+  actor_id: string;
+  op: 'forget.scope';
+  payload_hash: string;
+  prepared_at: string;
+  expected: {
+    surface: 'forget.scope';
+    audit: {
+      observation_id: string;
+      observation_hash: string;
+      sequence: number;
+    };
+    scope: string;
+    reason: 'erasure' | 'offboarding';
+  };
+  result: {
+    scope: string;
+    reason: 'erasure' | 'offboarding';
+    claims_retracted: number;
+    observations_retracted: number;
+    grants_revoked: string[];
+    scope_entry_removed: boolean;
+    audit_observation_id: string;
+    status: 'forgotten';
+  };
+  details: {
+    scope: string;
+    reason: 'erasure' | 'offboarding';
+    /** Export-before-erasure link (spec §10c.4) — erasure lane only. */
+    export_id?: string;
+  };
+}
+
 export interface ReviveOperationIntent {
   version: 1;
   operation_id: string;
@@ -191,6 +234,7 @@ export type OperationIntent =
   | ObservationOperationIntent
   | ReviseOperationIntent
   | ForgetOperationIntent
+  | ForgetScopeOperationIntent
   | ReviveOperationIntent
   | EndorseOperationIntent
   | ReflectClaimOperationIntent;
@@ -312,6 +356,37 @@ function isForgetIntent(value: unknown): value is ForgetOperationIntent {
     && (result.target_kind === 'claim') === (claimVersion !== undefined);
 }
 
+function isForgetScopeIntent(value: unknown): value is ForgetScopeOperationIntent {
+  if (!value || typeof value !== 'object') return false;
+  const intent = value as Partial<ForgetScopeOperationIntent>;
+  const expected = intent.expected as ForgetScopeOperationIntent['expected'] | undefined;
+  const result = intent.result as ForgetScopeOperationIntent['result'] | undefined;
+  const details = intent.details as ForgetScopeOperationIntent['details'] | undefined;
+  const validReason = expected?.reason === 'erasure' || expected?.reason === 'offboarding';
+  const validResultReason = result?.reason === 'erasure' || result?.reason === 'offboarding';
+  return hasCommonIntentFields(intent)
+    && intent.op === 'forget.scope'
+    && expected?.surface === 'forget.scope'
+    && typeof expected.audit?.observation_id === 'string'
+    && typeof expected.audit.observation_hash === 'string'
+    && Number.isInteger(expected.audit.sequence)
+    && typeof expected.scope === 'string'
+    && validReason
+    && typeof result?.scope === 'string'
+    && validResultReason
+    && result.scope === expected.scope
+    && result.reason === expected.reason
+    && Number.isInteger(result.claims_retracted)
+    && Number.isInteger(result.observations_retracted)
+    && Array.isArray(result.grants_revoked)
+    && result.grants_revoked.every(id => typeof id === 'string')
+    && typeof result.scope_entry_removed === 'boolean'
+    && result.audit_observation_id === expected.audit.observation_id
+    && result.status === 'forgotten'
+    && details?.scope === expected.scope
+    && details.reason === expected.reason;
+}
+
 function isReviveIntent(value: unknown): value is ReviveOperationIntent {
   if (!value || typeof value !== 'object') return false;
   const intent = value as Partial<ReviveOperationIntent>;
@@ -386,6 +461,7 @@ function parseIntent(raw: string, expectedOperationId: string): OperationIntent 
   if ((!isObservationIntent(parsed)
     && !isReviseIntent(parsed)
     && !isForgetIntent(parsed)
+    && !isForgetScopeIntent(parsed)
     && !isReviveIntent(parsed)
     && !isEndorseIntent(parsed)
     && !isReflectClaimIntent(parsed))
@@ -432,6 +508,7 @@ export function persistOperationIntent(
   if (!isObservationIntent(intent)
     && !isReviseIntent(intent)
     && !isForgetIntent(intent)
+    && !isForgetScopeIntent(intent)
     && !isReviveIntent(intent)
     && !isEndorseIntent(intent)
     && !isReflectClaimIntent(intent)) {

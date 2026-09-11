@@ -123,4 +123,24 @@ export interface CompileTelemetry {
   llm_synthesis_attempted: number;
   llm_synthesis_failed: number;
   llm_synthesis_skipped_sensitive: number;
+  /**
+   * State-based freshness payload contract (spec §10a): literal
+   * unverified / EXTRACTED / FAILED counts over the raw-observation window
+   * so clients assert compile state instead of inferring it from search.
+   */
+  freshness?: FreshnessCounts;
+  /**
+   * §11.2b re-scope marker: true when the handler ran with L2 wiki
+   * synthesis deferred (params.defer_synthesis) — claim production, L1/L3
+   * sync and freshness completed; pages_compiled is 0 and the wiki stage
+   * runs separately (compile queue worker).
+   */
+  synthesis_deferred?: boolean;
+}
+
+/** State-based freshness counts over the raw-observation FTS window. */
+export interface FreshnessCounts {
+  unverified: number;
+  extracted: number;
+  failed: number;
 }

@@ -1,0 +1,195 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.0/claim.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Claim Version",
+  "description": "One L1 claim version. The required field set applies to all versions (active and forgotten). Forgotten versions inherit non-content metadata from the prior active version; the content field is only required when state is active. Forgotten versions add additional required fields per the if/then below.",
+  "type": "object",
+  "required": [
+    "claim_id",
+    "version",
+    "state",
+    "scope",
+    "claim_type",
+    "claim_role",
+    "author",
+    "epistemic_owner",
+    "fingerprint",
+    "confidence",
+    "epistemic_tag",
+    "derived_from",
+    "relations",
+    "created_at",
+    "version_at",
+    "operation_id",
+    "actor_id",
+    "tags"
+  ],
+  "properties": {
+    "claim_id": {
+      "$ref": "common.schema.json#/$defs/ClaimId"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "active",
+        "forgotten"
+      ]
+    },
+    "content": {
+      "type": "string",
+      "description": "The assertion text. Required when state=active. Omitted when state=forgotten (the canonical snapshot lives in the L2 tombstone)."
+    },
+    "claim_type": {
+      "$ref": "common.schema.json#/$defs/ClaimType"
+    },
+    "claim_role": {
+      "$ref": "common.schema.json#/$defs/ClaimRole"
+    },
+    "author": {
+      "$ref": "common.schema.json#/$defs/Author",
+      "description": "Voice/body ownership. User-authored bodies are agent-immutable."
+    },
+    "epistemic_owner": {
+      "$ref": "common.schema.json#/$defs/Author",
+      "description": "Ownership of confidence, epistemic tag, epistemic relations, and lifecycle. User-owned claims are agent-immutable."
+    },
+    "fingerprint": {
+      "$ref": "common.schema.json#/$defs/Fingerprint",
+      "description": "Stable identity over normalized content, scope, and claim_type. Preserved across all versions."
+    },
+    "confidence": {
+      "$ref": "common.schema.json#/$defs/ConfidenceBucket"
+    },
+    "epistemic_tag": {
+      "$ref": "common.schema.json#/$defs/EpistemicTag"
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/Scope"
+    },
+    "derived_from": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/ObservationId"
+      },
+      "description": "ObservationIds underlying this claim. Agents may extend this only while epistemic_owner=agent; protected-claim corroboration requires user REVISE."
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "$ref": "relation.schema.json"
+      },
+      "description": "Inherited from prior version when version > 1 unless explicitly changed."
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601",
+      "description": "Claim's original birth. Equal across all versions of the same claim_id."
+    },
+    "version_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601",
+      "description": "This version's commit timestamp. Used by as-of queries."
+    },
+    "operation_id": {
+      "$ref": "common.schema.json#/$defs/OperationId"
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Tag"
+      }
+    },
+    "supersedes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Prior version number this one supersedes. Required for version > 1."
+    },
+    "tombstone_id": {
+      "$ref": "common.schema.json#/$defs/TombstoneId",
+      "description": "Required when state=forgotten"
+    },
+    "forgotten_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601"
+    },
+    "forgotten_by": {
+      "$ref": "common.schema.json#/$defs/ActorId"
+    },
+    "endorsement_source": {
+      "$ref": "common.schema.json#/$defs/PageId",
+      "description": "PageId that triggered the endorsement cascade producing this version"
+    },
+    "revived_via": {
+      "$ref": "common.schema.json#/$defs/TombstoneId",
+      "description": "TombstoneId of the revival source"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "forgotten"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "tombstone_id": true,
+          "forgotten_at": true,
+          "forgotten_by": true,
+          "supersedes": true
+        },
+        "required": [
+          "tombstone_id",
+          "forgotten_at",
+          "forgotten_by",
+          "supersedes"
+        ],
+        "description": "Forgotten versions add forget-specific fields; the core required field set above still applies (metadata is inherited from prior active version)."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "active"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "content": true
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 2
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "supersedes": true
+        },
+        "required": [
+          "supersedes"
+        ]
+      }
+    }
+  ],
+  "additionalProperties": false
+}

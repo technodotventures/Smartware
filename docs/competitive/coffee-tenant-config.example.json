@@ -1,0 +1,86 @@
+{
+  "instance_id": "smartware_01kxw9f2v3",
+  "owner_id": "user:ava",
+  "writer_id": "writer_local_01kxw9f2v4",
+  "version": "0.7.0",
+  "data_dir": "/var/lib/smartware/harbor-lane",
+  "scopes": [
+    { "id": "self", "parent": null, "visibility_default": "private" },
+    { "id": "workspace", "parent": null, "visibility_default": "workspace" },
+    { "id": "client:acme#1", "parent": "workspace", "visibility_default": "scope" },
+    { "id": "client:bcau#1", "parent": "workspace", "visibility_default": "scope" },
+    { "id": "client:gate#2", "parent": "workspace", "visibility_default": "scope" }
+  ],
+  "grants": [
+    {
+      "id": "grant_01kxw9f2v5",
+      "actor_type": "person",
+      "actor_id": "user:gigi",
+      "capabilities": {
+        "observe": ["client:acme#1", "client:bcau#1"],
+        "query": ["client:acme#1", "client:bcau#1"],
+        "compile": [],
+        "correct": ["client:acme#1"],
+        "forget": [],
+        "read": ["client:acme#1", "client:bcau#1"]
+      },
+      "trusted": false,
+      "quarantine": false,
+      "created_at": "2026-08-29T09:00:00.000Z",
+      "expires_at": null,
+      "status": "active"
+    },
+    {
+      "id": "grant_01kxw9f2v6",
+      "actor_type": "person",
+      "actor_id": "user:noah",
+      "capabilities": {
+        "observe": ["client:acme#1", "client:gate#2"],
+        "query": ["client:acme#1", "client:gate#2"],
+        "compile": [],
+        "correct": [],
+        "forget": [],
+        "read": ["client:gate#2"]
+      },
+      "trusted": false,
+      "quarantine": false,
+      "created_at": "2026-08-29T09:00:00.000Z",
+      "expires_at": "2027-01-01T00:00:00.000Z",
+      "status": "active"
+    },
+    {
+      "id": "grant_01kxw9f2v7",
+      "actor_type": "agent",
+      "actor_id": "agent:coffee-assistant",
+      "capabilities": {
+        "observe": ["client:gate#2"],
+        "query": ["client:gate#2"],
+        "compile": [],
+        "correct": [],
+        "forget": [],
+        "read": []
+      },
+      "trusted": false,
+      "quarantine": false,
+      "created_at": "2026-08-29T09:00:00.000Z",
+      "expires_at": null,
+      "status": "active"
+    }
+  ],
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5"
+  },
+  "staleness": {
+    "default_half_life_days": 90,
+    "scope_overrides": {},
+    "stale_threshold": 0.3
+  },
+  "retention": {
+    "default": { "policy": "forever", "duration_days": null },
+    "scope_overrides": {
+      "client:gate#2": { "policy": "duration", "duration_days": 30 }
+    },
+    "expire_action": "tombstone"
+  }
+}

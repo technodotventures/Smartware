@@ -3,7 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { ulid } from 'ulid';
-import type { ActorType } from './layer0/types.js';
+import type { ActorType, RetentionPolicy } from './layer0/types.js';
 import { SMARTWARE_VERSION } from './version.js';
 import { ensurePrivateDirectory, writePrivateFile } from './storage/private-fs.js';
 
@@ -32,6 +32,21 @@ export interface Grant {
   status: 'active' | 'revoked';
 }
 
+/** Retention policy for a scope (lifecycle, distinct from staleness/freshness). */
+export interface RetentionSetting {
+  policy: RetentionPolicy;
+  /** Resolved duration in days when policy === 'duration'; otherwise null. */
+  duration_days: number | null;
+}
+
+/** Optional, additive retention config. Absent ⇒ `forever` everywhere (today's behavior). */
+export interface RetentionConfig {
+  default: RetentionSetting;
+  scope_overrides?: Record<string, RetentionSetting>;
+  /** v0.6.0 only supports 'tombstone'; 'archive' is reserved. */
+  expire_action?: 'tombstone' | 'archive';
+}
+
 export interface SmartwareConfig {
   instance_id: string;
   owner_id: string;
@@ -49,6 +64,8 @@ export interface SmartwareConfig {
     scope_overrides: Record<string, number>;
     stale_threshold: number;
   };
+  /** Optional retention config (lifecycle). Absent ⇒ `forever` everywhere. */
+  retention?: RetentionConfig;
   entity_resolution?: {
     /** Score at or above this → auto-merge (default 0.92) */
     auto_merge_threshold: number;
@@ -109,4 +126,20 @@ export function createDefaultConfig(dataDir: string): SmartwareConfig {
 
 export function getDataDir(): string {
   return process.env['SMARTWARE_DATA_DIR'] ?? path.join(process.cwd(), 'data');
+}
+
+/** Resolve the retention setting for a scope: override → default → `forever`. */
+export function resolveRetention(config: SmartwareConfig, scope: string): RetentionSetting {
+  const r = config.retention;
+  const override = r?.scope_overrides?.[scope];
+  if (override) return override;
+  if (r?.default) return r.default;
+  return { policy: 'forever', duration_days: null };
+}
+
+/** ISO 8601 duration string for a resolved setting, or null when not time-bound. */
+export function toRetentionDurationString(setting: RetentionSetting): string | null {
+  if (setting.policy !== 'duration') return null;
+  const days = setting.duration_days;
+  return days != null && days > 0 ? `P${days}D` : null;
 }

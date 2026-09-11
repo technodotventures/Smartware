@@ -26,6 +26,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  renameSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -127,12 +128,62 @@ export function claimsJsonlPath(dataDir: string, commit_ts: string): string {
 }
 
 /**
- * Append one ClaimVersionRecord to the canonical L1 JSONL surface. Caller
+/** Append one ClaimVersionRecord to the canonical L1 JSONL surface. Caller
  * is responsible for stamping `version_at`/`operation_id`/`actor_id` per
  * the A0 single-commit-timestamp pattern.
  */
 export function appendClaimVersion(dataDir: string, record: ClaimVersionRecord): void {
   appendClaimVersions(dataDir, [record]);
+}
+
+/**
+ * FORGET.SCOPE{reason:erasure} canonical purge (spec §10).
+ *
+ * Erasure is the ONE sanctioned exception to the append-only L1 discipline:
+ * legal/PII erasure physically removes the client's claim version records
+ * from the canonical JSONL, because every derived index (Layer1 store, claim
+ * FTS, fingerprint index, ops receipts) is regenerated from this log — the
+ * record must be gone for wipe-and-rebuild to yield zero results
+ * (rebuild-equivalence, §10a). Month files are rewritten atomically
+ * (temp + rename) and fsynced; lost lines are not renumbered.
+ *
+ * Returns the number of claim version records removed.
+ */
+export function purgeClaimVersionsByScope(dataDir: string, scope: string): number {
+  const claimsDir = join(dataDir, 'claims');
+  if (!existsSync(claimsDir)) return 0;
+  let removed = 0;
+  for (const file of readdirSync(claimsDir).filter(f => f.endsWith('.jsonl'))) {
+    const filePath = join(claimsDir, file);
+    const lines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+    const kept: string[] = [];
+    let fileRemoved = 0;
+    for (const [i, line] of lines.entries()) {
+      let record: { scope?: unknown };
+      try {
+        record = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        throw new Error(`Malformed L1 JSONL at ${filePath}:${i + 1}`);
+      }
+      if (record.scope === scope) {
+        fileRemoved++;
+        continue;
+      }
+      kept.push(line);
+    }
+    if (fileRemoved === 0) continue;
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    const fd = openSync(tempPath, 'w', 0o600);
+    try {
+      if (kept.length > 0) writeFileSync(fd, `${kept.join('\n')}\n`, 'utf8');
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tempPath, filePath);
+    removed += fileRemoved;
+  }
+  return removed;
 }
 
 /** Append claim versions with one filesystem append per monthly file. */

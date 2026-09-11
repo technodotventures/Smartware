@@ -1,6 +1,6 @@
 {
   "name": "smartware",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "An open, user-owned memory protocol for every app and agent, with provenance, bitemporal truth, policy-first retrieval, and safe fallback.",
   "type": "module",
   "main": "dist/core.js",
@@ -11,6 +11,7 @@
   "files": [
     "dist",
     "schemas/v0.4.2",
+    "schemas/v0.5.0",
     "benchmarks/retrieval/*.json",
     "docs",
     "README.md",
@@ -25,6 +26,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:schemas": "node scripts/verify-schema-checksums.mjs",
+    "verify:saas": "npm run build --silent && node scripts/saas-integration-smoke.mjs",
     "benchmark:retrieval-kernel": "npm run build --silent && node scripts/run-retrieval-kernel-benchmark.mjs benchmarks/retrieval/kernel-contract-v1.json",
     "benchmark:retrieval-arena": "npm run build --silent && node scripts/evaluate-retrieval-arena.mjs benchmarks/retrieval/arena-contract-v1.json benchmarks/retrieval/arena-contract-run-v1.json",
     "benchmark:retrieval-activation-contract": "npm run build --silent && node scripts/evaluate-retrieval-activation.mjs benchmarks/retrieval/arena-contract-v1.json benchmarks/retrieval/arena-contract-run-v1.json benchmarks/retrieval/activation-contract-v1.json --expect-hold",
@@ -82,6 +84,9 @@
     "./schemas/v0.4.2/*": {
       "default": "./schemas/v0.4.2/*"
     },
+    "./schemas/v0.5.0/*": {
+      "default": "./schemas/v0.5.0/*"
+    },
     "./layer0": {
       "types": "./dist/layer0/index.d.ts",
       "import": "./dist/layer0/index.js"
@@ -93,6 +98,10 @@
     "./layer3": {
       "types": "./dist/layer3/search.d.ts",
       "import": "./dist/layer3/search.js"
+    },
+    "./render": {
+      "types": "./dist/render/provenance.d.ts",
+      "import": "./dist/render/provenance.js"
     }
   }
 }

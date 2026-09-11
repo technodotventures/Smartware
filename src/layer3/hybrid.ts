@@ -173,9 +173,19 @@ export function fuseHybridRankings(
     const rightChannels = Number(right.lexical_rank !== null) + Number(right.semantic_rank !== null);
     const leftBestRank = Math.min(left.lexical_rank ?? Infinity, left.semantic_rank ?? Infinity);
     const rightBestRank = Math.min(right.lexical_rank ?? Infinity, right.semantic_rank ?? Infinity);
+    // Spec §11.1 D2 (BINDING): exact ties are broken by semantic_relevance
+    // descending BEFORE the alphabetical id tiebreak — a principled score
+    // instead of id order (q03: 0.8365 vs 0.7385 flipped the winner). A
+    // channel-missing relevance (null) sorts last; the NaN case (null vs
+    // null, -Inf - -Inf) falls through to the id tiebreak so ordering stays
+    // deterministic.
+    const leftSemantic = left.semantic_relevance ?? Number.NEGATIVE_INFINITY;
+    const rightSemantic = right.semantic_relevance ?? Number.NEGATIVE_INFINITY;
+    const semanticDelta = rightSemantic - leftSemantic;
     return right.rrf_score - left.rrf_score
       || rightChannels - leftChannels
       || leftBestRank - rightBestRank
+      || (Number.isNaN(semanticDelta) ? 0 : semanticDelta)
       || left.id.localeCompare(right.id);
   }).slice(0, options.limit);
 }
