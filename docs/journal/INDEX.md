@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **18** entries.
+Total: **20** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -27,3 +27,5 @@ Total: **18** entries.
 | 2026-08-30 | [`2026-08-30-t_7ab8e358.md`](2026-08-30-t_7ab8e358.md) | G2-launch: D1+D2 hybrid internals fix — claim-level FTS as RRF lexical channel + tiebreak |
 | 2026-08-30 | [`2026-08-30-t_b5392e58.md`](2026-08-30-t_b5392e58.md) | G2-sub: full-pipeline compile budget — recorded re-scope + re-run (full pipeline <=10s @50k) |
 | 2026-09-09 | [`2026-09-09-t_ec51cb06.md`](2026-09-09-t_ec51cb06.md) | Build and deploy a version of Smartware than can be implemented into Coffee platform as per the latest Techno OS architecture |
+| 2026-09-10 | [`2026-09-10-t_0f787dcb.md`](2026-09-10-t_0f787dcb.md) | Consolidation/compaction operation — collapse superseded claim versions into a reviewed summary while preserving evidence + correction path |
+| 2026-09-10 | [`2026-09-10-t_a0d2171c.md`](2026-09-10-t_a0d2171c.md) | Retention / expiry / archival policy — enforce retention_duration + consume staleness.scope_overrides; scheduled expiry/archive/GC |

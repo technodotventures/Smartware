@@ -24,15 +24,15 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-09-t_ec51cb06.md`](journal/2026-09-09-t_ec51cb06.md) — Build and deploy a version of Smartware than can be implemented into Coffee platform as per the latest Techno OS architecture (2026-09-09)
-- **Journal entries:** 18 · tasks completed on board `smartware`: 18
+- **Journal:** [`2026-09-10-t_a0d2171c.md`](journal/2026-09-10-t_a0d2171c.md) — Retention / expiry / archival policy — enforce retention_duration + consume staleness.scope_overrides; scheduled expiry/archive/GC (2026-09-10)
+- **Journal entries:** 20 · tasks completed on board `smartware`: 20
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
-| `feature/retention-expiry` | 11 | 2026-09-10 | consolidate: collapse claim clusters into reviewed current-understanding (ADR-0002) |
+| `feature/retention-expiry` | 12 | 2026-09-10 | retention+consolidate: durability test + docs (tenant example, integration guide, ADR status) |
 | `release/coffee-v050-surface` | 8 | 2026-09-10 | release: 0.7.0 — v0.5.0 protocol surface cut on the upstream Node 22/24 gate |
 | `agent/hermes-onboarding` | 3 | 2026-08-25 | [verified] docs: name complete retrieval CI gate |
 
@@ -40,8 +40,7 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_0f787dcb` [ready] Consolidation/compaction operation — collapse superseded claim versions into a reviewed summary while preserving evidence + correction path (created 2026-09-10, unassigned)
-- `t_a0d2171c` [ready] Retention / expiry / archival policy — enforce retention_duration + consume staleness.scope_overrides; scheduled expiry/archive/GC (created 2026-09-10, unassigned)
+- Queue empty.
 
 ## Blockers and stale work
 
@@ -60,7 +59,7 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Health
 
-- ✅ declared block fresh (0d old)
+- ✅ declared block fresh (1d old)
 - ✅ kanban board readable (20 tasks, 780 events)
 - ✅ every completed task has a journal entry
 
