@@ -323,7 +323,7 @@ tenant config example), README, and LICENSE. The `exports` map in
 "./schemas/v0.4.2/*" and "./schemas/v0.5.0/*"
 ```
 
-Requires Node.js ≥ 20. `npm start` runs the stdio MCP server.
+Requires Node.js ≥ 22. `npm start` runs the stdio MCP server.
 
 ---
 
