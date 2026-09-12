@@ -153,6 +153,57 @@ Four things that will otherwise cost you an afternoon:
 
    `canonicalKey` is exported from the package root for exactly this check.
 
+### 1e. Corroboration, not duplication
+
+Re-observing the same fact must strengthen the claim that already asserts it, not mint a twin.
+Nothing inside Smartware wires identity to the corroboration helper for you — the host owns
+extraction, so the host owns identity. Skipped, every restatement accumulates: measured on a
+pilot, one billing preference restated twelve ways produced **14 recall results for 2 distinct
+facts**, and recall quality degrades the longer the product runs.
+
+```js
+import { canonicalKey } from 'smartware';
+import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
+
+const existing = store.findByCanonicalKey(subjectId, predicate, scope, validityFrom);
+if (existing) {
+  addCorroborationEvidence(existing.id, observation.id, store);  // dedupes, recomputes confidence
+  syncSearchFromClaims(store, searchIndex, scope);                // recall must see the new confidence
+} else {
+  store.insertClaim({ /* ...a new claim... */ });
+}
+```
+
+`canonicalKey(subjectId, predicate, scope, validityFrom)` is the identity the store looks claims
+up by — the same value your `insertClaim` put in `validity.from`.
+
+**Confidence is derived, not stored input.** `addCorroborationEvidence` recomputes it from the
+claim's own fields (epistemic, evidence, recency, extraction), so a value you hand-set when
+inserting is *replaced* the first time the claim is corroborated — a pilot that inserted `0.9` saw
+`0.51`, the formula's answer for that claim. Set the initial value with the same formula so the two
+agree:
+
+```js
+import { computeConfidence } from 'smartware/layer1/confidence';
+
+const claim = { /* ...fields... */ };
+claim.confidence = computeConfidence(claim);   // don't hand-set what the library will recompute
+store.insertClaim(claim);
+```
+
+The trap below applies with it: identity includes `validity_from` as an **exact string**. If your extractor stamps a
+fresh `new Date().toISOString()` on every write, no two writes ever produce the same key and
+corroboration *silently never fires* — you get duplicate accumulation back, with the recipe
+apparently followed. Either derive `validity_from` from the fact's own validity start (coarse
+enough to be stable), or, when the fact carries no date, resolve to the active claim asserting the
+same object instead:
+
+```js
+const existing = store.getClaimsBySubject(subjectId, 'active')
+  .find(c => c.predicate === predicate && c.scope === scope
+          && c.object.value === value && c.validity.to === null);
+```
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by
