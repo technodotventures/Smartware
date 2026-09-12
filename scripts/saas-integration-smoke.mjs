@@ -3,9 +3,11 @@
 // resolves through package.json "exports", so this file fails to run if any of these
 // paths stop being public. (It previously imported ../dist/... deep paths, which
 // "exports" enforcement blocks for consumers: the example could not be reproduced.)
-import { SmartwareCore, createDefaultConfig, knownTime, nullTime } from 'smartware';
+import { SmartwareCore, createDefaultConfig, knownTime, nullTime, canonicalKey } from 'smartware';
 import { showAttributionByDefault, attributionLine, whySentence } from 'smartware/render';
 import { ClaimStore } from 'smartware/layer1';
+import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
+import { computeConfidence } from 'smartware/layer1/confidence';
 import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -71,20 +73,61 @@ store.insertEntity({
   id: subjectId, canonical_name: 'Acme', aliases: [], type: 'organization',
   scope: 'client:acme#1', created_at: new Date().toISOString(),
 });
-const claimId = 'claim_acme_billing';
-store.insertClaim({
-  id: claimId, subject_id: subjectId, subject_name: 'Acme',
+
+// A claim's identity is (subject, predicate, scope, validity_from) — held in a variable because
+// the same value is what makes a later restatement of this fact resolve back to THIS claim.
+const validityFrom = new Date().toISOString();
+const claim = {
+  id: 'claim_acme_billing', subject_id: subjectId, subject_name: 'Acme',
   predicate: 'prefers_billing', object: { type: 'text', value: 'quarterly' },
-  scope: 'client:acme#1', validity: { from: new Date().toISOString(), to: null },
-  t_ingested: knownTime(new Date().toISOString()), t_invalidated: nullTime(),
-  t_valid_from: knownTime(new Date().toISOString()), t_valid_to: nullTime(),
+  scope: 'client:acme#1', validity: { from: validityFrom, to: null },
+  t_ingested: knownTime(validityFrom), t_invalidated: nullTime(),
+  t_valid_from: knownTime(validityFrom), t_valid_to: nullTime(),
   source_event_id: obs.id, extraction_event_id: obs.id, supporting_evidence: [obs.id],
   extraction: { method: 'deterministic', model: null, compiler_version: '0.6.3', prompt_hash: null, extracted_at: new Date().toISOString() },
-  status: 'active', epistemic: 'observed', confidence: 0.9, sensitive: false,
+  status: 'active', epistemic: 'observed', confidence: 0, sensitive: false,
   superseded_by: null, contested_by: [],
-});
+};
+// Confidence is derived, not stored input: corroboration recomputes it from the claim's own
+// fields, so a hand-set value is replaced the first time evidence is added. Use the formula.
+claim.confidence = computeConfidence(claim);
+store.insertClaim(claim);
 const searchIndex = new SearchIndex(dbPath);
 syncSearchFromClaims(store, searchIndex, 'client:acme#1');
+
+// 3d. The same fact arriving again is CORROBORATION, not a second claim.
+//
+// Nothing inside Smartware wires identity to the corroboration helper — the host owns
+// extraction, so the host owns identity. Skip this step and every restatement mints a twin:
+// measured on a pilot, one billing preference restated twelve ways produced 14 recall results
+// for 2 distinct facts, because each paraphrase inserted a fresh claim.
+const restated = await memory.observe({
+  actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+  type: 'message',
+  content: { format: 'text/markdown', body: 'Acme confirmed again: they want to be invoiced quarterly.' },
+  scope: 'client:acme#1',
+  visibility: 'scope',
+  operation_id: opId(),
+});
+const key = canonicalKey(subjectId, 'prefers_billing', 'client:acme#1', validityFrom);
+const existing = store.findByCanonicalKey(subjectId, 'prefers_billing', 'client:acme#1', validityFrom);
+if (!existing) {
+  fail.push(`findByCanonicalKey(${key}) did not resolve the existing claim — corroboration would be skipped`);
+} else {
+  const evidenceBefore = existing.supporting_evidence.length;
+  addCorroborationEvidence(existing.id, restated.id, store);
+  syncSearchFromClaims(store, searchIndex, 'client:acme#1');
+  const after = store.getClaim(existing.id);
+  const active = store.getActiveClaims('client:acme#1');
+  // Compare against the same claim scored with one fewer piece of evidence, so the assertion is
+  // formula-to-formula rather than against a number this script chose.
+  const scoredAlone = computeConfidence({ ...after, supporting_evidence: [obs.id] });
+  if (after.supporting_evidence.length === evidenceBefore + 1 && active.length === 1 && after.confidence > scoredAlone) {
+    okay.push(`corroboration ok (1 claim, evidence ${evidenceBefore}→${after.supporting_evidence.length}, confidence ${scoredAlone.toFixed(4)}→${after.confidence.toFixed(4)}, no twin inserted)`);
+  } else {
+    fail.push(`corroboration did not accumulate as expected: evidence ${after.supporting_evidence.length}, active claims ${active.length}, confidence ${after.confidence.toFixed(4)} vs expected >${scoredAlone.toFixed(4)}`);
+  }
+}
 store.close();
 searchIndex.close();
 
@@ -96,6 +139,12 @@ const hits = await memory.recall({
 });
 const rc = Array.isArray(hits) ? hits : (hits.results ?? hits.matches ?? hits.claims ?? []);
 if (rc && rc.length > 0) okay.push(`recall ok (${rc.length} claim(s))`); else fail.push(`recall empty: ${JSON.stringify(hits).slice(0, 200)}`);
+// The corroborated restatement must not have added a second result for the same fact.
+if (rc && rc.length === 1) {
+  okay.push('recall returns one claim for the corroborated fact (restating it did not create a twin)');
+} else if (rc) {
+  fail.push(`recall returned ${rc.length} claims for one fact — corroboration did not prevent a duplicate`);
+}
 
 // 4. Provenance render (staff-facing attribution) via smartware/render.
 const renderInput = {

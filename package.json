@@ -98,6 +98,14 @@
       "types": "./dist/layer1/store.d.ts",
       "import": "./dist/layer1/store.js"
     },
+    "./layer1/corroboration": {
+      "types": "./dist/layer1/corroboration.d.ts",
+      "import": "./dist/layer1/corroboration.js"
+    },
+    "./layer1/confidence": {
+      "types": "./dist/layer1/confidence.d.ts",
+      "import": "./dist/layer1/confidence.js"
+    },
     "./layer3": {
       "types": "./dist/layer3/search.d.ts",
       "import": "./dist/layer3/search.js"
