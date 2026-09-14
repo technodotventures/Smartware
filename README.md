@@ -69,8 +69,8 @@ Smartware `0.6.x` is beta software.
 - Semantic and hybrid retrieval are opt-in protocol capabilities.
 - The deterministic retrieval kernel passes 9/9 scenarios with Hit@1 `1.0`,
   MRR `1.0`, and zero forbidden hits.
-- The standalone protocol and implementation suite passes 446 tests across
-  64 files with no skips.
+- The standalone protocol and implementation suite passes 490 tests across
+  69 files with no skips.
 - Semantic activation remains fail-closed until sealed held-out evaluation
   passes the configured quality, safety, latency, and cost gates.
 - The production dependency audit reports zero vulnerabilities.

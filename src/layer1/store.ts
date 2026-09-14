@@ -16,12 +16,14 @@ import type {
   RelationKind,
   RelationProvenance,
 } from './types.js';
+import type { TypedValue } from '../layer0/types.js';
 import {
   compatibilityValidity,
   confidenceToBucket,
   epistemicToTag,
   inferredTime,
   knownTime,
+  normaliseValue,
   nullTime,
   statusToState,
 } from './types.js';
@@ -758,6 +760,23 @@ export class ClaimStore {
       ? this.db.prepare(sql).all(subjectId, status) as Record<string, unknown>[]
       : this.db.prepare(sql).all(subjectId) as Record<string, unknown>[];
     return rows.map(row => this.rowToClaim(row));
+  }
+
+  findActiveFactMatches(
+    subjectId: string,
+    fact: { predicate: string; scope: string; object: TypedValue },
+  ): Claim[] {
+    const wanted = normaliseValue(fact.object);
+    return this.getClaimsBySubject(subjectId, 'active')
+      .filter(claim =>
+        claim.predicate === fact.predicate
+        && claim.scope === fact.scope
+        && claim.validity.to === null
+        && normaliseValue(claim.object) === wanted)
+      // Survivor order: claim ids are ULIDs (time-ordered), so the smallest id is the
+      // earliest-minted claim. Returning the list in that order means `matches[0]` is the
+      // survivor even for a caller that ignores the rest.
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
   getActiveClaims(scope?: string): Claim[] {

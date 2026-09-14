@@ -35,18 +35,39 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-10 for the 0.7.0 release cut on Node v26.5.1 (CI re-runs the
-same gate via `npm ci` from `package-lock.json` on Node 22 and 24, so the two
-runtime lines are verified by CI rather than by this local run), superseding
-the 2026-09-07 baseline: the counts below are unchanged — **446 tests across
-64 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
-contract still fails closed.
+Verified 2026-09-14 on Node v26.5.1 for the duplicate-claim-identity change
+(`fix/duplicate-claim-recipe`), superseding the 2026-09-10 0.7.0 release-cut
+baseline (which recorded **446 tests across 64 files**): **490 tests across
+69 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
+contract still fails closed. The 19-test delta is
+`test/layer1/fact-identity.test.ts` (see below); no other suite changed. (CI
+re-runs the same gate via `npm ci` from `package-lock.json` on Node 22 and 24,
+so the two runtime lines are verified by CI rather than by this local run.)
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **446 tests across 64 files** with no skips.
+- The standalone suite passes **490 tests across 69 files** with no skips.
+- The fact-identity suite (`test/layer1/fact-identity.test.ts`, 19 tests) pins the
+  claim write-path identity contract documented in the integration guide §1e:
+  `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
+  fact (survivor order — lexicographically smallest claim id, i.e. earliest-minted
+  ULID first) and `resolveFactMatches` folds duplicates into that survivor by
+  unioning the losers' `supporting_evidence`, demoting them (`status:
+  'superseded'`, `superseded_by`, timestamped, never deleted), recomputing
+  confidence with the library formula, and reporting `ambiguous_matches` /
+  `superseded_claims`. Both insertion orders of a duplicate pair yield the same
+  survivor; a demoted duplicate is no longer matched. The same 6 fixtures as the
+  host-side pilot reference implementation are reproduced 1:1, so the pilot's
+  deterministic suite remains a valid cross-check.
+- `npm run verify:saas` (public-API smoke) exercises the same contract end to end
+  against the packaged surface: a store seeded with two active claims for one fact
+  answers **2** recall results for that fact and **1** after
+  `resolveFactMatches`, with the duplicate superseded, its evidence unioned
+  (2→3 refs), survivor confidence formula-consistent, and the two rows for the one
+  fact shown to carry two different `canonicalKey`s (the key includes
+  `validity_from`, so it is not the fact identity).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
   "Learned from Maya, May 12; corrected by owner May 13.", badge set
@@ -132,6 +153,12 @@ The exact ordering and recovery state table are documented in
   guarantee.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts
   remain available for manual review.
+- Duplicate-claim convergence is **host-triggered**, not automatic: an existing
+  store keeps two active claims for one fact until a write touching that fact
+  resolves them or the host sweeps the scope (`ClaimStore.findActiveFactMatches`
+  + `resolveFactMatches`, integration guide §1e). Identity is
+  `(subject, predicate, scope, object value)` — the same fact asserted in two
+  different scopes is never merged.
 - The suite does not prove concurrent multi-writer serialization or universal
   sudden-power-loss durability.
 - REFLECT page output and search databases are rerunnable projections rather

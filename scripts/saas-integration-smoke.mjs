@@ -6,7 +6,7 @@
 import { SmartwareCore, createDefaultConfig, knownTime, nullTime, canonicalKey } from 'smartware';
 import { showAttributionByDefault, attributionLine, whySentence } from 'smartware/render';
 import { ClaimStore } from 'smartware/layer1';
-import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
+import { addCorroborationEvidence, resolveFactMatches } from 'smartware/layer1/corroboration';
 import { computeConfidence } from 'smartware/layer1/confidence';
 import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
 import fs from 'node:fs';
@@ -128,10 +128,63 @@ if (!existing) {
     fail.push(`corroboration did not accumulate as expected: evidence ${after.supporting_evidence.length}, active claims ${active.length}, confidence ${after.confidence.toFixed(4)} vs expected >${scoredAlone.toFixed(4)}`);
   }
 }
+
+// 3e. Duplicate active claims for ONE fact must CONVERGE, not be silently picked.
+//
+// The shape a write path leaves behind when it mints a claim per observation: two ACTIVE claims
+// asserting the same fact. `getClaimsBySubject` has no ORDER BY, so resolving that with `.find()`
+// picks whichever row SQLite returns first, decides the survivor by row order, and reports nothing.
+// Seed that shape, measure the double answer it produces, then resolve it with the shipped helper.
+const reiterated = await memory.observe({
+  actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+  type: 'message',
+  content: { format: 'text/markdown', body: 'Acme reiterated: quarterly, not monthly.' },
+  scope: 'client:acme#1',
+  visibility: 'scope',
+  operation_id: opId(),
+});
+
+// `claim_acme_billing_twin` sorts AFTER `claim_acme_billing`, so the duplicate is the loser.
+const twinId = 'claim_acme_billing_twin';
+const twinValidityFrom = new Date().toISOString();
+const twin = {
+  ...claim, id: twinId, validity: { from: twinValidityFrom, to: null },
+  t_ingested: knownTime(twinValidityFrom), t_valid_from: knownTime(twinValidityFrom),
+  source_event_id: reiterated.id, extraction_event_id: reiterated.id,
+  supporting_evidence: [reiterated.id], superseded_by: null, confidence: 0,
+};
+twin.confidence = computeConfidence(twin);
+store.insertClaim(twin);
+syncSearchFromClaims(store, searchIndex, 'client:acme#1');
+
+// The canonical key cannot be the identity: two rows for ONE fact carry two different keys,
+// because the key includes validity_from and this write path stamps a fresh one every time.
+const twinKey = canonicalKey(subjectId, 'prefers_billing', 'client:acme#1', twinValidityFrom);
+if (twinKey !== key && store.findByCanonicalKey(subjectId, 'prefers_billing', 'client:acme#1', twinValidityFrom)?.id === twinId) {
+  okay.push('canonical key is NOT the fact identity (two active rows, one fact, two different keys)');
+} else {
+  fail.push(`the duplicate did not land on its own canonical key: ${twinKey} vs ${key}`);
+}
+
+// Every active claim asserting the fact — the two rows, in survivor order.
+const matches = store.findActiveFactMatches(subjectId, {
+  predicate: 'prefers_billing', scope: 'client:acme#1', object: { type: 'text', value: 'quarterly' },
+});
+if (matches.length === 2 && matches[0].id === 'claim_acme_billing') {
+  okay.push(`findActiveFactMatches returns every duplicate (${matches.map(c => c.id).join(', ')}) with the survivor first`);
+} else {
+  fail.push(`findActiveFactMatches returned ${matches.length} match(es): ${matches.map(c => c.id).join(', ')}`);
+}
 store.close();
 searchIndex.close();
 
-// 3c. Recall the compiled claim via the public API (owner subject bypasses grants).
+const claimIds = (result) => {
+  const rows = Array.isArray(result) ? result : (result.results ?? result.matches ?? result.claims ?? []);
+  return rows.map((r) => r.claim?.id ?? r.claim_id ?? r.id ?? 'unknown');
+};
+
+// 3c. Recall the compiled claim via the public API (owner subject bypasses grants) — BEFORE the
+// duplicate is resolved, where the recipe in older docs left recall double-answering.
 const hits = await memory.recall({
   actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
   query: 'Acme billing',
@@ -139,11 +192,60 @@ const hits = await memory.recall({
 });
 const rc = Array.isArray(hits) ? hits : (hits.results ?? hits.matches ?? hits.claims ?? []);
 if (rc && rc.length > 0) okay.push(`recall ok (${rc.length} claim(s))`); else fail.push(`recall empty: ${JSON.stringify(hits).slice(0, 200)}`);
-// The corroborated restatement must not have added a second result for the same fact.
-if (rc && rc.length === 1) {
-  okay.push('recall returns one claim for the corroborated fact (restating it did not create a twin)');
-} else if (rc) {
-  fail.push(`recall returned ${rc.length} claims for one fact — corroboration did not prevent a duplicate`);
+// The symptom the old recipe produced, measured: ONE fact, TWO answers.
+if (claimIds(hits).length === 2) {
+  okay.push(`duplicate baseline measured: recall answers twice for one fact (${claimIds(hits).join(', ')})`);
+} else {
+  fail.push(`expected 2 recall results for the duplicate-laden fact, got ${claimIds(hits).length}: ${claimIds(hits).join(', ')}`);
+}
+
+// Resolve: fold every active claim for the fact into one survivor that keeps the provenance.
+const resolvingStore = new ClaimStore(dbPath);
+resolvingStore.setDataDir(dataDir);
+const resolution = resolveFactMatches({ store: resolvingStore, matches, observationId: reiterated.id });
+const survivor = resolvingStore.getClaim(resolution.claimId);
+const demoted = resolvingStore.getClaim(twinId);
+const activeAfter = resolvingStore.getActiveClaims('client:acme#1').filter((c) => c.validity.to === null);
+const evidenceBefore = matches[0].supporting_evidence.length;
+const formulaConfidence = survivor ? computeConfidence(survivor) : 0;
+const resolutionOk = survivor
+  && resolution.claimId === 'claim_acme_billing'
+  && resolution.ambiguous_matches === 2
+  && resolution.ambiguity_resolved === true
+  && resolution.superseded_claims.length === 1 && resolution.superseded_claims[0] === twinId
+  && survivor.supporting_evidence.length === evidenceBefore + 1
+  && survivor.supporting_evidence.includes(reiterated.id)
+  && Math.abs(survivor.confidence - formulaConfidence) <= 1e-6
+  && demoted?.status === 'superseded' && demoted?.superseded_by === 'claim_acme_billing'
+  && demoted.supporting_evidence.length === 1
+  && activeAfter.length === 1;
+if (resolutionOk) {
+  okay.push(`duplicate resolved: survivor ${resolution.claimId}, ambiguous_matches ${resolution.ambiguous_matches}, superseded [${resolution.superseded_claims.join(', ')}], evidence ${evidenceBefore}→${survivor.supporting_evidence.length}, confidence formula-consistent`);
+} else {
+  fail.push(`duplicate resolution did not hold: ${JSON.stringify({
+    claimId: resolution.claimId, ambiguous_matches: resolution.ambiguous_matches,
+    superseded_claims: resolution.superseded_claims,
+    evidence: survivor?.supporting_evidence, demoted: demoted?.status,
+    superseded_by: demoted?.superseded_by, active: activeAfter.length,
+    confidenceDelta: survivor ? Math.abs(survivor.confidence - formulaConfidence) : null,
+  })}`);
+}
+const resolvingIndex = new SearchIndex(dbPath);
+syncSearchFromClaims(resolvingStore, resolvingIndex, 'client:acme#1');
+resolvingStore.close();
+resolvingIndex.close();
+
+// The corroborated-and-resolved fact must now answer once: a demoted duplicate leaves the
+// recall-eligible set (`status === 'active'`), which is what removes the second answer.
+const hitsAfter = await memory.recall({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
+  query: 'Acme billing',
+  scope: 'client:acme#1',
+});
+if (claimIds(hitsAfter).length === 1) {
+  okay.push(`recall converged to one claim for the fact after resolution (${claimIds(hitsAfter).join(', ')})`);
+} else {
+  fail.push(`recall returned ${claimIds(hitsAfter).length} claims for one fact after resolution: ${claimIds(hitsAfter).join(', ')}`);
 }
 
 // 4. Provenance render (staff-facing attribution) via smartware/render.
