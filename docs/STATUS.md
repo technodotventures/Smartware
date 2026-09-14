@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/neo/demotion-durability` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/smarty/demotion-handbuilt-records` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -32,7 +32,8 @@
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
-| `wip/neo/p0-sources-ingestion` | 41 | 2026-09-14 | docs: refresh STATUS projection (board counters) |
+| `wip/neo/demotion-durability` | 43 | 2026-09-14 | docs(journal): state delta for t_01ef0ede (demotion durability) + STATUS regen |
+| `wip/neo/p0-sources-ingestion` | 42 | 2026-09-14 | restore: EXPORT.SCOPE packages get a tested return path (ADR-0006) |
 | `docs/protocol-identity-adr` | 40 | 2026-09-14 | docs: decide protocol claim identity — one fact-identity predicate, one creation key |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
@@ -59,7 +60,6 @@ Unmerged work — read the branch before assuming this tree is current.
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
 - `t_2996a3ab` [todo] Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) (created 2026-09-14, assignee neo)
-- `t_742e31f9` [ready] Smartware: carry a mechanical demotion through hand-built version records (REVISE/forget/revive/endorse/consolidation) — decide preserve vs release per flow (created 2026-09-14, assignee smarty-pants)
 
 ## Blockers and stale work
 
@@ -83,7 +83,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (3d old)
-- ✅ kanban board readable (45 tasks, 1215 events)
+- ✅ kanban board readable (45 tasks, 1240 events)
 - ✅ every completed task has a journal entry
 - ⚠️ 1 blocked task(s)
 
