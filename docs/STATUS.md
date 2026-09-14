@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wt/t_ad51d0e2` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wt/t_c5c999ba` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -25,7 +25,7 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-14-t_ec159c21.md`](journal/2026-09-14-t_ec159c21.md) — P0 fix: deterministic corroboration proof in Coffee-shaped pilot (2026-09-14)
-- **Journal entries:** 36 · tasks completed on board `smartware`: 37
+- **Journal entries:** 36 · tasks completed on board `smartware`: 39
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -33,7 +33,9 @@
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
 | `wip/smarty/demotion-handbuilt-records` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
+| `wt/t_ad51d0e2` | 46 | 2026-09-14 | docs: regenerate STATUS projection (lifecycle composition lane) |
 | `wip/neo/p0-sources-ingestion` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
+| `wt/t_65569b9e` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
 | `wip/neo/demotion-durability` | 43 | 2026-09-14 | docs(journal): state delta for t_01ef0ede (demotion durability) + STATUS regen |
 | `docs/protocol-identity-adr` | 40 | 2026-09-14 | docs: decide protocol claim identity — one fact-identity predicate, one creation key |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
@@ -54,7 +56,6 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_65569b9e` [todo] P1 implement: company-brain observability and SLO contract (created 2026-09-13, assignee neo)
 - `t_ba868906` [todo] P1 build: Coffee reference adapter for workspaces, staff and agents (created 2026-09-13, assignee neo)
 - `t_9740ae98` [todo] GATE run: realistic Coffee company-brain acceptance and soak (created 2026-09-13, assignee neo)
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
@@ -75,6 +76,7 @@ Unmerged work — read the branch before assuming this tree is current.
 | [0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md) | ADR-0004 — Contradiction and bi-temporal lifecycle | (no status line) |  |
 | [0005](adr/0005-sources-ingestion-and-federation.md) | ADR-0005 — Sources, connector ingestion and federated reads | (no status line) |  |
 | [0006](adr/0006-export-restore-return-path.md) | ADR-0006 — An export must have a return path: RESTORE.SCOPE | (no status line) |  |
+| [0008](adr/0008-legal-hold-composition.md) | Legal hold is composition, not a substrate marker | Accepted | 2026-09-14 |
 
 ## Verification state
 
@@ -86,8 +88,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (3d old)
-- ✅ kanban board readable (48 tasks, 1362 events)
-- ⚠️ 1 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (49 tasks, 1426 events)
+- ⚠️ 3 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 2 blocked task(s)
 
 ## Canonical index

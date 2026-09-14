@@ -52,13 +52,18 @@ build clean (`tsc`), same schema and kernel results. Re-measured a fourth time
 results. Re-measured a fifth time 2026-09-14 after the lifecycle-composition
 suite landed (`test/conformance/q_lifecycle_composition.test.ts`, t_ad51d0e2):
 **529 tests across 73 files**, build clean (`tsc`), 31 schema files verified,
-`verify:saas` pass — same kernel and conformance results.
+`verify:saas` pass — same kernel and conformance results. Re-measured a sixth
+time 2026-09-14 after the legal-hold composition suite landed and the hold
+decision was recorded (`test/conformance/r_legal_hold_composition.test.ts`,
+t_c5c999ba → ADR-0008): **532 tests across 74 files**, build clean (`tsc`),
+31 schema files verified, `verify:saas` pass — same kernel and conformance
+results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **529 tests across 73 files** with no skips
+- The standalone suite passes **532 tests across 74 files** with no skips
   (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
@@ -83,6 +88,22 @@ suite landed (`test/conformance/q_lifecycle_composition.test.ts`, t_ad51d0e2):
   markers; (d) provenance integrity — every recall hit resolves its source
   observation + ops entry, superseded claims never satisfy recall/get, and
   multi-version history is order-correct, including on rebuilt state.
+- The legal-hold composition suite
+  (`test/conformance/r_legal_hold_composition.test.ts`, 3 tests, added
+  2026-09-14, t_c5c999ba → [ADR-0008](adr/0008-legal-hold-composition.md)) is
+  the executable half of the hold decision: with an **elapsed time-bound**
+  observation in a scope that took the hold lane, (R1) the sweep over the held
+  scope expires nothing and writes no bytes — the hold lane *is* the skip, by
+  construction, not by a flag the sweep consults; (R2) evidence written into the
+  held scope *after* the hold is tombstoned by an elapsed sweep, non-destructively
+  — nothing is removed from the canonical log and a post-sweep F1 export of the
+  held scope still carries every observation row with no deletion certificate, so
+  the defense record survives every non-erasure lifecycle act; (R3) erasure on a
+  held scope is the owner's terminal act, recorded not gated — it succeeds with an
+  explicit `attestation: null`, the only substrate-side refusal being
+  `requireOwner`. (C8 of the lifecycle-composition suite asserted the same "skip"
+  claim on `forever`-policy evidence, where it could not have failed; R1 reruns it
+  on time-bound evidence.)
 - The Coffee company-brain e2e suite (`test/conformance/coffee-company-brain.test.ts`,
   3 tests) proves the multi-actor product flow on the real core (spec §10b/§10c/§25):
   one business = one tenant; owner admin; clients as scopes under `workspace`

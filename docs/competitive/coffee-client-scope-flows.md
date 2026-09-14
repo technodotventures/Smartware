@@ -185,7 +185,7 @@ Render shape: `learned from ⟨source type⟩ ⟨date⟩; corrected ⟨date⟩` 
 | Substrate | FORGET.SCOPE (erasure/offboarding), owner_pointer, same-commit revocation, non-reusable markers, audits | SHIPPED v0.5.0 (G2) | tech-head | none |
 | Substrate | `smartware_export_scope` + manifest | **SHIPPED (G3.1)** — owner-only, one-scope boundary, canonical package + manifest, idempotent per operation_id, export-before-erasure link (`details.export_id`) | tech-head | none — can ship before Coffee window |
 | Substrate | import/restore verb (portability round-trip) | CONTRACT defined (re-import-equivalence acceptance test) | tech-head | G4 — after export impl |
-| Substrate | explicit legal-hold marker | v1 = composition (offboarding + export + attestation); explicit marker = G4 decision | @user / tech-head | G4 |
+| Substrate | explicit legal-hold marker | **DECIDED (ADR-0008, 2026-09-14): not built — v1 composition stands** (hold lane + snapshot + attestation); trigger-gated | @user / tech-head | G4 — only on an ADR-0008 §3 trigger |
 | Coffee | F1–F5 UX (gates, receipts, pointer builder, attribution) | DESIGNED; unimplemented (Coffee repo) | Coffee team | Coffee release window — **@user dates** |
 | Coffee | client data-rights request intake (owner-mediated v1) | DESIGNED | Coffee team | Coffee window |
 
@@ -193,7 +193,7 @@ Render shape: `learned from ⟨source type⟩ ⟨date⟩; corrected ⟨date⟩` 
 1. Coffee release window (plan G3: "no dates until Coffee's window is known").
 2. Which flows ship in the launch cut vs after — recommendation: F2/F3/F5 (zero new substrate work; F3 needs the export tool for its default lane), F1 as the substrate tool before window (cheapest, unblocks everything).
 3. Does G3.1 (`smartware_export_scope`) ship substrate-side now? Recommended YES — it has no Coffee dependency and F1/F3 both consume it.
-4. Legal-hold: explicit substrate marker (G4) vs v1 composition (offboarding + export + owner attestation). Composition is sufficient; recommend explicit marker only if a dispute actually happens before Coffee grows.
+4. Legal-hold: **decided 2026-09-14 — v1 composition is the answer (ADR-0008)**. No substrate marker is built; the observable seam is the recorded attestation + snapshot link. The marker returns to the owner only if a trigger fires (a real dispute/hold before the client-scope flows are generally available; a second consumer needing a substrate-verifiable refusal; an erasure executed with a hold open; a tenant that must prove hold state at a past instant).
 
 ---
 
@@ -207,3 +207,4 @@ Render shape: `learned from ⟨source type⟩ ⟨date⟩; corrected ⟨date⟩` 
 | Zero-results-every-lane + marker non-reuse, asserted against rebuilt indexes | conformance t_58b66030 (`test/conformance/v050-rebuild-forget-provenance.test.ts`, 14 tests) |
 | Exact-id grants; `client:*` / `client:acme#*` never match; #2 never authorizes #1 | t_400a42f8 (`scripts/verify-config-shape.mjs`); spec §10b.2, §10b.5 |
 | Observation shape (scope field), claim versions (scope), ops entry (`details` only) | `src/layer0/types.ts:74`, `src/layer1/jsonl.ts`, `src/ops_log/types.ts:33` |
+| Legal-hold composition: the hold lane IS the sweep skip; a post-hold sweep is tombstone-only (bytes retained, held scope still exportable in full); erasure is recorded not gated (`attestation: null`) | [ADR-0008](../adr/0008-legal-hold-composition.md) §2/§4; `test/conformance/r_legal_hold_composition.test.ts` (R1–R3, t_c5c999ba) |

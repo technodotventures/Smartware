@@ -583,6 +583,16 @@ never see the affordance.
   attestation is recorded: `attestation: 'no pending dispute / hold released'`
   (erasure lane only; `details.attestation` in the ops entry). The audit marker
   is the deletion certificate.
+  **Decision (2026-09-14, ADR-0008): the substrate holds no legal-hold state and
+  will not refuse on one.** It records: the ops entry always carries
+  `attestation` — the statement, or an explicit `null` — plus `export_id`, so an
+  audit can always tell whether the owner claimed the hold released. Keep the
+  hold **in the integrator's flow** (a dispute → the hold lane only; erasure
+  offered only behind the attestation), and read a held scope from its F1
+  snapshot: a held scope is lane-silent by design. An elapsed retention sweep
+  over a held scope tombstones nothing (the hold lane already did), and evidence
+  written after the hold is tombstoned — non-destructively, with the scope still
+  exportable in full.
 
 ```ts
 await memory.forgetScope({
