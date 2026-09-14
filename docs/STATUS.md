@@ -52,7 +52,6 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_00a9df88` [ready] P0 verify/fix: single-writer resilience, recovery and portability gauntlet (created 2026-09-13, assignee neo)
 - `t_ad51d0e2` [todo] P1 verify/fix: retention, forget, offboarding, export/import and legal-hold composition (created 2026-09-13, assignee neo)
 - `t_65569b9e` [todo] P1 implement: company-brain observability and SLO contract (created 2026-09-13, assignee neo)
 - `t_ba868906` [todo] P1 build: Coffee reference adapter for workspaces, staff and agents (created 2026-09-13, assignee neo)
@@ -83,7 +82,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (3d old)
-- ✅ kanban board readable (44 tasks, 1195 events)
+- ✅ kanban board readable (44 tasks, 1201 events)
 - ✅ every completed task has a journal entry
 - ⚠️ 1 blocked task(s)
 
