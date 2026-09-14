@@ -91,6 +91,11 @@ import {
   type ExportScopeParams,
   type ExportScopeResult,
 } from './protocol/export_scope.js';
+import {
+  handleRestoreScope,
+  type RestoreScopeParams,
+  type RestoreScopeResult,
+} from './protocol/restore_scope.js';
 import { handleEndorse, type EndorseParams, type EndorseResult } from './protocol/endorse.js';
 import {
   handleQuarantineReview,
@@ -1373,6 +1378,29 @@ export class SmartwareCore {
       store: this.store,
       config,
     });
+  }
+
+  /**
+   * RESTORE.SCOPE — the return path for an EXPORT.SCOPE package: write one package's canonical
+   * records back into this brain (owner-only; target scope must be empty). Derived state
+   * catches up from the canonical records, exactly like a wipe-and-rebuild.
+   */
+  async restoreScope(params: RestoreScopeParams): Promise<RestoreScopeResult> {
+    const config = this.getConfig();
+    const result = await handleRestoreScope(params, {
+      evidenceDir: this.evidenceDir,
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      store: this.store,
+      config,
+    });
+    if (result.status === 'restored') {
+      this.layer0.catchUp(this.evidenceDir);
+      this.store.setDataDir(this.dataDir);
+      syncSearchFromClaims(this.store, this.searchIndex, result.scope);
+      syncObservationsFromEvidence(this.evidenceDir, this.layer0, this.searchIndex);
+    }
+    return result;
   }
 
   /**

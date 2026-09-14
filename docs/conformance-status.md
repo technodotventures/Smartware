@@ -46,13 +46,16 @@ kernel results. Re-measured again 2026-09-14 after the contradiction/temporal
 lifecycle suite landed: **488 tests across 70 files**, build clean (`tsc`),
 same schema and kernel results. Re-measured a third time 2026-09-14 after the
 sources/ingestion/federated-read suite landed: **515 tests across 71 files**,
-build clean (`tsc`), same schema and kernel results.
+build clean (`tsc`), same schema and kernel results. Re-measured a fourth time
+2026-09-14 after the export-restore return path landed (ADR-0006):
+**520 tests across 72 files**, build clean (`tsc`), same schema and kernel
+results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **515 tests across 71 files** with no skips
+- The standalone suite passes **520 tests across 72 files** with no skips
   (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship

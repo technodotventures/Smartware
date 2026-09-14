@@ -89,8 +89,9 @@ or attach it to your own transport. Tools include the canonical verbs
 `smartware_observe`, `smartware_recall`, `smartware_reflect`,
 `smartware_revise`, `smartware_forget`, plus `smartware_context`, `read`,
 `explain`, `correct`, `quarantine_review`, `grant`/`revoke`, `session_*`,
-the two owner-only Coffee operations `smartware_forget_scope` and
-`smartware_export_scope`, and the shared-workspace set
+the owner-only Coffee operations `smartware_forget_scope`,
+`smartware_export_scope` and `smartware_restore_scope`, and the
+shared-workspace set
 `smartware_register_source`, `smartware_list_sources`, `smartware_ingest`,
 `smartware_sync_status`, `smartware_recall_federated`.
 
@@ -497,6 +498,28 @@ never see the affordance.
   `observations/claims/evidence/operations/entities.jsonl` + `manifest.json`
   (per-file sha256 + aggregate, asserts `scope_exclusive: true`). Derived
   indexes excluded. **Idempotent** per `operation_id`.
+- **Restore one client** → `smartware_restore_scope` (ADR-0006). The return path
+  for a package: verifies the manifest checksums and declared counts, refuses a
+  package that crosses its scope boundary, refuses a non-empty target scope
+  (`scope_not_empty` — restore, never merge), and refuses a tampered package
+  (`package_corrupt`) **before writing anything**. The same package restored
+  twice is idempotent (`already_restored`; receipt under `<data_dir>/imports/`).
+  A post-erasure package (deletion certificate, no content) restores as an empty
+  package: erasure is never undone by a restore. Run it on the lease holder.
+
+  ```ts
+  const restored = await memory.restoreScope({
+    actor: owner,                          // owner-only
+    package_dir: '/var/lib/smartware/harbor-lane/exports/exp_01J8ZP…',
+    operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z',
+  });
+  // { status: 'restored' | 'already_restored' | 'empty_package',
+  //   export_id, scope, counts, manifest, receipt_path }
+  ```
+
+  Restored = exported, measurably: same claim ids, same `observation_ids`
+  provenance, same recall answers — including after the restored brain's derived
+  state is wiped and rebuilt (`test/protocol/restore-scope.test.ts`).
 - **Offboarding (reversible)** → `FORGET.SCOPE { reason: 'offboarding' }`.
   Tombstones, revokes grants same-commit, records exact retraction counts, and
   persists an owner-approved non-PII `owner_pointer` for a later `#N` return.
@@ -544,7 +567,7 @@ await memory.forgetScope({
 npm ci
 npm run build        # tsc → dist/
 npm run verify:schemas
-npm test             # 515 tests across 71 files, no skips
+npm test             # 520 tests across 72 files, no skips
 npm pack             # → smartware-0.7.0.tgz
 ```
 
@@ -573,7 +596,7 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 515 tests / 71 files, no skips. The Coffee-specific suites:
+- `npm test` — 520 tests / 72 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/p0_sources_ingestion.test.ts` (24 tests: source registry,
   fail-closed source context, ingestion cursors/replay/dedup, sync status,

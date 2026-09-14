@@ -431,6 +431,21 @@ export function createSmartwareMcpServer(
   );
 
   server.tool(
+    'smartware_restore_scope',
+    'Restore an EXPORT.SCOPE package into this brain (owner only) — the return path for a package. Verifies the manifest checksums, refuses a non-empty target scope (restore, never merge) and refuses a package that crosses its scope boundary. Idempotent per package; derived indexes rebuild from the restored canonical records.',
+    {
+      actor_id: z.string(),
+      package_dir: z.string().describe('Directory of an EXPORT.SCOPE package (contains manifest.json)'),
+      operation_id: z.string().optional().describe('Idempotency key for this restore operation'),
+    },
+    async args => wrap(() => core.restoreScope({
+      actor: actor(args.actor_id, 'person'),
+      package_dir: args.package_dir,
+      operation_id: args.operation_id,
+    }), 'restore_scope'),
+  );
+
+  server.tool(
     'smartware_expire_retention',
     'Retention expiry sweep (ADR-0001). Tombstones elapsed duration-policy observations in one scope and retracts their sole-evidence claims. Idempotent; host-triggered like compile. Requires a forget grant on the scope (or owner).',
     {
