@@ -404,6 +404,7 @@ export function createSmartwareMcpServer(
       operation_id: z.string(),
       owner_pointer: z.string().optional(),
       export_id: z.string().optional().describe('Optional export package id (exp_<ulid>) produced by smartware_export_scope before erasure; surfaced in the ops entry (details.export_id) for auditability'),
+      attestation: z.string().optional().describe('Optional owner attestation for an erasure that releases a dispute/legal hold (§10c.3, e.g. "no pending dispute / hold released"); recorded in the ops entry (details.attestation). Erasure lane only.'),
     },
     async args => wrap(() => core.forgetScope({
       actor: actor(args.actor_id, 'person'),
@@ -412,6 +413,7 @@ export function createSmartwareMcpServer(
       operation_id: args.operation_id,
       owner_pointer: args.owner_pointer,
       export_id: args.export_id,
+      attestation: args.attestation,
     }), 'forget_scope'),
   );
 

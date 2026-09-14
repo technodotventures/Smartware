@@ -1306,7 +1306,14 @@ export class SmartwareCore {
   }
 
   async correct(params: CorrectParams): Promise<CorrectResult> {
-    return handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
+    const result = await handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
+    // Keep the claim-FTS surface truthful after a correction (mirrors
+    // CONSOLIDATE): handleCorrect appends a NEW claim id via replay, and without
+    // this sync the corrected understanding is invisible to RECALL until the
+    // next rebuild — the correction exists but cannot be read.
+    const affectedScope = this.store.getClaim(result.new_claim_id ?? params.target_claim_id)?.scope;
+    if (affectedScope) syncSearchFromClaims(this.store, this.searchIndex, affectedScope);
+    return result;
   }
 
   async revise(params: ReviseParams): Promise<ReviseResult> {
@@ -1395,7 +1402,11 @@ export class SmartwareCore {
       config,
     });
     if (result.status === 'restored') {
-      this.layer0.catchUp(this.evidenceDir);
+      // Full Layer-0 rebuild, not an incremental catch-up: restored records carry
+      // their ORIGINAL sequences, which can sit below this brain's replay
+      // watermark — catch-up would skip them (and their scope-level markers)
+      // silently. The index is a regenerable projection; a restore is rare.
+      this.layer0.rebuildIndex(this.evidenceDir);
       this.store.setDataDir(this.dataDir);
       syncSearchFromClaims(this.store, this.searchIndex, result.scope);
       syncObservationsFromEvidence(this.evidenceDir, this.layer0, this.searchIndex);

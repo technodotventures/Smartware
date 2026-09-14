@@ -85,6 +85,14 @@ export interface ForgetScopeParams {
   /** Owner-approved non-PII pointer (offboarding only) — carried into `#2`. */
   owner_pointer?: string;
   /**
+   * Owner attestation for an erasure that ends a dispute/legal hold (§10c.3):
+   * the Coffee flow requires the owner to state why erasure may run now
+   * ("no pending dispute / verified request / hold released"), and the substrate
+   * records it in the ops entry. Erasure-lane only; additive (a DSR erasure
+   * without a hold needs no attestation and stays byte-identical to v0.5.0).
+   */
+  attestation?: string | null;
+  /**
    * Export-before-erasure binding (§10c.4): the export package produced by
    * smartware_export_scope for this scope. Erasure-lane only; surfaced in
    * the ops-entry details (details.export_id) so export-before-erasure is
@@ -139,8 +147,10 @@ function scopePayload(params: ForgetScopeParams): Record<string, unknown> {
     owner_pointer: params.owner_pointer ?? null,
   };
   // Additive-only: the payload stays byte-identical for v0.5.0 calls without
-  // export_id (idempotent retry of an existing operation must keep matching).
+  // export_id / attestation (idempotent retry of an existing operation must
+  // keep matching).
   if (params.export_id) payload.export_id = params.export_id;
+  if (params.attestation) payload.attestation = params.attestation;
   return payload;
 }
 
@@ -217,6 +227,16 @@ export async function handleForgetScope(
     }
     if (!EXPORT_ID_PATTERN.test(params.export_id)) {
       throw new ProtocolError('invalid_parameter', `Invalid export_id '${params.export_id}'`);
+    }
+  }
+  if (params.attestation != null) {
+    // Hold-release attestation (§10c.3): erasure-lane only, and it must SAY
+    // something — an empty string is not an attestation, it is a bug.
+    if (params.reason !== 'erasure') {
+      throw new ProtocolError('invalid_parameter', 'attestation is only valid for reason=erasure');
+    }
+    if (typeof params.attestation !== 'string' || params.attestation.trim().length === 0) {
+      throw new ProtocolError('invalid_parameter', 'attestation must be a non-empty string');
     }
   }
   if (params.operation_id && !OPERATION_ID_PATTERN.test(params.operation_id)) {
@@ -575,6 +595,7 @@ export async function handleForgetScope(
         derived_summaries_flagged: derivedSummariesFlagged,
         vector_entries_removed: vectorEntriesRemoved,
         export_id: params.export_id ?? null,
+        attestation: params.attestation ?? null,
       },
     });
     commitHooks?.afterCommit?.();

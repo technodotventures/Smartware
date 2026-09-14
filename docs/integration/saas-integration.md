@@ -567,14 +567,22 @@ never see the affordance.
 
   Restored = exported, measurably: same claim ids, same `observation_ids`
   provenance, same recall answers — including after the restored brain's derived
-  state is wiped and rebuilt (`test/protocol/restore-scope.test.ts`).
+  state is wiped and rebuilt (`test/protocol/restore-scope.test.ts`). Restore
+  rebuilds Layer 0 from the canonical log (a restored record can carry a
+  sequence below the receiving brain's replay watermark, so an incremental
+  catch-up would skip it), and scope-level `forget.scope` markers **travel with
+  the package** so a restored offboarded scope comes back retained (tombstoned
+  raw window, forgotten claims), never resurrected
+  (`test/conformance/q_lifecycle_composition.test.ts`).
 - **Offboarding (reversible)** → `FORGET.SCOPE { reason: 'offboarding' }`.
   Tombstones, revokes grants same-commit, records exact retraction counts, and
   persists an owner-approved non-PII `owner_pointer` for a later `#N` return.
 - **Erasure (terminal)** → `FORGET.SCOPE { reason: 'erasure' }`. Physical
   purge in every lane. **Erasure never fires under dispute** — the hold lane is
-  offboarding + export snapshot; erasure only after owner attestation. The
-  audit marker is the deletion certificate.
+  offboarding + export snapshot; erasure only after owner attestation, and the
+  attestation is recorded: `attestation: 'no pending dispute / hold released'`
+  (erasure lane only; `details.attestation` in the ops entry). The audit marker
+  is the deletion certificate.
 
 ```ts
 await memory.forgetScope({

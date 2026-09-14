@@ -175,12 +175,22 @@ export async function handleRestoreScope(
   }
 
   // ── One scope = one boundary: every imported record carries the package's scope.
+  //    Scope-level mutation markers (type erasure, target_kind scope) are the one
+  //    deliberate exception: they live in the POD scope by design and reference
+  //    the package scope (§10c.4) — they are the replay evidence for a retained
+  //    scope, so they must be importable or a restored offboarded scope would
+  //    resurrect its raw evidence.
   const scope = manifest.scope;
   const observations = files.observations.records as Observation[];
   const claims = files.claims.records as ClaimVersionRecord[];
   const operations = files.operations.records as OpLogEntry[];
+  const isScopeMarker = (record: Observation | undefined): boolean => {
+    if (record?.type !== 'erasure') return false;
+    const body = (typeof record.content?.body === 'object' && record.content.body) as Record<string, unknown> | null;
+    return body?.['target_kind'] === 'scope' && body['scope'] === scope;
+  };
   const outOfScope = [
-    ...observations.filter((record) => record?.scope !== scope).map((record) => `observation ${record?.id}`),
+    ...observations.filter((record) => record?.scope !== scope && !isScopeMarker(record)).map((record) => `observation ${record?.id}`),
     ...claims.filter((record) => record?.scope !== scope).map((record) => `claim ${record?.claim_id}`),
   ];
   if (outOfScope.length > 0) {
