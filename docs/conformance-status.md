@@ -42,13 +42,16 @@ the 2026-09-07 baseline: the counts below are unchanged — **446 tests across
 64 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
 contract still fails closed. Re-measured 2026-09-14 after the isolation suite
 landed: **482 tests across 69 files**, build clean (`tsc`), same schema and
-kernel results.
+kernel results. Re-measured again 2026-09-14 after the contradiction/temporal
+lifecycle suite landed: **488 tests across 70 files**, build clean (`tsc`),
+same schema and kernel results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **446 tests across 64 files** with no skips.
+- The standalone suite passes **488 tests across 70 files** with no skips
+  (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
   "Learned from Maya, May 12; corrected by owner May 13.", badge set
@@ -94,6 +97,23 @@ kernel results.
   `ProtocolError` (`actor_unregistered` for an identity with no grant row,
   `insufficient_permission` for a known actor outside its scope) — a lane never
   answers an unauthorized actor with an empty result.
+- The contradiction/temporal lifecycle suite
+  (`test/conformance/p0_contradiction_temporal.test.ts`, 6 tests, added
+  2026-09-14) closes P0-2/P0-4 against the embedded `SmartwareCore` seam:
+  two actors' conflicting facts for the same canonical key are both retained
+  (claims, evidence lists, raw L0 episodes) and both marked contested, and
+  RECALL returns both with `status: contested` / `epistemic_tag: contested`
+  instead of a silent empty result (the pre-fix defect); a third voice joins
+  the same contest rather than becoming a lone active claim; supersession
+  closes the older claim's event-valid window at the replacement's start
+  (`t_valid_to`) while recording system time (`t_invalidated`); current recall
+  and the working index exclude superseded and stale facts
+  (`include_superseded` / `include_stale` history reaches them); as-of reads
+  reconstruct along **both** axes (event-valid March → the superseded fact;
+  system-recorded March → what the brain then knew); a warranted user REVISE
+  (`origin: user` supersedes edge) is the only path that retires one side of a
+  contest — no LLM adjudication anywhere (fixture configures
+  `llm.provider: 'none'`).
 - Tests exercise OBSERVE, RECALL, REFLECT, REVISE, FORGET, REVIVE, ENDORSE,
   FORGET.SCOPE (erasure and offboarding lanes, owner-only enforcement,
   same-commit grant revocation, exact retraction counts, idempotent retry,
@@ -174,6 +194,28 @@ Hosts must supply the same actor identity they already use for `observe`/`read`,
 and should surface the denial code to the user rather than treating it as "no
 data". Coffee/Pod adapters calling `listActivity` need the actor threaded
 through their activity routes.
+
+## Consumer-visible change — contradiction and temporal semantics (2026-09-14, unreleased)
+
+Conflicting facts now have defined, deterministic semantics on both write paths,
+and a disagreement is visible instead of silent. **No protocol or schema
+surface changed** (the five verbs and their schemas are untouched); this is the
+embedded `SmartwareCore` seam plus one new public subpath. Decision record:
+[ADR-0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md).
+
+| surface | before | now |
+|---|---|---|
+| conflicting writes | second claim became a parallel `active` claim — two "current" truths for one fact | one deterministic policy: same canonical key + different value → every side `contested` (retained, linked via `contested_by`); later event-valid start → older claim `superseded` |
+| contested claims in RECALL | dropped from the claim index → **empty result** for a disagreement | recallable, returned with `status: contested` and `epistemic_tag: contested`; `readConflicts` unchanged |
+| superseded claims | `t_invalidated` (system time) recorded, event-valid window (`t_valid_to`) left open | window closed at the replacement's `t_valid_from` (event-valid time); `validity.to` is now meaningful |
+| valid-time as-of / range reads | superseded claims excluded, so a past window could read empty | include claims that were true in the window (superseded history reconstructs); transaction-time reads unchanged |
+| recall result `claim` object | `id`, `predicate`, `object`, `epistemic`, `confidence`, `status`, `observation_ids`, `valid_at`, `invalid_at`, `recorded_at`, `invalidated_at` | **additive**: `epistemic_tag`, `superseded_by`, `contested_by` |
+| host write path | hosts hand-rolled corroboration and had no contradiction handling at all | `admitClaim(claim, store)` from the new public `smartware/layer1/conflicts` returns `inserted / corroborated / contested / superseded` |
+
+Hosts that render recall results should now handle `contested` (surface both
+sides with the marker) instead of assuming one current truth, and should prefer
+`admitClaim` over a bare `insertClaim` when persisting an extracted fact so the
+corroborate/contest/supersede policy is the library's, not a re-implementation.
 
 ## Accurate release claim
 

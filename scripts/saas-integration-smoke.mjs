@@ -7,6 +7,7 @@ import { SmartwareCore, createDefaultConfig, knownTime, nullTime, canonicalKey }
 import { showAttributionByDefault, attributionLine, whySentence } from 'smartware/render';
 import { ClaimStore } from 'smartware/layer1';
 import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
+import { admitClaim } from 'smartware/layer1/conflicts';
 import { computeConfidence } from 'smartware/layer1/confidence';
 import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
 import fs from 'node:fs';
@@ -33,6 +34,11 @@ cfg.grants = [
   {
     id: 'grant_gigi', actor_type: 'person', actor_id: 'user:gigi',
     capabilities: { observe: ['client:acme#1'], query: ['client:acme#1'], compile: [], correct: ['client:acme#1'], forget: [], read: ['client:acme#1'] },
+    trusted: false, quarantine: false, created_at: new Date().toISOString(), expires_at: null, status: 'active',
+  },
+  {
+    id: 'grant_noah', actor_type: 'person', actor_id: 'user:noah',
+    capabilities: { observe: ['client:acme#1'], query: ['client:acme#1'], compile: [], correct: [], forget: [], read: ['client:acme#1'] },
     trusted: false, quarantine: false, created_at: new Date().toISOString(), expires_at: null, status: 'active',
   },
 ];
@@ -133,6 +139,100 @@ if (!existing) {
     fail.push(`corroboration did not accumulate as expected: evidence ${after.supporting_evidence.length}, active claims ${active.length}, confidence ${after.confidence.toFixed(4)} vs expected >${scoredAlone.toFixed(4)}`);
   }
 }
+// 3e. Contradiction and temporal lifecycle (P0-2/P0-4) through the public
+// admission seam. A same-key disagreement is retained and marked contested —
+// recall surfaces both sides instead of a silent empty result. A later
+// event-valid window then supersedes deterministically, closing the old window
+// at the replacement's start (event-valid time) and recording when it was
+// learned (system time).
+store.insertEntity({
+  id: 'entity_beacon', canonical_name: 'Beacon', aliases: [], type: 'organization',
+  scope: 'client:acme#1', created_at: new Date().toISOString(),
+});
+const conflictWindow = '2026-09-01T00:00:00.000Z';
+function beaconClaim(observationId, predicate, value, validFrom = conflictWindow) {
+  const built = {
+    ...claim,
+    id: `claim_${ulid()}`,
+    subject_id: 'entity_beacon', subject_name: 'Beacon', predicate,
+    object: { type: 'text', value },
+    validity: { from: validFrom, to: null },
+    t_valid_from: knownTime(validFrom), t_valid_to: nullTime(),
+    t_ingested: knownTime(new Date().toISOString()),
+    source_event_id: observationId, extraction_event_id: observationId,
+    supporting_evidence: [observationId],
+    superseded_by: null, contested_by: [],
+  };
+  built.confidence = computeConfidence(built);
+  return built;
+}
+const beaconObsA = await memory.observe({
+  actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon renewal is 2026-09-30' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
+});
+const beaconObsB = await memory.observe({
+  actor: { type: 'person', id: 'user:noah', display_name: 'Noah' },
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon renewal is 2026-10-31' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
+});
+const beaconA = beaconClaim(beaconObsA.id, 'renewal_date', '2026-09-30');
+const admissionA = admitClaim(beaconA, store);
+const beaconB = beaconClaim(beaconObsB.id, 'renewal_date', '2026-10-31');
+const admissionB = admitClaim(beaconB, store);
+syncSearchFromClaims(store, searchIndex, 'client:acme#1');
+const conflictRecall = await memory.recall({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
+  query: 'Beacon renewal', scope: 'client:acme#1', limit: 10,
+});
+const conflictClaims = (conflictRecall.results ?? []).map(result => result.claim).filter(Boolean);
+const conflictSides = conflictClaims.filter(c => c.predicate === 'renewal_date');
+if (admissionA.outcome === 'inserted'
+  && admissionB.outcome === 'contested'
+  && conflictSides.length === 2
+  && conflictSides.every(c => c.status === 'contested' && c.epistemic_tag === 'contested')) {
+  okay.push(`contradiction semantics ok (admissions ${admissionA.outcome}/${admissionB.outcome}; recall surfaces ${conflictSides.length} contested sides, never silent-empty)`);
+} else {
+  fail.push(`contradiction semantics failed: outcomes ${admissionA.outcome}/${admissionB.outcome}, recall claim hits ${JSON.stringify(conflictSides.map(c => [c.id, c.status, c.epistemic_tag]))}`);
+}
+
+// 3f. Deterministic supersession: a later event-valid window replaces the
+// active claim, closes its window at the replacement's start, and drops the
+// superseded fact from current recall (history still reaches it).
+const supersedeWindow = '2026-09-20T00:00:00.000Z';
+const supersedeObsC = await memory.observe({
+  actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon contract tier is gold' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
+});
+const supersedeObsD = await memory.observe({
+  actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon contract tier is platinum' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
+});
+const tierFirst = beaconClaim(supersedeObsC.id, 'contract_tier_is', 'gold', conflictWindow);
+const tierAdmissionFirst = admitClaim(tierFirst, store);
+const tierReplacement = beaconClaim(supersedeObsD.id, 'contract_tier_is', 'platinum', supersedeWindow);
+const tierAdmissionSecond = admitClaim(tierReplacement, store);
+syncSearchFromClaims(store, searchIndex, 'client:acme#1');
+const superseded = store.getClaim(tierFirst.id);
+const currentTier = await memory.recall({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
+  query: 'Beacon contract tier', scope: 'client:acme#1', limit: 10,
+});
+const currentTierClaims = (currentTier.results ?? []).map(result => result.claim).filter(Boolean);
+const tierHits = currentTierClaims.filter(c => c.predicate === 'contract_tier_is');
+if (tierAdmissionFirst.outcome === 'inserted'
+  && tierAdmissionSecond.outcome === 'superseded'
+  && superseded?.status === 'superseded'
+  && superseded?.validity?.to === supersedeWindow
+  && tierHits.length === 1
+  && tierHits[0]?.id === tierReplacement.id) {
+  okay.push(`supersession ok (old window closed at ${superseded.validity.to}; current recall returns only the replacement)`);
+} else {
+  fail.push(`supersession failed: outcomes ${tierAdmissionFirst.outcome}/${tierAdmissionSecond.outcome}, old status ${superseded?.status}, validity.to ${superseded?.validity?.to}, recall ${JSON.stringify(tierHits.map(c => [c.id, c.status]))}`);
+}
+
 store.close();
 searchIndex.close();
 

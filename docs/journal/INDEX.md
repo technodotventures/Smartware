@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **20** entries.
+Total: **31** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -29,3 +29,14 @@ Total: **20** entries.
 | 2026-09-09 | [`2026-09-09-t_ec51cb06.md`](2026-09-09-t_ec51cb06.md) | Build and deploy a version of Smartware than can be implemented into Coffee platform as per the latest Techno OS architecture |
 | 2026-09-10 | [`2026-09-10-t_0f787dcb.md`](2026-09-10-t_0f787dcb.md) | Consolidation/compaction operation — collapse superseded claim versions into a reviewed summary while preserving evidence + correction path |
 | 2026-09-10 | [`2026-09-10-t_a0d2171c.md`](2026-09-10-t_a0d2171c.md) | Retention / expiry / archival policy — enforce retention_duration + consume staleness.scope_overrides; scheduled expiry/archive/GC |
+| 2026-09-13 | [`2026-09-13-t_03fcaeb2.md`](2026-09-13-t_03fcaeb2.md) | P0 audit: freeze the real Smartware baseline and Coffee boundary |
+| 2026-09-13 | [`2026-09-13-t_1548b5f6.md`](2026-09-13-t_1548b5f6.md) | P0 audit: Graphiti temporal-memory parity for Coffee |
+| 2026-09-13 | [`2026-09-13-t_1aa4e55d.md`](2026-09-13-t_1aa4e55d.md) | Verify completed Kanban changes against committed code |
+| 2026-09-13 | [`2026-09-13-t_4f1013e8.md`](2026-09-13-t_4f1013e8.md) | Validate the Coffee-shaped pilot and authorization mapping |
+| 2026-09-13 | [`2026-09-13-t_8f754b0a.md`](2026-09-13-t_8f754b0a.md) | Compile the authoritative Coffee capability ledger |
+| 2026-09-13 | [`2026-09-13-t_9a58647c.md`](2026-09-13-t_9a58647c.md) | P0 audit: GBrain company-brain parity for Coffee |
+| 2026-09-13 | [`2026-09-13-t_aa6a3280.md`](2026-09-13-t_aa6a3280.md) | Audit conformance claims and release artifacts |
+| 2026-09-13 | [`2026-09-13-t_cb77ba0c.md`](2026-09-13-t_cb77ba0c.md) | Verify the active repository baseline and version identity |
+| 2026-09-14 | [`2026-09-14-t_3f19e206.md`](2026-09-14-t_3f19e206.md) | P0 synthesize: Coffee company-brain parity contract v1 |
+| 2026-09-14 | [`2026-09-14-t_a1118c49.md`](2026-09-14-t_a1118c49.md) | P0 implement: tenant, scope, human and agent isolation conformance |
+| 2026-09-14 | [`2026-09-14-t_ec159c21.md`](2026-09-14-t_ec159c21.md) | P0 fix: deterministic corroboration proof in Coffee-shaped pilot |

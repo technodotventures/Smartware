@@ -204,6 +204,42 @@ const existing = store.getClaimsBySubject(subjectId, 'active')
           && c.object.value === value && c.validity.to === null);
 ```
 
+### 1f. Conflicting facts: admit, don't arbitrate
+
+Two staff members (or an agent and a human) can report different values for the same fact.
+Smartware has one deterministic policy for that — no LLM, no "last write wins" — and exposes it as
+an admission seam so the host does not re-implement it (0.7.0 line, unreleased: the export is not
+in the published 0.6.x tarballs; `scripts/saas-integration-smoke.mjs` proves it resolves against
+this build):
+
+```js
+import { admitClaim } from 'smartware/layer1/conflicts';
+
+const admission = admitClaim(claim, store);
+// 'inserted'      first assertion for its canonical key
+// 'corroborated'  same key + same value → evidence folded into the existing claim, no twin
+// 'contested'     same key + different value → ALL sides retained and marked contested
+// 'superseded'    same subject/predicate/scope, later validity_from, target still active →
+//                 older claim superseded; validity.to closes at the new start and
+//                 t_invalidated records when the brain learned the replacement
+syncSearchFromClaims(store, searchIndex, scope);   // recall must see the new lifecycle state
+```
+
+Treat `contested` as a first-class product state: **recall returns both sides** with
+`status: 'contested'`, `epistemic_tag: 'contested'` and `contested_by` claim ids, so the UI can
+surface the disagreement instead of presenting one value as the truth. Superseded and stale claims
+never satisfy current recall — read them back with `include_superseded: true` / `include_stale:
+true`, or reconstruct a past instant with
+`recall({ …, temporal: { mode: 'as_of', axis: 'valid_time' | 'transaction_time', at: iso } })`.
+
+Resolving a contest is a *warranted user action* (REVISE admitting a `supersedes`/`corrects`
+edge). Recency never resolves it, and `admitClaim` never supersedes a contested or stale claim.
+
+Identity discipline decides which outcome you get: a restatement must reuse the original
+`validity_from` to corroborate, and a conflicting write with a *later* `validity_from` reads as a
+successor (superseded) rather than a disagreement (contested). Key `validity_from` to the fact's
+claimed validity start — not the extraction time — when you want disagreements detected.
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by

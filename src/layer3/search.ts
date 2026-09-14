@@ -752,13 +752,19 @@ export class SearchIndex {
  */
 export function syncSearchFromClaims(store: ClaimStore, searchIndex: SearchIndex, scope?: string): number {
   const entities = store.getAllEntities(scope);
-  const allActive = store.getActiveClaims(scope);
-  searchIndex.replaceClaimIndex(allActive, scope);
+  // Statuses that stay in the working index. A contested claim is unresolved,
+  // not non-current: dropping it from the index is what made recall answer a
+  // disagreement with silence (P0-2). Superseded/retracted claims are history —
+  // they stay out of the working index and are reached through explicit
+  // history/as-of reads (which scan the authorized snapshot directly).
+  const indexable = store.getAllClaims(scope)
+    .filter(claim => claim.status !== 'superseded' && claim.status !== 'retracted');
+  searchIndex.replaceClaimIndex(indexable, scope);
   let indexed = 0;
   const indexedEntityIds = new Set<string>();
 
   for (const entity of entities) {
-    const claims = allActive
+    const claims = indexable
       .filter(c => c.subject_id === entity.id && c.status === 'active');
     if (claims.length === 0) {
       // All claims retracted/superseded/stale — drop the entity from the index
@@ -773,7 +779,7 @@ export function syncSearchFromClaims(store: ClaimStore, searchIndex: SearchIndex
     indexed++;
   }
 
-  for (const claim of allActive) {
+  for (const claim of indexable) {
     if (indexedEntityIds.has(claim.subject_id)) continue;
     if (claim.status !== 'active') continue;
 
