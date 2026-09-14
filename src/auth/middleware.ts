@@ -17,7 +17,13 @@ export class ProtocolError extends Error {
 /**
  * Require a grant for an operation on a scope.
  * Owners bypass all grant checks.
- * Throws ProtocolError if insufficient permission.
+ *
+ * Denials are precise so a host can route on them (P0-7):
+ *   - an actor with no grant row at all is `actor_unregistered` (unknown
+ *     identity — registration is owner-managed, spec §7);
+ *   - an actor the Pod knows (has a grant row, possibly revoked or expired) but
+ *     who is not covered for this operation+scope is `insufficient_permission`.
+ * Throws ProtocolError in both cases: silence is never a denial.
  */
 export function requireGrant(
   actorId: string,
@@ -26,6 +32,13 @@ export function requireGrant(
   config: SmartwareConfig,
 ): void {
   if (isOwner(actorId, config)) return;
+  const known = config.grants.some(grant => grant.actor_id === actorId || grant.actor_id === '*');
+  if (!known) {
+    throw new ProtocolError(
+      'actor_unregistered',
+      `Actor '${actorId}' is not registered with this Pod.`,
+    );
+  }
   if (!checkGrant(actorId, operation, scope, config)) {
     throw new ProtocolError(
       'insufficient_permission',

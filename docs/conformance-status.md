@@ -40,7 +40,9 @@ same gate via `npm ci` from `package-lock.json` on Node 22 and 24, so the two
 runtime lines are verified by CI rather than by this local run), superseding
 the 2026-09-07 baseline: the counts below are unchanged — **446 tests across
 64 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
-contract still fails closed.
+contract still fails closed. Re-measured 2026-09-14 after the isolation suite
+landed: **482 tests across 69 files**, build clean (`tsc`), same schema and
+kernel results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
@@ -79,6 +81,19 @@ contract still fails closed.
   never Bcau/Gate/`*`; owner bypasses grants); and EXPORT.SCOPE is exactly one
   client — `scope_exclusive: true`, zero cross-client ids in the package, per-client
   packages distinct, and idempotent by `operation_id`.
+- The isolation suite (`test/conformance/p0_isolation_conformance.test.ts`,
+  11 tests, added 2026-09-14) closes P0-5/P0-7: six businesses with IDENTICAL
+  client scope ids in one process, every read lane (recall, hybrid recall,
+  context, raw-observation window, activity feed, read/browse, conflicts,
+  knowledge graph, semantic documents) driven per actor (owner, human staff,
+  agent, revoked staff, unregistered stranger); a fuzz over
+  **1,350 (actor × scope × lane) combinations** — 972 denials, 378 allowed,
+  **zero cross-tenant or cross-scope results**; federated multi-scope reads
+  deny rather than partially answering an unauthorized scope; denied writes
+  leave no observation, claim, or index row behind. Every denial is an explicit
+  `ProtocolError` (`actor_unregistered` for an identity with no grant row,
+  `insufficient_permission` for a known actor outside its scope) — a lane never
+  answers an unauthorized actor with an empty result.
 - Tests exercise OBSERVE, RECALL, REFLECT, REVISE, FORGET, REVIVE, ENDORSE,
   FORGET.SCOPE (erasure and offboarding lanes, owner-only enforcement,
   same-commit grant revocation, exact retraction counts, idempotent retry,
@@ -140,6 +155,25 @@ The exact ordering and recovery state table are documented in
   owner-approved non-PII pointer path exists only for `offboarding`.
 - Passing schemas and behavioral invariants is not an exhaustive
   requirement-by-requirement proof of Specification v1.6.16.
+
+## Consumer-visible change — isolation enforcement (2026-09-14, unreleased)
+
+The embedded read lanes are now actor-bound end to end; a host that currently
+reaches them without an identity must pass one. **No protocol or schema surface
+changed** (the five verbs, RECALL family and FORGET.SCOPE are untouched); this
+is the embedded `SmartwareCore` seam.
+
+| surface | before | now |
+|---|---|---|
+| `core.searchObservations(query, scope, opts?)` | no actor, no grant check — anyone holding the core could read any scope's raw evidence | `core.searchObservations({ actor, query, scope, ... })`; requires a `read` grant on the scope, sensitive content requires owner + opt-in |
+| `core.listActivity(opts?)` | no actor, no grant check; `includeSensitive` widened any caller's view | `core.listActivity({ actor, ... })`; per-scope grants (scope-less calls return only readable scopes); `includeSensitive` requires the owner |
+| `core.recall(...)` / `core.context(...)` on an ungranted scope | empty result set (indistinguishable from "no memory") | `ProtocolError` — `insufficient_permission` / `actor_unregistered` |
+| any `requireGrant` denial | always `insufficient_permission` | `actor_unregistered` when the actor has no grant row at all; `insufficient_permission` when the Pod knows the actor (including revoked/expired grants) |
+
+Hosts must supply the same actor identity they already use for `observe`/`read`,
+and should surface the denial code to the user rather than treating it as "no
+data". Coffee/Pod adapters calling `listActivity` need the actor threaded
+through their activity routes.
 
 ## Accurate release claim
 

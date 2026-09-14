@@ -9,7 +9,7 @@ import type { ConfidenceBucket, EpistemicTag } from '../layer1/types.js';
 import { assembleContext, type QueryFilters, type AssembledContext } from '../layer4/assembly.js';
 import type { ScoredResult } from '../layer4/scoring.js';
 import type { TemporalConstraint } from '../layer3/temporal.js';
-import { ProtocolError } from '../auth/middleware.js';
+import { ProtocolError, requireGrant } from '../auth/middleware.js';
 import type { SessionStore } from '../session/store.js';
 import { requireSessionCapability, resolveActorFromSession } from './session.js';
 
@@ -109,6 +109,12 @@ export async function handleQuery(
     requireSessionCapability(resolved, 'query', params.scope);
     actorId = resolved.actor_id;
   }
+
+  // §7 ACCESS enforcement at the protocol boundary: RECALL was the one lane
+  // that answered an unauthorized scope with an empty result instead of a
+  // denial — indistinguishable from "no memory" for the host, and a gap P0-7
+  // closes. (The authorized snapshot below still filters independently.)
+  requireGrant(actorId, 'query', params.scope, config);
 
   const filters: QueryFilters = {
     minConfidence,

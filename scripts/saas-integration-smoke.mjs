@@ -56,7 +56,12 @@ if (obs && obs.status) okay.push(`observe ok (${obs.status})`); else fail.push('
 // before any compile job materializes it. The Coffee product keeps raw
 // observations as the evidence window, then persists structured claims
 // (extraction runs upstream / LLM-backed). Assert the raw window here.
-const rawHits = memory.searchObservations('billing', 'client:acme#1', { limit: 10 });
+const rawHits = memory.searchObservations({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
+  query: 'billing',
+  scope: 'client:acme#1',
+  limit: 10,
+});
 if (rawHits && rawHits.length > 0) {
   okay.push(`raw-observation window ok (${rawHits.length} raw hit(s))`);
 } else {

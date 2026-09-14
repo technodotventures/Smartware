@@ -103,7 +103,7 @@ import {
 import { handleStatus, type StatusResult } from './protocol/status.js';
 import { handleContext, type ContextParams, type ContextBundle } from './protocol/context.js';
 import { SessionStore } from './session/store.js';
-import { createGrant, getGrantForActor, isOwner } from './auth/grants.js';
+import { createGrant, getGrantForActor, isOwner, checkGrant } from './auth/grants.js';
 import { ProtocolError, requireGrant } from './auth/middleware.js';
 import {
   openCompileQueue,
@@ -729,7 +729,37 @@ export class SmartwareCore {
     };
   }
 
-  listActivity(options: { scope?: string; types?: string[]; actorId?: string; limit?: number; includeSensitive?: boolean } = {}): SmartwareActivityEvent[] {
+  /**
+   * Activity feed over accepted raw observations. Actor-bound: the caller's
+   * identity decides the scopes it may see, whether the request names one
+   * scope (`requireGrant`, so an ungranted scope is a denial rather than an
+   * empty feed) or asks across scopes (the feed is filtered to the scopes the
+   * actor may read). Sensitive observations additionally require the owner AND
+   * an explicit opt-in.
+   */
+  listActivity(options: {
+    actor: Actor;
+    scope?: string;
+    types?: string[];
+    actorId?: string;
+    limit?: number;
+    includeSensitive?: boolean;
+  }): SmartwareActivityEvent[] {
+    const config = this.getConfig();
+    const owner = isOwner(options.actor.id, config);
+    const includeSensitive = options.includeSensitive === true && owner;
+    if (options.scope) requireGrant(options.actor.id, 'read', options.scope, config);
+
+    // Per-scope decision memo: one config read per distinct scope, not per row.
+    const readableScopes = new Map<string, boolean>();
+    const mayRead = (scope: string): boolean => {
+      const cached = readableScopes.get(scope);
+      if (cached !== undefined) return cached;
+      const allowed = owner || checkGrant(options.actor.id, 'read', scope, config);
+      readableScopes.set(scope, allowed);
+      return allowed;
+    };
+
     const limit = options.limit ?? 50;
     const types = new Set(options.types ?? []);
     const events: SmartwareActivityEvent[] = [];
@@ -737,9 +767,10 @@ export class SmartwareCore {
     for (const obs of readAll(this.evidenceDir)) {
       if (obs.status !== 'accepted') continue;
       if (options.scope && obs.scope !== options.scope) continue;
+      if (!options.scope && !mayRead(obs.scope)) continue;
       if (types.size > 0 && !types.has(obs.type)) continue;
       if (options.actorId && obs.source.actor.id !== options.actorId) continue;
-      if (obs.policy.sensitive && !options.includeSensitive) continue;
+      if (obs.policy.sensitive && !includeSensitive) continue;
       events.push({
         id: obs.id,
         type: obs.type,
@@ -760,22 +791,32 @@ export class SmartwareCore {
       .slice(0, limit);
   }
 
-  searchObservations(
-    query: string,
-    scope: string,
-    options: {
-      limit?: number;
-      includeSensitive?: boolean;
-      temporalRange?: { from: string; to: string };
-      /** Restrict to these state-based freshness labels (spec §10a). */
-      freshness?: ObservationFreshness[];
-    } = {},
-  ): SmartwareObservationSearchResult[] {
-    const terms = searchObservationQueryTerms(query);
+  /**
+   * Raw-observation window (spec §10a) — the lane where un-compiled evidence is
+   * searchable. Actor-bound like every other read lane: the caller's identity
+   * decides what it may see, and an actor with no `read` grant on the scope is
+   * denied rather than answered with an empty window. Sensitive observations
+   * additionally require the owner AND an explicit opt-in — a staff caller can
+   * never widen its own view by setting the flag.
+   */
+  searchObservations(params: {
+    actor: Actor;
+    query: string;
+    scope: string;
+    limit?: number;
+    includeSensitive?: boolean;
+    temporalRange?: { from: string; to: string };
+    /** Restrict to these state-based freshness labels (spec §10a). */
+    freshness?: ObservationFreshness[];
+  }): SmartwareObservationSearchResult[] {
+    const config = this.getConfig();
+    requireGrant(params.actor.id, 'read', params.scope, config);
+    const includeSensitive = params.includeSensitive === true && isOwner(params.actor.id, config);
+    const terms = searchObservationQueryTerms(params.query);
     // The legacy substring matcher returned [] for a blank query with no
     // temporal anchor; keep that contract (the FTS fallback would otherwise
     // scan the whole scope).
-    if (terms.length === 0 && !options.temporalRange) return [];
+    if (terms.length === 0 && !params.temporalRange) return [];
 
     // Time bound vs. state bound: the FTS window is state-based — the
     // freshness label, never a timestamp. Layer 0 is the authoritative
@@ -783,13 +824,13 @@ export class SmartwareCore {
     // landed after indexing (tombstone/redaction/reject/approve) drops the
     // row immediately rather than after the next rebuild.
     const hits: IndexedObservationSearchResult[] = this.searchIndex.searchObservations(
-      query,
-      scope,
+      params.query,
+      params.scope,
       {
-        limit: options.limit,
-        includeSensitive: options.includeSensitive,
-        temporalRange: options.temporalRange,
-        freshness: options.freshness,
+        limit: params.limit,
+        includeSensitive,
+        temporalRange: params.temporalRange,
+        freshness: params.freshness,
       },
     );
 
@@ -814,7 +855,7 @@ export class SmartwareCore {
 
     return results
       .sort((a, b) => b.observed_at.localeCompare(a.observed_at))
-      .slice(0, options.limit ?? 10);
+      .slice(0, params.limit ?? 10);
   }
 
   /**
