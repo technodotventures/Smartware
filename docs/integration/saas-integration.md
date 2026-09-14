@@ -322,6 +322,54 @@ retention/sensitivity policy) — a connector does not get a bypass. Writes from
 review-held connector land `quarantined` (counted, hidden from the raw window until a review
 approves them), so treat "connector trusted" as a provisioning decision.
 
+### 1h. Multi-replica deployment: the lease, the write guard and the app-store outage
+
+A brain is **single-writer**. A SaaS runs replicas, so brain ownership must be arbitrated —
+the executable reference is the throwaway pilot (`brain-pilot`, Redis-backed, two replicas),
+and the patterns below are the ones the resilience gauntlet measured (`t_00a9df88`; evidence in
+`/opt/data/workspaces/brain-pilot-evidence/gauntlet-postfix2-20260914T165142Z/`).
+
+**Lease.** One key per brain, derived from the brain's own provisioning surface
+(`workspace_id` + `instance_id`), never from a mount path:
+
+```js
+await redis.set(leaseKey, instanceId, { NX: true, PX: 8000 });   // acquire
+// renew ONLY if we still own it — value-conditional, atomically:
+//   if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end
+```
+
+`SET key me XX PX ttl` is **wrong**: `XX` only checks that the key exists, so a replica whose
+lease has already been handed to another replica takes it back — both then believe they own the
+brain (the gauntlet handoff drill measured exactly this: the old owner kept writing after the
+new owner was serving).
+
+**Guard.** Re-verify ownership immediately before **every brain mutation**, not just on a timer
+— that guard caught a lost lease in **9 ms** where the control-loop tick would have taken
+~2.7 s. If the guard fails: demote, close the brain handle, refuse with
+`503 { retryable: true, partial_write: false }`. Ownership is settled **before either store is
+touched**: a write that cannot be completed in full must leave nothing to reconcile.
+
+**App-store outage.** Fail closed and stay alive:
+
+- create the Redis client with `disableOfflineQueue: true` — a command issued while the store is
+  unreachable must fail fast, not queue invisibly (the pilot died on an uncaught `TimeoutError`
+  from exactly that queue);
+- an owner that cannot reach the app store can no longer *prove* ownership: demote, stop
+  writing, keep serving an honest `/health` (`503`, `degraded: true`, `stores.redis.error`);
+- handle top-level rejections so a store outage degrades the service instead of killing the
+  process, and alert on it.
+
+Measured after those changes: writes during an outage → `503 app_store_unavailable`; recovery
+to the first acknowledged write after Redis returned → **2.8 s**; brain reads degraded to the
+app-store fallback with an explicit "provenance requires the brain" note and **never invent
+provenance**.
+
+Residual limit, stated plainly: with a lease alone the window between "guard passed" and
+"write committed" is bounded but non-zero (a process stall of ≥ TTL inside that window). Closing
+it needs a **fencing token validated at the brain's commit boundary** — not implemented; treat
+it as a substrate-surface decision before promising strict no-split-brain under arbitrary
+pauses.
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by
