@@ -1,9 +1,7 @@
 # ADR-0003 — Fact identity on the claim write path: the library resolves the fact, not the key
 
 - **Date:** 2026-09-14
-- **Status:** Accepted — **amended 2026-09-14**: the rule's scope is qualified and the parallel
-  fingerprint identity over the same rows is recorded (*Known divergence*). That divergence is
-  unreconciled by design; this ADR does not claim the library has one notion of fact identity.
+**Status:** Accepted — **the *Known divergence* section below was superseded by [ADR-0005](0005-protocol-claim-identity.md) on 2026-09-14** (owner sign-off pending there). This ADR's Decision and its frozen write-path contract stand unchanged; the divergence is no longer "unreconciled by default" but *declared*, with the relationship between the two rules stated in ADR-0005.
 - **Deciders:** @smarty-pants (protocol stewardship / research). No owner sign-off gate for the
   **additive SDK surface** itself — no protocol invariant, schema, cryptography, or authority-table
   change. The disposition in *Known divergence* (leaving the pre-existing fingerprint rule
@@ -112,7 +110,13 @@ WRONG); using `canonicalKey` as the fact identity when `validity_from` is not de
   *entity resolution* (aliasing), which is a different decision — reopen this ADR rather than widening
   identity here.
 
-## Known divergence: two identity rules over the same `claims` rows (unreconciled)
+## Known divergence: two identity rules over the same `claims` rows (superseded by ADR-0005)
+
+> **Superseded 2026-09-14 by [ADR-0005](0005-protocol-claim-identity.md)** — disposition only. The
+> divergence below is still real and the measurements still stand; what changed is that the
+> *relationship* between the two rules, the named consumers, and the interop consequence are now
+> stated normatively there, with owner sign-off pending. Read this section as the record of what was
+> found, and ADR-0005 as the disposition.
 
 Found by the round-1 reviewer of `t_29739781` (2026-09-14) and reproduced independently here. Both
 rules read the same `claims` table and answer "are these two rows one fact?" differently, in both
