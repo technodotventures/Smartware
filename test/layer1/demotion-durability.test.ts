@@ -33,13 +33,27 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { ulid } from 'ulid';
 import { ClaimStore } from '../../src/layer1/store.js';
 import { computeConfidence } from '../../src/layer1/confidence.js';
 import { resolveFactMatches } from '../../src/layer1/corroboration.js';
-import { iterAllClaimVersions, readLatestVersion } from '../../src/layer1/jsonl.js';
+import {
+  iterAllClaimVersions,
+  readLatestVersion,
+  type ForgottenClaimVersion,
+} from '../../src/layer1/jsonl.js';
 import { knownTime, nullTime } from '../../src/layer1/types.js';
 import type { Claim, ClaimStatus } from '../../src/layer1/types.js';
 import type { TypedValue } from '../../src/layer0/types.js';
+import { Layer0Index } from '../../src/layer0/index.js';
+import { CascadePreviewStore } from '../../src/preview_store/store.js';
+import { serialiseFrontmatter } from '../../src/layer2/frontmatter.js';
+import type { Frontmatter } from '../../src/layer2/types.js';
+import { createDefaultConfig, saveConfig, type SmartwareConfig } from '../../src/config.js';
+import { handleRevise } from '../../src/protocol/revise.js';
+import { handleForget, handleRevive } from '../../src/protocol/forget.js';
+import { handleConsolidate } from '../../src/protocol/consolidate.js';
+import { handleEndorse } from '../../src/protocol/endorse.js';
 
 let dataDir: string;
 let store: ClaimStore;
@@ -261,5 +275,234 @@ describe('demotion durability · every row the flow produces is consistent', () 
     } finally {
       replay.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part 2 — the flows that hand-build a claim's next version record
+//
+// A flow that constructs the record literal itself (rather than appending through `insertClaim`) is
+// the place the demotion used to evaporate: every materialisation derives `status` from the new
+// record alone, so a record without `superseded_by` *is* a release — consistently in live and
+// replayed state, and silently.
+//
+// ADR-0003 → *Carry-forward across hand-built version records* decides per flow that the demotion is
+// preserved, because beta has no verb that changes the fact a claim asserts (spec §6: content is
+// never rewritten in place). Releasing it could only add a second recall-eligible copy of the same
+// fact, which the next §1e write re-demotes. These tests pin the carry-forward, the derived row, the
+// recall-eligible set and a canonical replay for every flow that can touch a superseded claim. Run
+// against the pre-change tree they are the RED proof that the old boundary released the demotion.
+// ---------------------------------------------------------------------------
+
+const OWNER = { type: 'person' as const, id: 'user:owner', display_name: 'Owner' };
+
+/** Directories the protocol handlers need; the rest of the fixture is the shared `dataDir`. */
+function scaffold(): { evidenceDir: string; opsDir: string; wikiDir: string } {
+  const evidenceDir = path.join(dataDir, 'evidence');
+  const opsDir = path.join(dataDir, 'operations');
+  const wikiDir = path.join(dataDir, 'wiki', 'entities');
+  for (const dir of [evidenceDir, opsDir, wikiDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return { evidenceDir, opsDir, wikiDir };
+}
+
+function protocolConfig(): SmartwareConfig {
+  const config = createDefaultConfig(dataDir);
+  config.owner_id = OWNER.id;
+  config.scopes = [{ id: FACT.scope, parent: null, visibility_default: 'scope' }];
+  saveConfig(dataDir, config);
+  return config;
+}
+
+describe('demotion durability · hand-built version records carry the demotion forward', () => {
+  it('REVISE: the user revision keeps the claim demoted — record, row, replay and result', async () => {
+    seedAndSweep();
+    const { opsDir } = scaffold();
+    const config = protocolConfig();
+
+    const params = {
+      actor: OWNER,
+      target: DUPLICATE,
+      expected_base_version: 2,
+      set_confidence: 'high' as const,
+      reason: 'the owner confirms this deadline',
+      operation_id: `op_${ulid()}`,
+    };
+
+    const result = await handleRevise(params, dataDir, store, config, { opsDir });
+    expect(result.status).toBe('revised');
+    // A REVISE changes metadata, never the asserted fact — so the duplicate condition the demotion
+    // encodes still holds, and the caller is told rather than left to discover it from recall.
+    expect(result.superseded_by).toBe(SURVIVOR);
+
+    const latest = readLatestVersion(dataDir, DUPLICATE)!;
+    expect(latest.version).toBe(3);
+    expect(latest.confidence).toBe('high');
+    expect(latest.superseded_by).toBe(SURVIVOR);
+    expect(typeof latest.superseded_at).toBe('string');
+
+    const row = store.getClaim(DUPLICATE)!;
+    assertConsistent(row, 'after REVISE');
+    expect(row.status).toBe('superseded');
+    expect(row.superseded_by).toBe(SURVIVOR);
+    expect(recallEligible(store)).toEqual([SURVIVOR]);
+    // The write path still sees exactly one claim for the fact: a revise did not create a duplicate.
+    expect(store.findActiveFactMatches(ENTITY_ID, {
+      predicate: FACT.predicate, scope: FACT.scope, object: FACT.object,
+    }).map(claim => claim.id)).toEqual([SURVIVOR]);
+
+    // The compile path re-materialising the revised record, then a full canonical replay.
+    store.syncFromJsonlVersionsBatch([latest], new Set(), undefined);
+    expect(store.getClaim(DUPLICATE)!.status).toBe('superseded');
+    const replay = replayIntoFreshStore(path.join(dataDir, 'replay.db'));
+    try {
+      expect(recallEligible(replay)).toEqual([SURVIVOR]);
+      expect(replay.getClaim(DUPLICATE)!.superseded_by).toBe(SURVIVOR);
+    } finally {
+      replay.close();
+    }
+
+    // Idempotent replay of the same operation_id reports the same thing: the contract does not
+    // depend on which path served the call.
+    const replayed = await handleRevise(params, dataDir, store, config, { opsDir });
+    expect(replayed.superseded_by).toBe(SURVIVOR);
+  });
+
+  it('FORGET → REVIVE: the tombstone and the revival both carry it; the duplicate stays out', async () => {
+    seedAndSweep();
+    const { evidenceDir } = scaffold();
+    const config = protocolConfig();
+    const layer0 = new Layer0Index(path.join(dataDir, 'smartware.db'));
+
+    try {
+      const forgotten = await handleForget(
+        { actor: OWNER, target_claim_id: DUPLICATE, mode: 'tombstone', reason: 'the owner asked for it' },
+        evidenceDir, layer0, store, config,
+      );
+      expect(forgotten.status).toBe('forgotten');
+
+      // Spec §11: the forgotten version carries forward all non-content metadata. The demotion is
+      // non-content metadata about this claim; losing it here is how a revival would lose it.
+      const forgottenVersion = readLatestVersion(dataDir, DUPLICATE)! as ForgottenClaimVersion;
+      expect(forgottenVersion.state).toBe('forgotten');
+      expect(forgottenVersion.superseded_by).toBe(SURVIVOR);
+      expect(typeof forgottenVersion.superseded_at).toBe('string');
+
+      // The derived row for a forgotten claim is retracted, and the pointer only means something
+      // while the claim is superseded — so the row's pointer is null by design, not by loss.
+      const retracted = store.getClaim(DUPLICATE)!;
+      expect(retracted.status).toBe('retracted');
+      expect(retracted.superseded_by).toBeNull();
+
+      const revived = await handleRevive(
+        {
+          actor: OWNER,
+          tombstone_id: forgottenVersion.tombstone_id,
+          reason: 'the owner brought it back',
+          operation_id: `op_${ulid()}`,
+        },
+        dataDir, store, config,
+      );
+      expect(revived.status).toBe('revived');
+
+      // Revival restores the claim's assertion. The survivor still asserts the same fact, so the
+      // revival must not put the duplicate back into the recall-eligible set.
+      const revivedVersion = readLatestVersion(dataDir, DUPLICATE)!;
+      expect(revivedVersion.state).toBe('active');
+      expect(revivedVersion.superseded_by).toBe(SURVIVOR);
+      const row = store.getClaim(DUPLICATE)!;
+      assertConsistent(row, 'after REVIVE');
+      expect(row.status).toBe('superseded');
+      expect(recallEligible(store)).toEqual([SURVIVOR]);
+
+      const replay = replayIntoFreshStore(path.join(dataDir, 'replay.db'));
+      try {
+        expect(recallEligible(replay)).toEqual([SURVIVOR]);
+        expect(replay.getClaim(DUPLICATE)!.superseded_by).toBe(SURVIVOR);
+      } finally {
+        replay.close();
+      }
+    } finally {
+      layer0.close();
+    }
+  });
+
+  it('ENDORSE: the cascade version of a demoted claim keeps it demoted', async () => {
+    seedAndSweep();
+    const { wikiDir } = scaffold();
+    const config = protocolConfig();
+    const previews = new CascadePreviewStore(':memory:');
+
+    try {
+      const frontmatter: Frontmatter = {
+        entity_id: ENTITY_ID,
+        entity: FACT.subjectName,
+        type: 'organization',
+        scope: FACT.scope,
+        epistemic: 'observed',
+        sensitive: false,
+        sources: [],
+        claim_ids: [DUPLICATE],
+        sources_claim_ids: [DUPLICATE],
+        compiled_at: new Date().toISOString(),
+        compiled_by: 'smartware',
+        confidence: 0.5,
+        supersedes: [],
+        related: [],
+        page_id: `page_${ENTITY_ID}`,
+      };
+      const pagePath = path.join(wikiDir, 'acme.md');
+      fs.writeFileSync(pagePath, serialiseFrontmatter(frontmatter, '# Acme'), 'utf8');
+
+      const result = await handleEndorse({
+        actor: OWNER,
+        page_id: `page_${ENTITY_ID}`,
+        page_path: pagePath,
+        dry_run: false,
+        reason: 'the owner confirms this page',
+        operation_id: `op_${ulid()}`,
+      }, dataDir, store, previews, config);
+      expect(result.status).toBe('endorsed');
+
+      // Endorsement adopts the body as user voice; it does not decide that the claim is no longer a
+      // duplicate of the survivor.
+      const latest = readLatestVersion(dataDir, DUPLICATE)!;
+      expect(latest.state).toBe('active');
+      expect(latest.author).toBe('user');
+      expect(latest.superseded_by).toBe(SURVIVOR);
+      const row = store.getClaim(DUPLICATE)!;
+      assertConsistent(row, 'after ENDORSE');
+      expect(row.status).toBe('superseded');
+      expect(recallEligible(store)).toEqual([SURVIVOR]);
+    } finally {
+      previews.close();
+    }
+  });
+
+  it('CONSOLIDATE: a demoted input\'s tombstone carries it; the summary inherits nothing', async () => {
+    seedAndSweep();
+    const config = protocolConfig();
+
+    const result = await handleConsolidate({
+      actor: OWNER,
+      claim_ids: [SURVIVOR, DUPLICATE],
+      summary: 'One deadline: 2026-09-01',
+      subject_name: FACT.subjectName,
+      predicate: 'deadline_summary',
+      scope: FACT.scope,
+      operation_id: `op_${ulid()}`,
+    }, dataDir, store, config);
+    expect(result.status).toBe('consolidated');
+
+    const forgottenVersion = readLatestVersion(dataDir, DUPLICATE)! as ForgottenClaimVersion;
+    expect(forgottenVersion.state).toBe('forgotten');
+    expect(forgottenVersion.superseded_by).toBe(SURVIVOR);
+
+    // The "current understanding" claim is a NEW claim (version 1): there is no prior version to
+    // carry from, and it inherits none of the input's demotion state.
+    const consolidated = readLatestVersion(dataDir, result.claim_id)!;
+    expect(consolidated.version).toBe(1);
+    expect(consolidated.state).toBe('active');
+    expect(consolidated.superseded_by).toBeUndefined();
+    expect(store.getClaim(result.claim_id)!.status).toBe('active');
   });
 });

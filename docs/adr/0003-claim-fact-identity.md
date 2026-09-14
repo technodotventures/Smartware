@@ -4,6 +4,9 @@
 - **Status:** Accepted — **amended 2026-09-14**: the rule's scope is qualified and the parallel
   fingerprint identity over the same rows is recorded (*Known divergence*). That divergence is
   unreconciled by design; this ADR does not claim the library has one notion of fact identity.
+  **Amended again 2026-09-14** (`t_742e31f9`): the demotion's durability is extended to every flow
+  that hand-builds a version record — preserved by all of them, reported on `REVISE`
+  (*Carry-forward across hand-built version records*).
 - **Deciders:** @smarty-pants (protocol stewardship / research). No owner sign-off gate for the
   **additive SDK surface** itself — no protocol invariant, schema, cryptography, or authority-table
   change. The disposition in *Known divergence* (leaving the pre-existing fingerprint rule
@@ -94,7 +97,95 @@ is deliberately **not** a canonical `supersedes` relation edge, which spec §6 a
 `origin ∈ {reviewed, user}` — the dedup carries no user warrant and must not pretend to one. Its
 boundaries are recorded in `docs/conformance-status.md` → *Remaining limits*: a pre-fix demotion is
 not reconstructible, and flows that hand-build a claim's next version record (user `REVISE`,
-endorsement cascade, consolidation) do not yet carry the pointer forward.
+endorsement cascade, consolidation) do not yet carry the pointer forward. **That second boundary was
+closed in `t_742e31f9` — see *Carry-forward across hand-built version records* below, which decides
+the semantics flow by flow.**
+
+### Carry-forward across hand-built version records (added 2026-09-14 · kanban `t_742e31f9`)
+
+The subsection above left a boundary: flows that **hand-build** a claim's next version record (rather
+than appending it through `insertClaim`) did not copy `superseded_by`/`superseded_at`, and because
+every materialisation derives `status` purely from the record, touching a demoted claim through one of
+them silently released the demotion in live **and** replayed state. This subsection decides the
+semantics per flow and removes the boundary.
+
+**Decision: every flow preserves the demotion. Nothing in beta releases it, and no flow reverses it
+silently.** A user act that touches a demoted claim is recorded *and reported*, so that the mirror
+failure mode — an act that appears to succeed while the claim stays out of recall — is not silent
+either.
+
+| Flow | Site | Disposition |
+| --- | --- | --- |
+| user `REVISE` | `src/protocol/revise.ts` | **Preserve**, and report `superseded_by` on the result |
+| `FORGET` tombstone | `src/protocol/forget.ts` (forgotten version) | **Preserve** (§11 carry-forward of non-content metadata) |
+| `REVIVE` | `src/protocol/forget.ts` (revived version) | **Preserve** (the snapshot it restores was demoted) |
+| endorsement cascade | `src/protocol/endorse.ts` | **Preserve** (already, by spreading the endorsed version — now pinned by test) |
+| `CONSOLIDATE` inputs | `src/protocol/consolidate.ts` | **Preserve** on each input's tombstone; the summary is a new claim and inherits none |
+| `FORGET.SCOPE` offboarding | `src/protocol/forget_scope.ts` | **Preserve** |
+| retention expiry | `src/protocol/retention.ts` | **Preserve** |
+| `reflect.auto` fingerprint extension | `src/protocol/reflect.ts` | **Preserve** (already, by spreading the existing version — now pinned by test) |
+| `reflect.auto` / `CONSOLIDATE` new claim | version 1 of a fresh claim id | Not applicable: no prior version to carry |
+
+Why preserve is forced rather than merely preferred:
+
+1. **Beta has no verb that changes the fact a claim asserts.** `REVISE`'s payload has no content,
+   object, predicate or scope field (`ReviseParams`), `adopt_body` flips authorship only, and spec §6
+   is explicit that content "is never rewritten in place". So after every one of these flows the
+   claim still asserts the same `(subject, predicate, scope, object)` as the survivor — the exact
+   condition the demotion encodes. Releasing it cannot add information; it can only add a second
+   recall-eligible copy of one fact.
+2. **A release would be unstable.** The next write touching that fact re-runs §1e and demotes the
+   same claim again (the survivor is the earliest-minted id, which the release did not change), so
+   "release" can only produce an oscillating state that depends on write order — the failure this ADR
+   exists to eliminate.
+3. **A user `REVISE` is the wrong vocabulary to overrule it.** The demotion carries no user warrant
+   (it is substrate bookkeeping), but it is also not an epistemic claim the user is contradicting.
+   Beta's sanctioned routes to change current truth — observe → `reflect.auto` → `REVISE` with
+   `adopt_body`, or admitting a `corrects`/`supersedes` edge (spec §9) — all produce or protect a
+   *different* claim and none of them requires the duplicate to become recall-eligible.
+
+Alternatives considered and rejected:
+
+- **Release on user `REVISE`, reported to the caller.** Rejected: unstable (reason 2), and `REVISE`
+  cannot change the fact (reason 1), so it always recreates the duplicate the §1e sweep exists to
+  remove.
+- **Release only when the revise adjudicates (`adopt_body` / relation admission), preserve otherwise.**
+  Rejected: `adopt_body` does not change the body in this implementation, so the split keys semantics
+  off a flag that does not affect the fact — a rule with two branches where one behaviour is correct.
+- **Refuse `REVISE` on a demoted claim** (`ProtocolError`). Rejected: it would block legitimate
+  adjudication of an auditable claim (confidence, epistemic tag, relations, `add_derived_from`,
+  protection) and still could not give the user what they asked for, because the survivor *is* the
+  claim for that fact. Reporting is the honest version of the same information.
+- **Add the un-supersede vocabulary now.** Deferred — new protocol surface, owner sign-off required.
+  See *Remaining limit* below, which also names the shape that vocabulary should take.
+
+Evidence: `test/layer1/demotion-durability.test.ts` (REVISE, FORGET→REVIVE, ENDORSE, CONSOLIDATE —
+each asserting the record, the derived row, the recall-eligible set and a canonical replay),
+`test/protocol/forget-scope.test.ts` and `test/protocol/retention-expire.test.ts` for the two sweeps.
+The proof of the *old* boundary (a flow that drops the field releases the demotion) is the same tests
+run against the pre-change tree.
+
+**Migration note.** The two fields are additive on the record and already existed on demotion
+records, so a store written by an older version replays unchanged and no schema or migration is
+needed. The one narrow exception is a *pending* operation intent that the old code prepared for a
+demoted claim: the intent's `record_hash` was computed without the carried fields, so recovery fails
+closed — the operation lands in manual review instead of being applied on a mismatch — and
+re-issuing it under a fresh `operation_id` resolves it.
+
+**Remaining limit (recorded, not fixed here).** Two consequences of the decision are worth stating
+plainly, because a reader could otherwise assume the substrate can do something it cannot:
+
+- **Beta has no way to release a mechanical demotion.** `invalidate_relations` releases an *admitted*
+  `supersedes`/`corrects` edge; a mechanical demotion is deliberately not an edge, so there is no
+  relation to withdraw. If the survivor is itself later forgotten, the fact leaves default recall
+  entirely (the duplicate stays demoted and audit-visible). The useful vocabulary is probably not
+  "un-supersede the loser" — after which the next §1e write would re-demote it — but a user-only
+  **re-pick the survivor** act that demotes the other copy. Owner decision, new protocol surface.
+- **`FingerprintIndex.activeByFingerprint` filters on `state`, not on the demotion**, so a demoted
+  claim can be the fingerprint holder `reflect.auto` folds a restatement into. Measured
+  (`t_01ef0ede` step 2): recall stays at 1 after an autonomous restatement — correct — but the added
+  evidence lands on the copy that is out of recall. Reconciling that is the fingerprint/write-path
+  identity divergence (*Known divergence*, owner-gated `t_15bb0cd0`), not a carry-forward defect.
 
 ## Consequences
 

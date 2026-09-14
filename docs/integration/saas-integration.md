@@ -199,7 +199,12 @@ survivor order — so `matches[0]` is the survivor even if you only need the id.
   which is what stops recall answering the same question twice. The demotion is recorded in the
   demoted claim's own **canonical version records** (`superseded_by`, `superseded_at`) and the row is
   re-derived from them, so it survives a compile-path row sync and a full canonical replay — it is
-  not a projection-only fact.
+  not a projection-only fact. **Every flow that touches the claim afterwards carries it forward**: a
+  user `REVISE` (whose result reports `superseded_by`, because the revision changes metadata and not
+  the asserted fact — so the claim stays out of the recall-eligible set), `FORGET`'s tombstone,
+  `REVIVE`'s restore, the endorsement cascade, consolidation's input tombstones, scope offboarding
+  and retention expiry. Nothing in beta *releases* a mechanical demotion; §10 names the boundary that
+  remains.
 - **The decision is reported.** `ambiguous_matches` and `superseded_claims` come back to the caller
   instead of a choice being made silently.
 
@@ -557,13 +562,20 @@ on the exact version you ship:
   scope (`§1e`). Identity is `(subject, predicate, scope, object value)` — two rows
   asserting the same fact in **different scopes** are never merged, so scope
   isolation always wins over deduplication.
-- Demotion durability has two boundaries. A demotion written by a library version
-  **before this change** was projection-only and is not reconstructible from canonical
-  data. And flows that hand-build a claim's next version record — user `REVISE`, the
-  endorsement cascade, consolidation — do not yet carry the pointer forward, so
-  revising a demoted claim releases the demotion (consistently in live and replayed
-  state). The `§1e` write path and its follow-up writes (evidence, confidence) do
-  carry it; `test/layer1/demotion-durability.test.ts` pins that.
+- Demotion durability has **one** boundary left. A demotion written by a library version before the
+  durability fix was projection-only and is not reconstructible from canonical data. From that fix
+  on, the demotion lives in the demoted claim's own version records and **every** flow carries it
+  forward — user `REVISE` (which reports `superseded_by` on its result, because it changes metadata
+  and not the asserted fact), the `FORGET` tombstone, `REVIVE`'s restore from the snapshot, the
+  endorsement cascade, consolidation's input tombstones, scope offboarding and retention expiry. So
+  a claim demoted as a duplicate stays out of the recall-eligible set through all of them, including
+  a later `REVIVE`. **Releasing** a mechanical demotion needs a new, explicitly user-only vocabulary
+  ("re-pick the survivor" — the loser cannot win, because the next write touching that fact would
+  re-demote it); until it ships, a demoted duplicate also stays demoted if the survivor is itself
+  forgotten, and the fact is then audit-visible only. Reasoning:
+  [`ADR-0003`](../adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built version
+  records*. Pinned by `test/layer1/demotion-durability.test.ts` plus the FORGET.SCOPE and retention
+  suites.
 - Passing schemas + behavioral invariants is **not** exhaustive
   requirement-by-requirement conformance to Specification v1.6.16.
 

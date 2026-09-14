@@ -282,6 +282,10 @@ export async function handleEndorse(
     const latest = readLatestVersion(dataDir, claimId);
     if (!latest) throw new ProtocolError('claim_not_found', `Claim '${claimId}' not found`);
     if (latest.state !== 'active') throw new ProtocolError('claim_forgotten', `Claim '${claimId}' is forgotten`);
+    // The spread carries `superseded_by`/`superseded_at` with it: endorsing a claim adopts its body
+    // as user voice, which does not decide that the claim is no longer a duplicate of the survivor
+    // (`resolveFactMatches` makes that call — ADR-0003 → *Carry-forward across hand-built version
+    // records*). Dropping the field here would release the demotion silently.
     const endorsed: ActiveClaimVersion = {
       ...latest,
       version: latest.version + 1,

@@ -36,22 +36,28 @@ Specification v1.6.16 conformance.
 ## Verified baseline
 
 Verified 2026-09-14 on Node v26.5.1 for the duplicate-claim-identity change
-(`fix/duplicate-claim-recipe`) and the demotion-durability fix on top of it
-(`wip/neo/demotion-durability`), superseding the 2026-09-10 0.7.0 release-cut
-baseline (which recorded **446 tests across 64 files**): **501 tests across
-70 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
-contract still fails closed. The delta over the parent commit is
-`test/layer1/fact-identity.test.ts` (22 tests) plus
-`test/layer1/demotion-durability.test.ts` (8 tests, see below); no other suite
-changed. (CI
-re-runs the same gate via `npm ci` from `package-lock.json` on Node 22 and 24,
-so the two runtime lines are verified by CI rather than by this local run.)
+(`fix/duplicate-claim-recipe`), the demotion-durability fix on top of it
+(`wip/neo/demotion-durability`), and the carry-forward of a demotion through the
+flows that hand-build a version record (`wip/smarty/demotion-handbuilt-records`),
+superseding the 2026-09-10 0.7.0 release-cut baseline (which recorded **446 tests
+across 64 files**): **507 tests across 70 files**, 31 schema files. The delta over
+the parent commit is 6 tests — `test/layer1/demotion-durability.test.ts` (4:
+`REVISE`, `FORGET` → `REVIVE`, endorsement, consolidation), plus one each in
+`test/protocol/forget-scope.test.ts` (offboarding) and
+`test/protocol/retention-expire.test.ts` (expiry) — and the eight
+demotion-durability tests of the parent change are all still green; no other suite
+changed. The retrieval-kernel contract (9/9 scenarios) and the activation contract
+(fails closed) were last measured on the parent revision of this baseline; this
+change touches Layer 1 version records only, not the retrieval kernel or the
+extractor. (CI re-runs the same gate via `npm ci` from `package-lock.json` on Node
+22 and 24, so the two runtime lines are verified by CI rather than by this local
+run.)
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **493 tests across 69 files** with no skips.
+- The standalone suite passes **507 tests across 70 files** with no skips.
 - The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
   claim write-path identity contract documented in the integration guide §1e:
   `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
@@ -67,7 +73,8 @@ so the two runtime lines are verified by CI rather than by this local run.)
   from them, so a compile-path row sync and a full canonical replay both keep the
   duplicate out of the recall-eligible set (previously projection-only — measured
   in `t_15bb0cd0` `evidence/23-demotion-durability.txt`; pinned by
-  `test/layer1/demotion-durability.test.ts`). The same 6 fixtures as the
+  `test/layer1/demotion-durability.test.ts`, which now also covers the flows that
+  hand-build a version record). The same 6 fixtures as the
   host-side pilot reference implementation are reproduced 1:1, so the pilot's
   deterministic suite remains a valid cross-check.
 - The same suite pins the **known divergence between that write-path identity and
@@ -178,13 +185,23 @@ The exact ordering and recovery state table are documented in
   + `resolveFactMatches`, integration guide §1e). Identity is
   `(subject, predicate, scope, object value)` — the same fact asserted in two
   different scopes is never merged.
-- The demotion is durable **from the version that records it**: a compile-path
+- The demotion is durable **from the version that records it** — a compile-path
   row sync and a canonical replay both reconstruct it from the claim's canonical
-  version records. Two boundaries: a demotion written before this fix was
-  projection-only and is not reconstructible from canonical data; and flows that
-  hand-build a claim's next version record (user `REVISE`, endorsement cascade,
-  consolidation) do not yet carry the pointer forward — the claim re-derives from
-  that record, releasing the demotion consistently in live and replayed state.
+  version records — and **every flow that hand-builds a claim's next version
+  record carries it forward**: user `REVISE` (whose result reports `superseded_by`,
+  because a revise changes metadata and not the asserted fact), the `FORGET`
+  tombstone, `REVIVE`'s restore from the snapshot, the endorsement cascade,
+  consolidation's input tombstones, scope offboarding and retention expiry. Two
+  limits remain. A demotion written before this fix was projection-only and is not
+  reconstructible from canonical data. And **nothing in beta releases a mechanical
+  demotion**: `invalidate_relations` withdraws an *admitted* `supersedes`/`corrects`
+  edge, and the mechanical demotion is deliberately not an edge, so the vocabulary
+  needed is a new, explicitly user-only **re-pick the survivor** act (un-superseding
+  the loser would be re-demoted by the next write touching that fact). Until it
+  ships, a demoted duplicate stays demoted even if the survivor is later forgotten
+  — the fact is then audit-visible only. Reasoning and the rejected alternatives:
+  [ADR-0003](adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built
+  version records*.
 - **Two identity rules over the claim table are unreconciled.** The write-path
   identity above governs the host write path; the autonomous-creation path
   (`reflect.auto`) is idempotent on the structured claim fingerprint instead

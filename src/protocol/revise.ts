@@ -22,6 +22,7 @@ import type {
 import { isCanonicalRelationValid } from '../layer1/types.js';
 import {
   appendClaimVersion,
+  carryDemotion,
   iterAllClaimVersions,
   readLatestVersion,
   type ClaimVersionRecord,
@@ -71,6 +72,13 @@ export interface ReviseResult {
   epistemic_owner: ClaimAuthor;
   operation_id: string;
   status: 'revised';
+  /**
+   * Set when the revised claim is still a mechanically demoted duplicate (ADR-0003 →
+   * *Carry-forward across hand-built version records*): the surviving claim that supersedes it.
+   * `REVISE` changes metadata, never the asserted fact, so it cannot release a duplicate
+   * resolution — the caller is told that rather than left to discover it from a recall miss.
+   */
+  superseded_by?: string;
 }
 
 /** Synchronous fault hooks used by crash-boundary conformance tests. */
@@ -136,6 +144,10 @@ export async function handleRevise(
       || typeof recordHash !== 'string') {
       throw new ProtocolError('conflict', `operation_id '${params.operation_id}' has no replayable REVISE result`);
     }
+    const supersededBy = exact.details?.['superseded_by'];
+    if (supersededBy !== undefined && typeof supersededBy !== 'string') {
+      throw new ProtocolError('conflict', `operation_id '${params.operation_id}' has no replayable REVISE result`);
+    }
     const artifacts = [...iterAllClaimVersions(dataDir)]
       .filter(version => version.operation_id === params.operation_id);
     if (artifacts.length !== 1
@@ -151,6 +163,7 @@ export async function handleRevise(
       epistemic_owner: epistemicOwner,
       operation_id: params.operation_id,
       status: 'revised',
+      ...(supersededBy !== undefined ? { superseded_by: supersededBy } : {}),
     };
   };
 
@@ -263,7 +276,7 @@ export async function handleRevise(
     ? [...new Set([...latest.derived_from, ...params.add_derived_from])]
     : latest.derived_from;
 
-  const record: ActiveClaimVersion = {
+  const record: ActiveClaimVersion = carryDemotion({
     claim_id: latest.claim_id,
     version: newVersion,
     state: 'active',
@@ -285,7 +298,7 @@ export async function handleRevise(
     tags: latest.tags,
     supersedes: latest.version,
     semantic: latest.semantic,
-  };
+  }, latest);
 
   if (commitCtx) {
     const recordHash = computePayloadHash(record);
@@ -309,6 +322,8 @@ export async function handleRevise(
         epistemic_owner: record.epistemic_owner,
         operation_id: params.operation_id,
         status: 'revised',
+        // The claim is still a demoted duplicate: the REVISE decided metadata, not fact identity.
+        ...(record.superseded_by !== undefined ? { superseded_by: record.superseded_by } : {}),
       },
       details: { claim_id: record.claim_id, new_version: record.version },
     };
@@ -330,6 +345,7 @@ export async function handleRevise(
         new_version: record.version,
         epistemic_owner: record.epistemic_owner,
         record_hash: recordHash,
+        ...(record.superseded_by !== undefined ? { superseded_by: record.superseded_by } : {}),
       },
     });
     commitHooks?.afterCommit?.();
@@ -346,5 +362,6 @@ export async function handleRevise(
     epistemic_owner: newEpistemicOwner,
     operation_id: params.operation_id,
     status: 'revised',
+    ...(record.superseded_by !== undefined ? { superseded_by: record.superseded_by } : {}),
   };
 }

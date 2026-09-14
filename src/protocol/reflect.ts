@@ -378,6 +378,8 @@ export async function produceObservationClaims(
         sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
       });
       if (!existingByFp.derived_from.includes(obs.id)) {
+        // The spread carries the substrate's demotion fields (ADR-0003): folding a restatement into
+        // an existing claim must not release a duplicate resolution.
         const extended: ActiveClaimVersion = {
           ...existingByFp,
           version: existingByFp.version + 1,

@@ -639,6 +639,9 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           new_version: intent.result.new_version,
           epistemic_owner: intent.result.epistemic_owner,
           record_hash: intent.expected.record_hash,
+          ...(intent.result.superseded_by !== undefined
+            ? { superseded_by: intent.result.superseded_by }
+            : {}),
           recovered: true,
         },
       });

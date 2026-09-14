@@ -63,6 +63,13 @@ export interface ReviseOperationIntent {
     epistemic_owner: 'agent' | 'user';
     operation_id: string;
     status: 'revised';
+    /**
+     * The surviving claim that supersedes this one, when the revised claim is still a mechanically
+     * demoted duplicate (ADR-0003 → *Carry-forward across hand-built version records*). A REVISE
+     * changes metadata, never the asserted fact, so the demotion survives it; recording the pointer
+     * on the intent keeps a recovered or replayed commit reporting the same result as the original.
+     */
+    superseded_by?: string;
   };
   details: {
     claim_id: string;
@@ -318,6 +325,7 @@ function isReviseIntent(value: unknown): value is ReviseOperationIntent {
     && (result.epistemic_owner === 'agent' || result.epistemic_owner === 'user')
     && result.operation_id === intent.operation_id
     && result.status === 'revised'
+    && (result.superseded_by === undefined || typeof result.superseded_by === 'string')
     && details?.claim_id === expected.claim_id
     && details.new_version === expected.version;
 }

@@ -11,6 +11,8 @@ import { createDefaultConfig, saveConfig, type SmartwareConfig } from '../../src
 import { parseDurationDays, isRetentionExpired } from '../../src/protocol/retention.js';
 import { ClaimStore } from '../../src/layer1/store.js';
 import { SearchIndex, syncSearchFromClaims } from '../../src/layer3/search.js';
+import { resolveFactMatches } from '../../src/layer1/corroboration.js';
+import { readLatestVersion } from '../../src/layer1/jsonl.js';
 import { makeClaim } from '../helpers.js';
 
 const OWNER = { type: 'person' as const, id: 'user:owner', display_name: 'Owner' };
@@ -144,6 +146,53 @@ describe('expireRetention sweep', () => {
 
     const after = await c.query({ actor: OWNER, query: 'prefers email', scope: ACME });
     expect(after.results.length).toBe(0);
+
+    store.close();
+    searchIndex.close();
+  });
+
+  it('carries a mechanical demotion onto the expired claim\'s forgotten version', async () => {
+    const c = await open();
+    const obsId = (await c.observe({
+      actor: OWNER, type: 'message', content: { format: 'text/plain', body: 'Acme prefers email' },
+      scope: ACME, observed_at: '2026-08-01T00:00:00.000Z',
+    })).id;
+
+    const dbPath = path.join(dataDir, 'smartware.db');
+    const store = new ClaimStore(dbPath);
+    store.setDataDir(dataDir);
+    const searchIndex = new SearchIndex(dbPath);
+    const subjectId = `entity_${ulid()}`;
+    store.insertEntity({ id: subjectId, canonical_name: 'Acme', aliases: [], type: 'organization', scope: ACME, created_at: new Date().toISOString() });
+    const fact = {
+      subject_id: subjectId, subject_name: 'Acme', scope: ACME,
+      predicate: 'prefers_contact', object: { type: 'text' as const, value: 'email' },
+      confidence: 0.8, supporting_evidence: [obsId], status: 'active' as const,
+      epistemic: 'observed' as const,
+      extraction: { method: 'deterministic' as const, model: null, compiler_version: '0.6.3', prompt_hash: null, extracted_at: new Date().toISOString() },
+    };
+    const survivor = makeClaim({ ...fact });
+    // §1e picks the lexicographically smallest claim id as the survivor, so this id is the loser by
+    // construction — deterministic, no ULID-ordering race.
+    const loser = makeClaim({ ...fact, id: `claim_${'Z'.repeat(26)}` });
+    store.insertClaim(survivor);
+    store.insertClaim(loser);
+    const resolution = resolveFactMatches({
+      store,
+      matches: store.findActiveFactMatches(subjectId, {
+        predicate: 'prefers_contact', scope: ACME, object: { type: 'text', value: 'email' },
+      }),
+    });
+    expect(resolution.superseded_claims).toEqual([loser.id]);
+
+    const result = await c.expireRetention({ actor: OWNER, scope: ACME, as_of: '2026-09-10T00:00:00.000Z' });
+    expect(result.claims_retracted).toBe(2);
+
+    // ADR-0003: the demotion is non-content metadata, so the expiry tombstone carries it — the
+    // sweep must not read as an event that lifts a duplicate back into the recall-eligible set.
+    const forgotten = readLatestVersion(dataDir, loser.id);
+    expect(forgotten?.state).toBe('forgotten');
+    expect(forgotten?.superseded_by).toBe(survivor.id);
 
     store.close();
     searchIndex.close();
