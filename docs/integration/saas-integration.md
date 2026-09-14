@@ -161,8 +161,9 @@ Skipped, every restatement accumulates: measured on a pilot, one billing prefere
 ways produced **14 recall results for 2 distinct facts**, and recall quality degrades the longer the
 product runs.
 
-Smartware ships the identity rule, so you do not have to reimplement it. Resolve the fact — the
-subject, predicate, scope and object value — rather than the canonical key:
+Smartware ships the identity rule **for this write path**, so you do not have to reimplement it
+there. Resolve the fact — the subject, predicate, scope and object value — rather than the canonical
+key:
 
 ```js
 import { resolveFactMatches } from 'smartware/layer1/corroboration';
@@ -204,6 +205,30 @@ for one fact** before resolution and **1** after, with the duplicate superseded 
 unioned into the survivor. `scripts/saas-integration-smoke.mjs` reproduces that against the
 published package surface. The rule and the reasoning behind it are recorded in
 [ADR-0003](../adr/0003-claim-fact-identity.md).
+
+**Which surface this rule governs — read this if you also run the compile path.** The identity above
+is the rule for **the host write path**: the moment you decide whether an extracted fact restates a
+claim you already hold. Smartware carries a **second, different identity rule over the same `claims`
+rows**: the structured claim fingerprint
+(`computeStructuredClaimFingerprint` — `subject_name`, `predicate`, `object`, `scope` **and**
+`claim_type`), which `reflect.auto` uses for autonomous-creation idempotency (spec §193/§238). The
+two are **not reconciled**, and they disagree in both measured directions:
+
+- Two active rows asserting one fact that differ only in `claim_type` (say `'preference'` vs
+  `'finding'`) have **different** fingerprints — two claims to the compile path — while
+  `findActiveFactMatches` returns **2** and resolves them into one. A host that leaves `claim_type`
+  unset hits this: `reflect.auto` defaults it to `'hypothesis'`, `ClaimStore` to `'finding'`.
+- Two rows whose text values differ only in case (`'Quarterly'` vs `'quarterly'`) have the **same**
+  fingerprint — one claim to the compile path — while fact identity keeps them apart (it does not
+  case-fold a `text` value).
+
+So a host running both surfaces can end up with a duplicate the write path would have merged, or a
+demotion the compile path does not see. Nothing is silently wrong — `resolveFactMatches` reports what
+it merged — but do not build policy on the assumption that the two identity rules agree. The
+divergence, its measured cases and its reversal trigger are recorded in
+[ADR-0003](../adr/0003-claim-fact-identity.md) → *Known divergence*, and pinned by tests
+(`test/layer1/fact-identity.test.ts`); reconciliation is an open owner decision. The §1e sweep below
+converges duplicates whichever path minted them.
 
 **Do not do this** — it is what this guide used to teach:
 
@@ -456,7 +481,7 @@ await memory.forgetScope({
 npm ci
 npm run build        # tsc → dist/
 npm run verify:schemas
-npm test             # 490 tests across 69 files, no skips
+npm test             # 493 tests across 69 files, no skips
 npm pack             # → smartware-0.7.0.tgz
 ```
 
@@ -486,7 +511,7 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 490 tests / 69 files, no skips. The Coffee-specific suites:
+- `npm test` — 493 tests / 69 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*

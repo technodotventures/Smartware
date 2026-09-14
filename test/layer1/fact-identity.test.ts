@@ -22,6 +22,7 @@ import path from 'path';
 import os from 'os';
 import { ClaimStore } from '../../src/layer1/store.js';
 import { computeConfidence } from '../../src/layer1/confidence.js';
+import { computeStructuredClaimFingerprint } from '../../src/layer1/fingerprint.js';
 import { resolveFactMatches } from '../../src/layer1/corroboration.js';
 import { canonicalKey } from '../../src/layer1/types.js';
 import type { Claim } from '../../src/layer1/types.js';
@@ -352,5 +353,80 @@ describe('resolveFactMatches', () => {
     });
     expect(findMatches({ predicate: 'prefers_contact', object: { type: 'text', value: 'email' } }))
       .toHaveLength(1);
+  });
+});
+
+// ── Known divergence: fact identity vs. the structured claim fingerprint ─────────────────────────
+// The library carries TWO identity rules over these same `claims` rows, and they disagree in both
+// directions:
+//   • fact identity (this card's rule, ADR-0003) — `findActiveFactMatches`, i.e. subject, predicate,
+//     scope, `normaliseValue(object)`, `validity.to === null`. Governs the HOST WRITE PATH.
+//   • the structured claim fingerprint — `computeStructuredClaimFingerprint(subject_name, predicate,
+//     object, scope, claim_type)`, computed on every insert and consumed by `reflect.auto`
+//     idempotency (spec §193/§238; `src/protocol/reflect.ts:351`). Governs AUTONOMOUS CREATION.
+//
+// ADR-0003 records the divergence as known and unreconciled ("Known divergence") and defers
+// reconciliation to an owner decision. These tests pin the DISPOSITION, not a bug: fact identity
+// deliberately excludes `claim_type`, and deliberately does not case-fold a text value.
+//
+// If these fail, someone changed one of the two identity rules. Update ADR-0003 in the same change —
+// do not just edit the expectation.
+describe('fact identity vs. the structured claim fingerprint (known divergence, ADR-0003)', () => {
+  /** The compile path's identity, computed from the claim AS STORED (rowToClaim round-trips claim_type). */
+  const fingerprint = (claimId: string): string => {
+    const stored = store.getClaim(claimId)!;
+    return computeStructuredClaimFingerprint(
+      stored.subject_name, stored.predicate, stored.object, stored.scope,
+      stored.claim_type ?? 'finding',
+    );
+  };
+
+  it('treats two rows differing only in claim_type as one fact, where the fingerprint sees two', () => {
+    seedActiveClaim(SURVIVOR, 'obs_a', { claim_type: 'preference' });
+    seedActiveClaim(DUPLICATE, 'obs_b', { claim_type: 'finding' });
+
+    // Compile path: `claim_type` is part of its identity, so these are two distinct claims and
+    // neither is deduplicated against the other. (reflect.ts defaults it to 'hypothesis',
+    // ClaimStore to 'finding' — a host leaving it unset lands in exactly this case.)
+    expect(fingerprint(SURVIVOR)).not.toBe(fingerprint(DUPLICATE));
+
+    // Write path: `claim_type` is not part of the fact, so this IS the duplicate shape §1e
+    // resolves — two active claims, one fact — and resolution converges them.
+    expect(findMatches().map((c) => c.id)).toEqual([SURVIVOR, DUPLICATE]);
+    const res = resolveFactMatches({ store, matches: findMatches(), observationId: 'obs_c' });
+    expect(res.ambiguous_matches).toBe(2);
+    expect(res.superseded_claims).toEqual([DUPLICATE]);
+    expect(store.getClaim(DUPLICATE)!.status).toBe('superseded');
+  });
+
+  it('keeps two rows differing only in text case apart, where the fingerprint sees one', () => {
+    seedActiveClaim(SURVIVOR, 'obs_a', { object: { type: 'text', value: 'Quarterly' } });
+    seedActiveClaim(DUPLICATE, 'obs_b', { object: { type: 'text', value: 'quarterly' } });
+
+    // Compile path lowercases the structured assertion, so it sees a single claim here...
+    expect(fingerprint(SURVIVOR)).toBe(fingerprint(DUPLICATE));
+
+    // ...while the write path does not case-fold a `text` value, so it sees two facts. The rule is
+    // `normaliseValue` (trim + NFC), not the fingerprint's lowercase-everything.
+    expect(store.findActiveFactMatches(ENTITY_ID,
+      { ...FACT, object: { type: 'text', value: 'quarterly' } }).map((c) => c.id))
+      .toEqual([DUPLICATE]);
+    expect(store.findActiveFactMatches(ENTITY_ID,
+      { ...FACT, object: { type: 'text', value: 'Quarterly' } }).map((c) => c.id))
+      .toEqual([SURVIVOR]);
+  });
+
+  it('case-folds an enum value while leaving a text value case-sensitive', () => {
+    seedActiveClaim(SURVIVOR, 'obs_a', { object: { type: 'text', value: 'Quarterly' } });
+    seedActiveClaim('claim_0003CCCCCCCCCCCCCCCCCCCCCCCC', 'obs_d', {
+      predicate: 'prefers_contact', object: { type: 'enum', value: 'EMAIL' },
+    });
+
+    // The two widenings normaliseValue does apply, and the one it does not — the difference the
+    // case above measures.
+    expect(findMatches({ object: { type: 'text', value: 'quarterly' } })).toHaveLength(0);
+    expect(store.findActiveFactMatches(ENTITY_ID, {
+      predicate: 'prefers_contact', scope: FACT.scope, object: { type: 'enum', value: 'email' },
+    })).toHaveLength(1);
   });
 });
