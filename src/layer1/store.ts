@@ -510,6 +510,13 @@ export class ClaimStore {
         operation_id: opId,
         actor_id: actId,
         tags: [],
+        // A demotion rides the canonical record, not just the derived row: without this,
+        // re-materialising the record (compile-path sync) or replaying the log restores the
+        // duplicate to the recall-eligible set. `t_invalidated` is the demotion commit time
+        // when the caller stamped one; otherwise the record's own commit time stands in.
+        ...(claim.status === 'superseded' && claim.superseded_by != null
+          ? { superseded_by: claim.superseded_by, superseded_at: claim.t_invalidated.value ?? versionAt }
+          : {}),
       };
       const record: ClaimVersionRecord = state === 'active'
         ? {
@@ -627,7 +634,13 @@ export class ClaimStore {
     const semantic = v.state === 'active' ? v.semantic : undefined;
     const confNum = v.confidence === 'high' ? 0.9 : v.confidence === 'medium' ? 0.5 : 0.2;
     const epist = v.epistemic_tag === 'fact' ? 'user_confirmed' : 'inferred';
-    const status = v.state === 'active' ? 'active' : 'retracted';
+    // Derived from the canonical record, never from the row being replaced: the row is
+    // rebuild-equivalent only if this derivation is a pure function of the record. A demoted
+    // duplicate carries `superseded_by`/`superseded_at` on its own version records, so a
+    // compile-path sync or a replay reconstructs the demotion instead of restoring the row.
+    const supersededBy = v.state === 'active' ? (v.superseded_by ?? null) : null;
+    const supersededAt = supersededBy ? (v.superseded_at ?? v.version_at) : null;
+    const status = v.state === 'active' ? (supersededBy ? 'superseded' : 'active') : 'retracted';
     const now = v.created_at;
     const existingEntity = existing ? this.getEntity(existing.subject_id) : undefined;
     const entityName = semantic?.subject_name
@@ -669,7 +682,7 @@ export class ClaimStore {
       v.claim_id, entityId, entityName, predicate, object.type, JSON.stringify(object.value),
       v.scope, validityFrom, validityTo,
       now, 'known', null,
-      null, 'null', null,
+      supersededAt, supersededAt ? 'known' : 'null', null,
       tValidFromValue, tValidFromState, tValidFromBasis,
       tValidToValue, tValidToState, tValidToBasis,
       existing?.source_event_id ?? v.derived_from[0] ?? '',
@@ -677,7 +690,7 @@ export class ClaimStore {
       JSON.stringify(v.derived_from), extraction?.method ?? 'deterministic',
       extraction?.model ?? null, extraction?.compiler_version ?? '0.6.1',
       extraction?.prompt_hash ?? null, extraction?.extracted_at ?? now, status, epist, confNum, sensitive,
-      existing?.superseded_by ?? null, JSON.stringify(existing?.contested_by ?? []),
+      supersededBy, JSON.stringify(existing?.contested_by ?? []),
       v.state, v.author, v.epistemic_owner, v.claim_type, v.claim_role,
       v.version_at, v.created_at, v.operation_id, v.actor_id, JSON.stringify(v.relations),
     ];
@@ -837,8 +850,14 @@ export class ClaimStore {
     if (!claim) return;
     claim.status = status;
     claim.state = statusToState(status);
-    if (supersededBy !== undefined) {
-      claim.superseded_by = supersededBy;
+    if (status === 'superseded') {
+      if (supersededBy !== undefined) {
+        claim.superseded_by = supersededBy;
+      }
+    } else {
+      // `superseded_by` only means something while the claim is superseded; leaving a stale
+      // pointer behind is the same defect class as a demotion that exists only in the row.
+      claim.superseded_by = null;
     }
     if (invalidatedAt) {
       claim.t_invalidated = invalidatedAt;

@@ -196,7 +196,10 @@ survivor order — so `matches[0]` is the survivor even if you only need the id.
   fact observed again, so dropping its observations would lose provenance the brain already has.
 - **Losers are demoted, never deleted** — `status: 'superseded'`, `superseded_by: <survivor>`,
   timestamped. They stay auditable on disk and leave the recall-eligible set (`status === 'active'`),
-  which is what stops recall answering the same question twice.
+  which is what stops recall answering the same question twice. The demotion is recorded in the
+  demoted claim's own **canonical version records** (`superseded_by`, `superseded_at`) and the row is
+  re-derived from them, so it survives a compile-path row sync and a full canonical replay — it is
+  not a projection-only fact.
 - **The decision is reported.** `ambiguous_matches` and `superseded_claims` come back to the caller
   instead of a choice being made silently.
 
@@ -511,17 +514,21 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 493 tests / 69 files, no skips. The Coffee-specific suites:
+- `npm test` — 501 tests / 70 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
   indexes, erasure vs offboarding semantics, provenance integrity),
-  `test/render/provenance-rendering.test.ts` (33 exact-string tests), and
+  `test/render/provenance-rendering.test.ts` (33 exact-string tests),
   `test/layer1/fact-identity.test.ts` (22 tests: the §1e identity contract —
   every duplicate found, earliest-minted survivor in both insertion orders,
   evidence unioned, losers demoted not deleted, sweep without a new observation —
   plus 3 tests pinning the *known divergence* from `computeStructuredClaimFingerprint`
-  recorded in ADR-0003).
+  recorded in ADR-0003), and
+  `test/layer1/demotion-durability.test.ts` (8 tests: the §1e demotion is recorded
+  in canonical version records and reconstructed by a compile-path row sync and a
+  full canonical replay; live and replayed projections agree on the recall-eligible
+  set).
 - `npm run verify:saas` — public-API smoke on the packaged surface, including the
   §1e duplicate contract end to end: 2 recall results for one fact → 1 after
   resolution, duplicate superseded with its evidence unioned.
@@ -550,6 +557,13 @@ on the exact version you ship:
   scope (`§1e`). Identity is `(subject, predicate, scope, object value)` — two rows
   asserting the same fact in **different scopes** are never merged, so scope
   isolation always wins over deduplication.
+- Demotion durability has two boundaries. A demotion written by a library version
+  **before this change** was projection-only and is not reconstructible from canonical
+  data. And flows that hand-build a claim's next version record — user `REVISE`, the
+  endorsement cascade, consolidation — do not yet carry the pointer forward, so
+  revising a demoted claim releases the demotion (consistently in live and replayed
+  state). The `§1e` write path and its follow-up writes (evidence, confidence) do
+  carry it; `test/layer1/demotion-durability.test.ts` pins that.
 - Passing schemas + behavioral invariants is **not** exhaustive
   requirement-by-requirement conformance to Specification v1.6.16.
 

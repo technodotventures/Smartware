@@ -94,6 +94,22 @@ interface ClaimVersionBase {
   tags: string[];
   /** Required when version > 1. */
   supersedes?: number;
+  /**
+   * Set on a mechanically demoted claim (a resolved duplicate): the surviving claim that
+   * supersedes this one, and when the demotion was recorded. Mirrors the derived row's
+   * `superseded_by` / `t_invalidated` so that re-materialising this record — compile-path
+   * sync or a full canonical replay — reconstructs the demotion instead of restoring the
+   * duplicate to the recall-eligible set.
+   *
+   * This is the substrate's record of the library's duplicate resolution
+   * (`resolveFactMatches`), which carries no user warrant and therefore cannot be a
+   * canonical `supersedes` relation edge (spec §6: canonical epistemic edges are
+   * user-admitted in beta). The demotion does not change `state`: a superseded claim
+   * stays `active` for history and audit, exactly as spec §6 says.
+   */
+  superseded_by?: string;
+  /** ISO 8601 commit time of the demotion; present whenever `superseded_by` is. */
+  superseded_at?: string;
   /** Set on endorsement-cascade-produced versions. */
   endorsement_source?: string;
   /** Set on revival-produced versions. */

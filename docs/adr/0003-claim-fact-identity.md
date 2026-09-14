@@ -80,6 +80,22 @@ The contract, frozen (frozen means a change needs a superseding ADR):
 Forbidden: `.find()`-style single-row picking as the write-path identity (the guide now shows it as
 WRONG); using `canonicalKey` as the fact identity when `validity_from` is not derived from the fact.
 
+### Durability of the demotion (added 2026-09-14 · kanban `t_01ef0ede`)
+
+Item 4's demotion used to be recorded **only in the derived SQLite row**, so a compile-path
+`syncFromJsonlVersionsBatch` or a canonical replay restored the duplicate to the recall-eligible set
+(measured: `t_15bb0cd0` `evidence/23-demotion-durability.txt` — the L1 JSONL contained no trace of
+the demotion at all). The demotion is now recorded in the demoted claim's **canonical version
+records** (`superseded_by`, `superseded_at`, carried forward on subsequent versions), and every
+materialisation derives `status` / `superseded_by` / `t_invalidated` from the record rather than
+from the row it replaces — a replay and the live projection agree on which rows are recall-eligible
+by construction. The record field is the substrate's own record of this **mechanical** demotion; it
+is deliberately **not** a canonical `supersedes` relation edge, which spec §6 admits only with
+`origin ∈ {reviewed, user}` — the dedup carries no user warrant and must not pretend to one. Its
+boundaries are recorded in `docs/conformance-status.md` → *Remaining limits*: a pre-fix demotion is
+not reconstructible, and flows that hand-build a claim's next version record (user `REVISE`,
+endorsement cascade, consolidation) do not yet carry the pointer forward.
+
 ## Consequences
 
 - Hosts that follow the guide no longer reimplement identity **on the write path**, so two hosts

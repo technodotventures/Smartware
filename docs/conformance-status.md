@@ -36,11 +36,14 @@ Specification v1.6.16 conformance.
 ## Verified baseline
 
 Verified 2026-09-14 on Node v26.5.1 for the duplicate-claim-identity change
-(`fix/duplicate-claim-recipe`), superseding the 2026-09-10 0.7.0 release-cut
-baseline (which recorded **446 tests across 64 files**): **493 tests across
-69 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
-contract still fails closed. The 22-test delta is
-`test/layer1/fact-identity.test.ts` (see below); no other suite changed. (CI
+(`fix/duplicate-claim-recipe`) and the demotion-durability fix on top of it
+(`wip/neo/demotion-durability`), superseding the 2026-09-10 0.7.0 release-cut
+baseline (which recorded **446 tests across 64 files**): **501 tests across
+70 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
+contract still fails closed. The delta over the parent commit is
+`test/layer1/fact-identity.test.ts` (22 tests) plus
+`test/layer1/demotion-durability.test.ts` (8 tests, see below); no other suite
+changed. (CI
 re-runs the same gate via `npm ci` from `package-lock.json` on Node 22 and 24,
 so the two runtime lines are verified by CI rather than by this local run.)
 
@@ -58,7 +61,13 @@ so the two runtime lines are verified by CI rather than by this local run.)
   'superseded'`, `superseded_by`, timestamped, never deleted), recomputing
   confidence with the library formula, and reporting `ambiguous_matches` /
   `superseded_claims`. Both insertion orders of a duplicate pair yield the same
-  survivor; a demoted duplicate is no longer matched. The same 6 fixtures as the
+  survivor; a demoted duplicate is no longer matched, **and the demotion is
+  durable**: it is recorded in the demoted claim's own canonical version records
+  (`superseded_by`, `superseded_at`) and every materialisation derives the row
+  from them, so a compile-path row sync and a full canonical replay both keep the
+  duplicate out of the recall-eligible set (previously projection-only — measured
+  in `t_15bb0cd0` `evidence/23-demotion-durability.txt`; pinned by
+  `test/layer1/demotion-durability.test.ts`). The same 6 fixtures as the
   host-side pilot reference implementation are reproduced 1:1, so the pilot's
   deterministic suite remains a valid cross-check.
 - The same suite pins the **known divergence between that write-path identity and
@@ -169,6 +178,13 @@ The exact ordering and recovery state table are documented in
   + `resolveFactMatches`, integration guide §1e). Identity is
   `(subject, predicate, scope, object value)` — the same fact asserted in two
   different scopes is never merged.
+- The demotion is durable **from the version that records it**: a compile-path
+  row sync and a canonical replay both reconstruct it from the claim's canonical
+  version records. Two boundaries: a demotion written before this fix was
+  projection-only and is not reconstructible from canonical data; and flows that
+  hand-build a claim's next version record (user `REVISE`, endorsement cascade,
+  consolidation) do not yet carry the pointer forward — the claim re-derives from
+  that record, releasing the demotion consistently in live and replayed state.
 - **Two identity rules over the claim table are unreconciled.** The write-path
   identity above governs the host write path; the autonomous-creation path
   (`reflect.auto`) is idempotent on the structured claim fingerprint instead
