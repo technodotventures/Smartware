@@ -100,8 +100,11 @@ WRONG); using `canonicalKey` as the fact identity when `validity_from` is not de
 - Evidence: `test/layer1/fact-identity.test.ts` (22 tests) and `npm run verify:saas` (2 recall results
   for one fact before resolution, 1 after; duplicate superseded; evidence 2→3; two rows for one fact
   carry two different canonical keys). Mutation check: restoring the silent `.find()` pick in
-  `findActiveFactMatches` fails **8 of the 22** tests and fails the smoke E2E with the symptom itself
-  — "recall returned 2 claims for one fact after resolution". Each way the divergence below could be
+  `findActiveFactMatches` fails **9 of the 22** tests — `npx vitest run
+  test/layer1/fact-identity.test.ts` with the survivor sort replaced by `.slice(0, 1)` reports
+  `Tests 9 failed | 13 passed (22)`, the ninth being the `claim_type` divergence test in the section
+  below — and also fails the smoke E2E with the symptom itself: "recall returned 2 claims for one
+  fact after resolution". Each way the divergence below could be
   silently closed is caught too: dropping `claim_type` from the fingerprint fails 1 test, case-folding
   a text value in `normaliseValue` fails 3, and making fact identity depend on `claim_type` fails 1
   (all three reverted byte-identically, sha256 verified).

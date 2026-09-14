@@ -517,9 +517,11 @@ on the exact version you ship:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
   indexes, erasure vs offboarding semantics, provenance integrity),
   `test/render/provenance-rendering.test.ts` (33 exact-string tests), and
-  `test/layer1/fact-identity.test.ts` (19 tests: the §1e identity contract —
+  `test/layer1/fact-identity.test.ts` (22 tests: the §1e identity contract —
   every duplicate found, earliest-minted survivor in both insertion orders,
-  evidence unioned, losers demoted not deleted, sweep without a new observation).
+  evidence unioned, losers demoted not deleted, sweep without a new observation —
+  plus 3 tests pinning the *known divergence* from `computeStructuredClaimFingerprint`
+  recorded in ADR-0003).
 - `npm run verify:saas` — public-API smoke on the packaged surface, including the
   §1e duplicate contract end to end: 2 recall results for one fact → 1 after
   resolution, duplicate superseded with its evidence unioned.
