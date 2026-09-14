@@ -10,6 +10,7 @@ import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
 import { admitClaim } from 'smartware/layer1/conflicts';
 import { computeConfidence } from 'smartware/layer1/confidence';
 import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
+import { MAX_INGEST_ITEMS } from 'smartware/ingestion';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -285,6 +286,119 @@ if (hasObservations) {
   okay.push(`export ok (${exported.export_id} → observations.jsonl, ${exported.counts?.observations?.toString() ?? '?'} obs)`);
 } else {
   fail.push(`export dir missing observations: ${exportDir} (${JSON.stringify(exported).slice(0, 200)})`);
+}
+
+// ── 6. Sources and connector ingestion (P1-2 contract) ─────────────────────
+//
+// Coffee owns OAuth login, scheduled jobs and connector credentials. Smartware
+// owns the provenance origin (the source registry) and the ingestion contract:
+// one batch per polled page, an opaque cursor, an operation_id, and per-item
+// dedup keyed on (source, external_id, scope). Context — actor + registered
+// source — is fail-closed: the brain refuses to write unattributable evidence.
+const owner = { type: 'person', id: 'user:ava', display_name: 'Ava' };
+
+const connector = memory.registerSource({
+  actor: owner,
+  id: 'src_gmail_ava',
+  kind: 'connector',
+  display_name: 'Gmail — ava@harbor-lane',
+  external_ref: 'acct_ava_primary',
+});
+if (connector.id === 'src_gmail_ava' && connector.status === 'active') {
+  okay.push(`source registry ok (${connector.kind}: ${connector.display_name})`);
+} else {
+  fail.push(`source registration failed: ${JSON.stringify(connector)}`);
+}
+
+// One polled page: two real items, one item carrying a credential (rejected —
+// the connector must not be able to wedge on a poisoned message).
+const batchOp = opId();
+const batch = {
+  actor: owner,
+  source_id: 'src_gmail_ava',
+  scope: 'client:acme#1',
+  cursor: 'hist/101',
+  operation_id: batchOp,
+  items: [
+    { external_id: 'msg_101', type: 'message', content: { format: 'text/plain', body: 'Acme onboarding starts Monday.' } },
+    { external_id: 'msg_102', type: 'message', content: { format: 'text/plain', body: 'Acme asked for parking details.' } },
+    { external_id: 'msg_103', type: 'message', content: { format: 'text/plain', body: 'Deploy key: ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } },
+  ],
+};
+const receipt = await memory.ingest(batch);
+if (batch.items.length <= MAX_INGEST_ITEMS && receipt.status === 'ok'
+  && receipt.accepted === 2 && receipt.rejected === 1
+  && receipt.cursor === 'hist/101' && receipt.cursor_before === null
+  && receipt.items.find(item => item.external_id === 'msg_103')?.code === 'secret_detected') {
+  okay.push(`ingest ok (2 accepted, 1 rejected secret_detected; cursor ${receipt.cursor})`);
+} else {
+  fail.push(`ingest failed: ${JSON.stringify(receipt).slice(0, 300)}`);
+}
+
+// Replaying the same operation_id returns the recorded receipt — no new writes.
+const ingestedId = receipt.items[0]?.observation_id;
+const replay = await memory.ingest(batch);
+const rawBefore = memory.searchObservations({ actor: owner, query: 'onboarding', scope: 'client:acme#1' });
+const rawAfter = memory.searchObservations({ actor: owner, query: 'onboarding', scope: 'client:acme#1' });
+if (replay.status === 'replayed' && rawAfter.length === 1 && rawBefore.length === 1) {
+  okay.push(`replay ok (${replay.status}; the retried batch wrote nothing again)`);
+} else {
+  fail.push(`replay failed: status ${replay.status}, raw hits ${rawBefore.length}->${rawAfter.length}`);
+}
+
+// A re-sync under a NEW operation_id dedups stored items instead of minting
+// twins; the poisoned item is (correctly) rejected again on every attempt.
+const resend = await memory.ingest({ ...batch, operation_id: opId(), cursor: 'hist/102' });
+if (resend.accepted === 0 && resend.duplicated === 2 && resend.rejected === 1) {
+  okay.push(`item dedup ok (re-synced page: 0 accepted, ${resend.duplicated} duplicates, ${resend.rejected} rejected again)`);
+} else {
+  fail.push(`item dedup failed: ${JSON.stringify({ accepted: resend.accepted, duplicated: resend.duplicated, rejected: resend.rejected })}`);
+}
+
+// Sync status: what Coffee's scheduler/UI renders.
+const sync = memory.sourceSyncStatus({ actor: owner, source_id: 'src_gmail_ava' })[0];
+if (sync && sync.last_sync?.cursor === 'hist/102' && sync.totals.batches === 2
+  && sync.totals.accepted === 2 && sync.totals.duplicated === 2 && sync.totals.rejected === 2) {
+  okay.push(`sync status ok (last cursor ${sync.last_sync.cursor}, ${sync.totals.batches} batches, accepted ${sync.totals.accepted}, duplicated ${sync.totals.duplicated}, rejected ${sync.totals.rejected})`);
+} else {
+  fail.push(`sync status wrong: ${JSON.stringify(sync)?.slice(0, 300)}`);
+}
+
+// The ingested item resolves to its registered source — provenance, not text matching.
+const ingestedEvidence = memory.readObservationEvidence({ actor: owner, observation_id: ingestedId });
+if (ingestedEvidence?.source_ref === 'src_gmail_ava') {
+  okay.push(`source-scoped provenance ok (${ingestedEvidence.id} ← ${ingestedEvidence.source_ref})`);
+} else {
+  fail.push(`ingested evidence lost its source: ${JSON.stringify(ingestedEvidence)?.slice(0, 200)}`);
+}
+
+// ── 7. Federated reads across client scopes, bounded by grants ──────────────
+
+// The owner reads both client scopes in one call; every result is scope-tagged.
+const federated = await memory.recallFederated({ actor: owner, query: 'billing', scopes: ['client:acme#1'] });
+const federatedScoped = federated.results.every(result => result.scope === 'client:acme#1');
+if (federated.scopes.join(',') === 'client:acme#1' && federatedScoped && federated.results.length > 0) {
+  okay.push(`federated read ok (${federated.results.length} scope-tagged result(s) across ${federated.scopes.join(', ')})`);
+} else {
+  fail.push(`federated read wrong: ${JSON.stringify(federated).slice(0, 300)}`);
+}
+
+// A staff actor naming a scope they cannot read gets a denial, never a partial answer.
+let partial = null;
+try {
+  await memory.recallFederated({
+    actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+    query: 'billing',
+    scopes: ['client:acme#1', 'workspace'],
+  });
+  partial = 'answered';
+} catch (error) {
+  partial = error?.code ?? String(error);
+}
+if (partial === 'insufficient_permission') {
+  okay.push('federated denial ok (gigi + workspace → insufficient_permission, no partial answer)');
+} else {
+  fail.push(`federated denial wrong: ${partial}`);
 }
 
 memory.close();

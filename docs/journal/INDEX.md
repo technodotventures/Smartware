@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **31** entries.
+Total: **33** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -37,6 +37,8 @@ Total: **31** entries.
 | 2026-09-13 | [`2026-09-13-t_9a58647c.md`](2026-09-13-t_9a58647c.md) | P0 audit: GBrain company-brain parity for Coffee |
 | 2026-09-13 | [`2026-09-13-t_aa6a3280.md`](2026-09-13-t_aa6a3280.md) | Audit conformance claims and release artifacts |
 | 2026-09-13 | [`2026-09-13-t_cb77ba0c.md`](2026-09-13-t_cb77ba0c.md) | Verify the active repository baseline and version identity |
+| 2026-09-14 | [`2026-09-14-t_29739781.md`](2026-09-14-t_29739781.md) | smartware docs+SDK: saas-integration recipe teaches the silent duplicate-claim pick |
+| 2026-09-14 | [`2026-09-14-t_35d6aa74.md`](2026-09-14-t_35d6aa74.md) | P0 implement: Graphiti-grade contradiction and temporal lifecycle |
 | 2026-09-14 | [`2026-09-14-t_3f19e206.md`](2026-09-14-t_3f19e206.md) | P0 synthesize: Coffee company-brain parity contract v1 |
 | 2026-09-14 | [`2026-09-14-t_a1118c49.md`](2026-09-14-t_a1118c49.md) | P0 implement: tenant, scope, human and agent isolation conformance |
 | 2026-09-14 | [`2026-09-14-t_ec159c21.md`](2026-09-14-t_ec159c21.md) | P0 fix: deterministic corroboration proof in Coffee-shaped pilot |

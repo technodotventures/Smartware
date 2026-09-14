@@ -59,7 +59,7 @@ await memory.observe({
   content: { format: 'text/markdown', body: 'Acme wants quarterly payroll.' },
   scope: 'client:acme#1',
   visibility: 'scope',
-  operation_id: crypto.randomUUID(), // crash-safe OBSERVE
+  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z', // `op_<ULID>` — a UUID is rejected; crash-safe OBSERVE
 });
 
 const hits = await memory.recall({
@@ -89,8 +89,10 @@ or attach it to your own transport. Tools include the canonical verbs
 `smartware_observe`, `smartware_recall`, `smartware_reflect`,
 `smartware_revise`, `smartware_forget`, plus `smartware_context`, `read`,
 `explain`, `correct`, `quarantine_review`, `grant`/`revoke`, `session_*`,
-and the two owner-only Coffee operations `smartware_forget_scope` and
-`smartware_export_scope`.
+the two owner-only Coffee operations `smartware_forget_scope` and
+`smartware_export_scope`, and the shared-workspace set
+`smartware_register_source`, `smartware_list_sources`, `smartware_ingest`,
+`smartware_sync_status`, `smartware_recall_federated`.
 
 ### 1c. Standalone MCP daemon (stdio)
 
@@ -240,6 +242,85 @@ Identity discipline decides which outcome you get: a restatement must reuse the 
 successor (superseded) rather than a disagreement (contested). Key `validity_from` to the fact's
 claimed validity start — not the extraction time — when you want disagreements detected.
 
+### 1g. Sources and connector ingestion (connectors, scheduled jobs)
+
+Coffee owns the OAuth dance, the scheduler and the connector credentials. The brain owns the
+**provenance origin** (a registered source) and one **ingestion contract** so a sync can be
+resumed, replayed and audited instead of being a loop of blind writes.
+
+Register the origin once (owner-only; `config.json` is the store, `created_at` is preserved on
+update, `paused`/`revoked` refuse new writes without touching old evidence):
+
+```ts
+memory.registerSource({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },   // must be the owner
+  id: 'src_gmail_ava',                    // stable host-chosen id — also the observation `app`
+  kind: 'connector',                      // connector | meeting | note | agent | manual | system
+  display_name: 'Gmail — ava@harbor-lane',
+  external_ref: 'acct_ava_primary',       // opaque host handle (mailbox / account / calendar)
+  // actor_ids: ['substrate:connector-runner'],   // optional: who may claim this provenance
+});
+```
+
+Then sync one **page per batch** — actor, source, scope, the opaque cursor you reached, and an
+`operation_id`:
+
+```ts
+const receipt = await memory.ingest({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },   // authenticated identity
+  source_id: 'src_gmail_ava',
+  scope: 'client:acme#1',                 // the actor still needs an observe grant here
+  cursor: 'hist/101',                     // opaque; stored verbatim, never parsed
+  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z', // `op_<ULID>`; the batch's idempotency key
+  items: page.items.map(item => ({
+    external_id: item.id,                 // the source's own id (dedup key)
+    type: 'message',
+    content: { format: 'text/plain', body: item.body },
+    observed_at: item.receivedAt,
+  })),
+});
+
+// receipt: { status, cursor, cursor_before, accepted, duplicated, quarantined, rejected, items }
+//   items[i]: { external_id, status: accepted|duplicate|quarantined|rejected, observation_id?, code? }
+```
+
+What the contract guarantees, and what it expects of you:
+
+- **Fail closed.** Missing source → `source_required`; unregistered → `source_unregistered`;
+  paused/revoked → `source_inactive`; actor outside the source's allow-list →
+  `insufficient_permission`; ungranted scope → the usual grant denial. All of these happen
+  **before anything is written**.
+- **Replay-safe.** Retry a batch with the same `operation_id` and you get the recorded receipt
+  back (`status: 'replayed'`) — nothing is written twice. Retry with a new `operation_id` (e.g.
+  after losing your local state) and stored items dedup per item. A crash *mid-batch* converges
+  on the retry: the written prefix dedups, the remainder completes.
+- **One item, one observation, per scope.** Dedup identity is `(source, external_id, scope)`, so
+  resending a page is safe, and the same message that matters to two clients lands in **both**
+  client memories instead of being silently shadowed by whichever scope saw it first. If an
+  item's content changes at the source, send it under a new `external_id` (e.g. `msg_123:2`) —
+  the brain keeps the original bytes and never rewrites history.
+- **A bad item does not wedge the batch.** A rejected item (e.g. `secret_detected`) is reported
+  with its code and counted; the batch still commits and the cursor advances. Alert on
+  `receipt.rejected` and on sync-status counts rather than assuming "ok" means "all stored".
+- **The cursor is yours.** Store it on your side too; `cursor_before` in the receipt tells you
+  the stream's previous checkpoint, and `syncStatus` (owner-only) reports, per source and scope,
+  the current cursor, last sync time, and accepted/duplicated/quarantined/rejected totals:
+
+```ts
+const [gmail] = memory.sourceSyncStatus({ actor: owner, source_id: 'src_gmail_ava' });
+// gmail.last_sync.cursor, gmail.scopes[i].cursor, gmail.totals.rejected, …
+```
+
+Batch size is capped at `MAX_INGEST_ITEMS` (500; exported from `smartware/ingestion`) — chunk
+bigger pages. The ledger of receipts/cursors is operational state: if it is ever lost (index
+wipe, restore into a fresh data dir), re-sending from your own last checkpoint is safe by
+construction; a missing cursor is never a lost write.
+
+Item bodies pass the same gates as any observation (secret detection, attachment safety,
+retention/sensitivity policy) — a connector does not get a bypass. Writes from an untrusted or
+review-held connector land `quarantined` (counted, hidden from the raw window until a review
+approves them), so treat "connector trusted" as a provisioning decision.
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by
@@ -309,7 +390,7 @@ await memory.observe({
   scope: 'client:acme#1',
   visibility: 'scope',
   sensitive: false,
-  operation_id: crypto.randomUUID(),
+  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z',
 });
 ```
 
@@ -338,6 +419,28 @@ const hits = await memory.recall({
 Freshness is **state-based, never time-based**: a failed compile stays
 raw-searchable forever with `unverified`. There is no silent "ages out of
 memory" based on a clock.
+
+**Federated reads (owner and multi-client staff).** When the product needs one
+search across several client scopes, use `recallFederated` rather than looping
+`recall` and merging in the host:
+
+```ts
+const federated = await memory.recallFederated({
+  actor: owner,                      // or a staff actor holding several scopes
+  query: 'open threads',
+  scopes: ['client:acme#1', 'client:bcau#1'],   // optional; omit → actor's readable scopes
+});
+// federated.scopes      → the scopes actually queried
+// federated.results     → scope-tagged rows, ordered scope-major (ranked within each scope)
+// federated.per_scope   → { scope, total_found, returned }
+```
+
+Two rules are enforced, not advisory: **naming a scope the actor cannot read
+denies the whole read** (`insufficient_permission` / `actor_unregistered`) —
+a federated read never partially answers a request that named an unauthorized
+scope; and **omitting `scopes` queries exactly the actor's readable scopes**
+(the owner: every scope in the brain). Scores are comparable within a scope,
+not across scopes — do not re-rank the merged list as one scale.
 
 ---
 
@@ -407,7 +510,7 @@ await memory.forgetScope({
   actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
   scope: 'client:acme#1',
   reason: 'offboarding',          // or 'erasure'
-  operation_id: crypto.randomUUID(),
+  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z',
   owner_pointer: '{"relationship_length":"client since 2023","job_categories":["bookkeeping","tax"],"satisfaction":"positive"}',
 });
 ```
@@ -441,7 +544,7 @@ await memory.forgetScope({
 npm ci
 npm run build        # tsc → dist/
 npm run verify:schemas
-npm test             # 446 tests across 64 files, no skips
+npm test             # 515 tests across 71 files, no skips
 npm pack             # → smartware-0.7.0.tgz
 ```
 
@@ -455,6 +558,7 @@ tenant config example), README, and LICENSE. The `exports` map in
 "./mcp"        → dist/mcp.js    (createSmartwareMcpServer)
 "./render"     → dist/render/provenance.js
 "./layer0|1|3" → dist/layer*/…   (advanced escape hatches)
+"./ingestion"  → dist/ingestion/index.js (source registry + ingestion contract)
 "./schemas/v0.4.2/*" and "./schemas/v0.5.0/*"
 ```
 
@@ -469,8 +573,11 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 446 tests / 64 files, no skips. The Coffee-specific suites:
+- `npm test` — 515 tests / 71 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
+  `test/conformance/p0_sources_ingestion.test.ts` (24 tests: source registry,
+  fail-closed source context, ingestion cursors/replay/dedup, sync status,
+  federated grants, human+agent attribution),
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
   indexes, erasure vs offboarding semantics, provenance integrity), and
@@ -490,6 +597,11 @@ on the exact version you ship:
   recover after one process terminates and the operation is retried*, plus
   reason-aware scope erasure/offboarding with lane-exhaustive purge and
   exact-count audit.
+- **Ingestion** is one page per batch (≤ `MAX_INGEST_ITEMS` = 500) and
+  single-writer; its receipt/cursor ledger is documented operational state —
+  the canonical record of what a batch wrote is the evidence log. Losing the
+  ledger is safe (item dedup is content-safe); losing evidence is not, and
+  that is what backup/restore drills are for.
 - The suite does **not** prove concurrent multi-writer serialization or
   universal sudden-power-loss durability.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts

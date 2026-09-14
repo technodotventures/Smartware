@@ -114,6 +114,10 @@
       "types": "./dist/layer3/search.d.ts",
       "import": "./dist/layer3/search.js"
     },
+    "./ingestion": {
+      "types": "./dist/ingestion/index.d.ts",
+      "import": "./dist/ingestion/index.js"
+    },
     "./render": {
       "types": "./dist/render/provenance.d.ts",
       "import": "./dist/render/provenance.js"

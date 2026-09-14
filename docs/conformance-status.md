@@ -44,13 +44,15 @@ contract still fails closed. Re-measured 2026-09-14 after the isolation suite
 landed: **482 tests across 69 files**, build clean (`tsc`), same schema and
 kernel results. Re-measured again 2026-09-14 after the contradiction/temporal
 lifecycle suite landed: **488 tests across 70 files**, build clean (`tsc`),
-same schema and kernel results.
+same schema and kernel results. Re-measured a third time 2026-09-14 after the
+sources/ingestion/federated-read suite landed: **515 tests across 71 files**,
+build clean (`tsc`), same schema and kernel results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **488 tests across 70 files** with no skips
+- The standalone suite passes **515 tests across 71 files** with no skips
   (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
@@ -114,6 +116,33 @@ same schema and kernel results.
   (`origin: user` supersedes edge) is the only path that retires one side of a
   contest — no LLM adjudication anywhere (fixture configures
   `llm.provider: 'none'`).
+- The sources/ingestion/federated-read suite
+  (`test/conformance/p0_sources_ingestion.test.ts`, 24 tests, added
+  2026-09-14) closes the shared-workspace contract (P1-2 shape): a source
+  registry inside one business brain (owner-only upsert; per-brain scope; a
+  second business never sees another's sources); fail-closed source context on
+  the write path (unknown → `source_unregistered`, paused → `source_inactive`,
+  actor outside the allow-list → `insufficient_permission`, and nothing
+  written); scope-aware item dedup (the same source item in two scopes is two
+  observations — a client's evidence is never shadowed by another's); ingest
+  receipts with per-item outcomes (a `secret_detected` item is rejected with
+  its code while the batch still commits); `operation_id` replay returning the
+  recorded receipt with zero new writes; crash-mid-batch convergence on retry
+  (fault-injected after the second item: written prefix dedups, the remainder
+  completes once); per-`(source, scope)` cursors; sync status counts and
+  cursors per source/scope, owner-only, with "connected, never synced" and an
+  explicit `source_unregistered` denial for a named unknown source; federated
+  reads across scopes — owner answers across named scopes with scope-tagged
+  results, a staff actor naming an unauthorized scope is denied as a whole
+  (never partially answered), omitted scopes federate over exactly the actor's
+  readable set, and no result carries another business's facts; and attribution
+  through every lane for a human and an agent writing one workspace (actor,
+  actor type and source preserved; quarantined ingestions counted and hidden
+  from the raw window; dedup never rewrites the original writer). The MCP
+  transport suite (`test/conformance/mcp_smoke.test.ts`) drives the same
+  contract over the real stdio server: the five new tools are registered with
+  their required inputs, and a register → ingest → sync-status → federated-read
+  round trip plus a fail-closed ingest denial run over the wire.
 - Tests exercise OBSERVE, RECALL, REFLECT, REVISE, FORGET, REVIVE, ENDORSE,
   FORGET.SCOPE (erasure and offboarding lanes, owner-only enforcement,
   same-commit grant revocation, exact retraction counts, idempotent retry,
@@ -216,6 +245,33 @@ Hosts that render recall results should now handle `contested` (surface both
 sides with the marker) instead of assuming one current truth, and should prefer
 `admitClaim` over a bare `insertClaim` when persisting an extracted fact so the
 corroborate/contest/supersede policy is the library's, not a re-implementation.
+
+## Consumer-visible change — sources, ingestion and federated reads (2026-09-14, unreleased)
+
+Connectors now have a registered provenance origin and an idempotent ingestion
+contract, and a company brain can read across client scopes in one call. **No
+protocol or schema surface changed** (the five verbs, the RECALL family and
+FORGET.SCOPE are untouched); this is the embedded `SmartwareCore` seam plus one
+new public subpath (`smartware/ingestion`) and five MCP tools. Decision record:
+[ADR-0005](adr/0005-sources-ingestion-and-federation.md).
+
+| surface | before | now |
+|---|---|---|
+| observation source | `observation.source` carried only the free-form `source_id` dedup string — any string, no registered origin | **additive** optional `source_ref` = the registered source id; every lane that returns raw evidence carries it (`searchObservations`, `listActivity`, `readObservationEvidence`) |
+| source registry | none | `core.registerSource({ actor, id, kind, display_name, status?, actor_ids?, external_ref? })` (owner-only upsert in `config.json`, `created_at` preserved) and `core.listSources({ actor })`; `kind ∈ connector/meeting/note/agent/manual/system`; `status ∈ active/paused/revoked` |
+| writes under a source | a `source_id` string was accepted from anyone | fail-closed before any write: `source_required` (missing), `source_unregistered`, `source_inactive`, `insufficient_permission` (actor outside the entry's allow-list) |
+| dedup identity | `(app, source_id)` — **scope-blind**: the same item in a second scope was silently dropped as a duplicate of the first | `(app, source_id, scope)` — one item per scope; the same message that matters to two clients lands in both (index swap is in-place in the derived Layer 0 index) |
+| connector ingestion | none — hosts looped `observe` with no cursor, no batch replay, nothing to reconcile after an interrupted sync | `core.ingest({ actor, source_id, scope, cursor, operation_id, items })`: one polled page per batch; opaque cursor + `cursor_before` per `(source, scope)`; replaying a committed `operation_id` returns the recorded receipt and writes nothing; a crash mid-batch converges on retry (written prefix dedups); per-item outcomes with codes (`accepted/duplicate/quarantined/rejected`) and a rejected item never wedges the batch; ≤ 500 items per batch |
+| sync status | none | `core.sourceSyncStatus({ actor, source_id? })` (owner-only): per source and scope — cursor, `cursor_before`, `synced_at`, batch and outcome counts; a registered source with no batches reports "connected, never synced"; a named unknown source denies (`source_unregistered`) |
+| multi-scope reads | no lane answered across scopes (`recall` is single-scope) | `core.recallFederated({ actor, query, scopes? })`: named scopes must **all** be readable or the whole read denies; omitted scopes federate over exactly the actor's readable set (owner: all); results are scope-tagged, scope-major, ranked within each scope |
+| `core.findObservationBySource(app, sourceId)` | two args | now requires the `scope` (identities are scope-aware) |
+| MCP tools | — | `smartware_register_source`, `smartware_list_sources`, `smartware_ingest`, `smartware_sync_status`, `smartware_recall_federated`; `smartware_observe` gains optional `source_ref` |
+
+The ingestion receipt/cursor ledger is **operational state**, not canonical
+evidence: the evidence JSONL a batch wrote is the record, and losing the ledger
+costs a resume hint, not writes (item dedup is content-safe). Hosts keep their
+own checkpoint too; a missing cursor means "resume from your side", never "the
+brain lost writes".
 
 ## Accurate release claim
 

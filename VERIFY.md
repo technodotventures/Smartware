@@ -80,6 +80,7 @@ common way a multi-agent project accumulates fiction.
 | Date | Result | Source |
 |---|---|---|
 | 2026-08-30 | `tsc` clean · **443/443** vitest passed · full-pipeline compile budget 9,493.5 ms @50k claims (n=4 clean runs, 9,445–9,682 ms) | kanban task `t_b5392e58`, recorded in spec §11.2c |
+| 2026-09-14 | `tsc` clean · **515/515** vitest across 71 files · `verify:schemas` 31 OK · `verify:saas` SMOKE_OUTCOME=pass (sources, ingestion replay/dedup, sync status, federated grants) · `status:check` current | kanban task `t_868d9680` (sources/ingestion/federation), evidence in its journal entry |
 
 _This table is a projection of the journal. If it disagrees with
 `docs/journal/`, the journal wins — and this table is a bug._

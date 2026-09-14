@@ -47,9 +47,10 @@ export function checkLegacySourceDedup(
   index: Layer0Index,
   app: string,
   sourceId: string | null,
+  scope: string,
 ): { isDuplicate: boolean; existingId?: string } {
   if (!sourceId) return { isDuplicate: false };
-  const existingId = index.checkDedup(app, sourceId);
+  const existingId = index.checkDedup(app, sourceId, scope);
   if (existingId) return { isDuplicate: true, existingId };
   return { isDuplicate: false };
 }

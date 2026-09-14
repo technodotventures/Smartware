@@ -84,6 +84,12 @@ export interface Observation {
     app: string;
     app_version: string;
     source_id: string | null;
+    /**
+     * Id of the registered source this evidence came from (the provenance
+     * origin — connector, meeting, note, agent, manual, system). Absent on
+     * pre-registry records and on writes that carry no source context.
+     */
+    source_ref?: string | null;
     actor: Actor;
     captured_at: string;   // ISO 8601
     observed_at: string;   // ISO 8601
