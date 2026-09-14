@@ -25,7 +25,7 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-14-t_ec159c21.md`](journal/2026-09-14-t_ec159c21.md) — P0 fix: deterministic corroboration proof in Coffee-shaped pilot (2026-09-14)
-- **Journal entries:** 34 · tasks completed on board `smartware`: 34
+- **Journal entries:** 35 · tasks completed on board `smartware`: 35
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -59,6 +59,7 @@ Unmerged work — read the branch before assuming this tree is current.
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
 - `t_2996a3ab` [todo] Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) (created 2026-09-14, assignee neo)
+- `t_742e31f9` [ready] Smartware: carry a mechanical demotion through hand-built version records (REVISE/forget/revive/endorse/consolidation) — decide preserve vs release per flow (created 2026-09-14, assignee smarty-pants)
 
 ## Blockers and stale work
 
@@ -82,7 +83,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (3d old)
-- ✅ kanban board readable (44 tasks, 1201 events)
+- ✅ kanban board readable (45 tasks, 1215 events)
 - ✅ every completed task has a journal entry
 - ⚠️ 1 blocked task(s)
 

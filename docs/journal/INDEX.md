@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **34** entries.
+Total: **35** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -37,6 +37,7 @@ Total: **34** entries.
 | 2026-09-13 | [`2026-09-13-t_9a58647c.md`](2026-09-13-t_9a58647c.md) | P0 audit: GBrain company-brain parity for Coffee |
 | 2026-09-13 | [`2026-09-13-t_aa6a3280.md`](2026-09-13-t_aa6a3280.md) | Audit conformance claims and release artifacts |
 | 2026-09-13 | [`2026-09-13-t_cb77ba0c.md`](2026-09-13-t_cb77ba0c.md) | Verify the active repository baseline and version identity |
+| 2026-09-14 | [`2026-09-14-t_01ef0ede.md`](2026-09-14-t_01ef0ede.md) | Smartware defect: a demoted duplicate is not demoted in canonical state — status 'superseded' is projection-only (compile-sync and rebuild restore it to active) |
 | 2026-09-14 | [`2026-09-14-t_29739781.md`](2026-09-14-t_29739781.md) | smartware docs+SDK: saas-integration recipe teaches the silent duplicate-claim pick |
 | 2026-09-14 | [`2026-09-14-t_35d6aa74.md`](2026-09-14-t_35d6aa74.md) | P0 implement: Graphiti-grade contradiction and temporal lifecycle |
 | 2026-09-14 | [`2026-09-14-t_3f19e206.md`](2026-09-14-t_3f19e206.md) | P0 synthesize: Coffee company-brain parity contract v1 |
