@@ -60,6 +60,7 @@ Unmerged work — read the branch before assuming this tree is current.
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
 - `t_2996a3ab` [todo] Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) (created 2026-09-14, assignee neo)
+- `t_1db21462` [todo] DECIDE: a user-only way to re-pick which duplicate survives (release a mechanical demotion) — protocol surface + owner sign-off (created 2026-09-14, assignee default)
 
 ## Blockers and stale work
 
@@ -83,7 +84,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (3d old)
-- ✅ kanban board readable (45 tasks, 1240 events)
+- ✅ kanban board readable (46 tasks, 1243 events)
 - ✅ every completed task has a journal entry
 - ⚠️ 1 blocked task(s)
 
