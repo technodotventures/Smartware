@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **52** entries.
+Total: **59** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -48,6 +48,7 @@ Total: **52** entries.
 | 2026-09-14 | [`2026-09-14-t_a1118c49.md`](2026-09-14-t_a1118c49.md) | P0 implement: tenant, scope, human and agent isolation conformance |
 | 2026-09-14 | [`2026-09-14-t_ad51d0e2.md`](2026-09-14-t_ad51d0e2.md) | P1 verify/fix: retention, forget, offboarding, export/import and legal-hold composition |
 | 2026-09-14 | [`2026-09-14-t_ec159c21.md`](2026-09-14-t_ec159c21.md) | P0 fix: deterministic corroboration proof in Coffee-shaped pilot |
+| 2026-09-15 | [`2026-09-15-t_0177d9c3.md`](2026-09-15-t_0177d9c3.md) | Retention sweep writer: handleExpireRetention's OperationId fallback is op_+sha256 hex (67 chars), which the published OperationId pattern rejects |
 | 2026-09-15 | [`2026-09-15-t_15bb0cd0.md`](2026-09-15-t_15bb0cd0.md) | Decide protocol identity: does claim fact identity include claim_type, or is the spec fingerprint the autonomous-path truth? (ADR-0003 vs spec §193) |
 | 2026-09-15 | [`2026-09-15-t_1db21462.md`](2026-09-15-t_1db21462.md) | DECIDE: a user-only way to re-pick which duplicate survives (release a mechanical demotion) — protocol surface + owner sign-off |
 | 2026-09-15 | [`2026-09-15-t_2996a3ab.md`](2026-09-15-t_2996a3ab.md) | Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) |
@@ -55,9 +56,15 @@ Total: **52** entries.
 | 2026-09-15 | [`2026-09-15-t_463c1ff9.md`](2026-09-15-t_463c1ff9.md) | P1 pre-production gate: explicit legal-hold marker — refuse erasure under hold + sweep skip + audited release |
 | 2026-09-15 | [`2026-09-15-t_55fdccdd.md`](2026-09-15-t_55fdccdd.md) | VERIFY (independent, ADR-0009): legal-hold marker — erasure refusal, sweep skip, audited release (branch wip/neo/legal-hold-marker @ 2ef69c1) |
 | 2026-09-15 | [`2026-09-15-t_65569b9e.md`](2026-09-15-t_65569b9e.md) | P1-3: host-facing health contract, lane-explicit counts, Coffee-trial SLOs |
+| 2026-09-15 | [`2026-09-15-t_65d73c3e.md`](2026-09-15-t_65d73c3e.md) | VERIFY (independent): F1b — a fingerprint hit on a demoted duplicate routes corroboration to the surviving claim (branch wip/neo/f1b-demoted-fingerprint @ 495a6c3, PR #10) |
+| 2026-09-15 | [`2026-09-15-t_695656d8.md`](2026-09-15-t_695656d8.md) | P3 design+impl: storage-level fencing — epoch-stamped artifacts so recovery rejects in-mutation partials (ADR-0007 follow-on) |
 | 2026-09-15 | [`2026-09-15-t_6c39a895.md`](2026-09-15-t_6c39a895.md) | Identity docs/creation path: guide §1e says reflect.auto consults fact identity before creating — measured, it does not when a DEMOTED duplicate's fingerprint matches (corroboration lands on the demoted claim) |
+| 2026-09-15 | [`2026-09-15-t_7a64ded2.md`](2026-09-15-t_7a64ded2.md) | legal-hold findings (advisory): release replay must converge config (F2) · require operation_id on smartware_hold_release (F1) · ops-log enum drift covers the new skip receipt (F3) |
+| 2026-09-15 | [`2026-09-15-t_85817375.md`](2026-09-15-t_85817375.md) | L1 record writer: insertClaim stamps op_LEGACY00000000000000000000, which the published OperationId pattern rejects |
+| 2026-09-15 | [`2026-09-15-t_9740ae98.md`](2026-09-15-t_9740ae98.md) | GATE run: the Coffee company-brain acceptance contract, against the packaged artifact — 79/79 |
 | 2026-09-15 | [`2026-09-15-t_9e124fe6.md`](2026-09-15-t_9e124fe6.md) | Tombstone writer: tombstone-backfill.ts emits snapshots the published schema rejects (4 required fields missing, confidence not bucketed) |
 | 2026-09-15 | [`2026-09-15-t_9ee8bd54.md`](2026-09-15-t_9ee8bd54.md) | P1 design+impl: fencing token at the brain mutation boundary (close the residual lease window) |
 | 2026-09-15 | [`2026-09-15-t_ba868906.md`](2026-09-15-t_ba868906.md) | P1 build: Coffee reference adapter — drop-in contract, drop-in code, deterministic local proof |
 | 2026-09-15 | [`2026-09-15-t_c5c999ba.md`](2026-09-15-t_c5c999ba.md) | DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition) |
 | 2026-09-15 | [`2026-09-15-t_e8bd6747.md`](2026-09-15-t_e8bd6747.md) | Identity falsifier (ADR-0005 #1): steady-state both-surfaces run — recall must answer once in every round, F1+F2 on one tree |
+| 2026-09-15 | [`2026-09-15-t_fa18b2bf.md`](2026-09-15-t_fa18b2bf.md) | VERIFY (independent, F1–F3 fix): hold-release keying + duty-scoped replay convergence + durable config writes + v0.5.0 ops enum completion (wip/neo/legal-hold-findings @ 29f5642, PR #12) |

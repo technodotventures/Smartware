@@ -49,6 +49,7 @@ import { computePayloadHash } from '../layer0/idempotency.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SearchIndex } from '../layer3/search.js';
+import { observationToIndexRow } from '../layer3/search.js';
 import type { SmartwareConfig } from '../config.js';
 import { loadConfig, saveConfig } from '../config.js';
 import {
@@ -553,6 +554,16 @@ export async function handleForgetScope(
   appendObservation(evidenceDir, withIntegrity);
   layer0.insertOrSkip(withIntegrity);
   layer0.applyMutationEvent(withIntegrity);
+  // The audit marker is an accepted Layer-0 observation in the pod scope, and a
+  // rebuilt index holds it — `syncObservationsFromEvidence` indexes every
+  // accepted observation. Without this line the live raw-observation lane is
+  // missing the marker until the next rebuild, so health's projection check
+  // reports drift (and the Coffee-trial SLO breaches) after EVERY FORGET.SCOPE.
+  // Index it here, with the marker's effective status, so live == rebuilt.
+  const markerEffectiveStatus = layer0.getEffectiveStatus(withIntegrity.id) ?? withIntegrity.status;
+  if (markerEffectiveStatus === 'accepted') {
+    searchIndex.indexObservation(observationToIndexRow(withIntegrity, { status: markerEffectiveStatus }));
+  }
   commitHooks?.afterAuditObservation?.(withIntegrity);
 
   // ── ONE ops-log entry carrying the exact counts.

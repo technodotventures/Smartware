@@ -31,6 +31,7 @@
     "verify:schemas": "node scripts/verify-schema-checksums.mjs",
     "verify:saas": "npm run build --silent && node scripts/saas-integration-smoke.mjs",
     "verify:coffee-adapter": "npm run build --silent && node scripts/coffee-adapter-smoke.mjs",
+    "verify:coffee-gate": "npm run build --silent && node scripts/coffee-company-brain-gate.mjs",
     "benchmark:retrieval-kernel": "npm run build --silent && node scripts/run-retrieval-kernel-benchmark.mjs benchmarks/retrieval/kernel-contract-v1.json",
     "benchmark:retrieval-arena": "npm run build --silent && node scripts/evaluate-retrieval-arena.mjs benchmarks/retrieval/arena-contract-v1.json benchmarks/retrieval/arena-contract-run-v1.json",
     "benchmark:retrieval-activation-contract": "npm run build --silent && node scripts/evaluate-retrieval-activation.mjs benchmarks/retrieval/arena-contract-v1.json benchmarks/retrieval/arena-contract-run-v1.json benchmarks/retrieval/activation-contract-v1.json --expect-hold",

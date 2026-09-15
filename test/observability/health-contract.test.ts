@@ -229,4 +229,39 @@ describe('company-brain health contract — lease, ingestion, receipts, storage,
     // The other projection still agrees with its substrate.
     expect(drifted.drift.records.find(record => record.surface === 'observation_fts')!.state).toBe('in_sync');
   });
+
+  it('S7: a FORGET.SCOPE leaves the raw-observation projection in sync — the audit marker is indexed exactly as a rebuild does', async () => {
+    const dir = makeBrain();
+    const core = await openCore(dir);
+    core.ensureScopes([{ id: 'client:acme#1', parent: 'workspace', visibility_default: 'scope' }]);
+    await core.observe({
+      actor: OWNER, type: 'message',
+      content: { format: 'text/plain', body: 'Acme beta note' },
+      scope: 'client:acme#1',
+    });
+    const before = await core.health({ actor: OWNER });
+    expect(before.drift.records.find(record => record.surface === 'observation_fts')!.state).toBe('in_sync');
+
+    await core.forgetScope({ actor: OWNER, scope: 'client:acme#1', reason: 'offboarding', operation_id: op() });
+
+    // The scope's raw rows leave the window. The audit marker is an accepted
+    // Layer-0 observation in the pod scope, and a rebuilt index holds it (the
+    // rebuild indexes every accepted observation) — so the live projection must
+    // hold it too, or health reports drift and the trial SLO breaches after every
+    // FORGET.SCOPE until the process restarts.
+    const after = await core.health({ actor: OWNER });
+    const afterFts = after.drift.records.find(record => record.surface === 'observation_fts')!;
+    expect(afterFts.expected).toBe(afterFts.observed);
+    expect(afterFts.state).toBe('in_sync');
+    expect(after.drift.in_sync).toBe(true);
+
+    // Live state and rebuilt state answer the same count: reopen (which rebuilds
+    // derived indexes from the canonical logs) and compare.
+    core.close();
+    const reopened = await openCore(dir);
+    const rebuilt = await reopened.health({ actor: OWNER });
+    const rebuiltFts = rebuilt.drift.records.find(record => record.surface === 'observation_fts')!;
+    expect(rebuiltFts.observed).toBe(afterFts.observed);
+    expect(rebuilt.drift.in_sync).toBe(true);
+  });
 });

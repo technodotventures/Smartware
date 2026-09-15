@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wt/t_ba868906` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wt/t_9740ae98` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,26 +24,30 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-15-t_e8bd6747.md`](journal/2026-09-15-t_e8bd6747.md) — Identity falsifier (ADR-0005 #1): steady-state both-surfaces run — recall must answer once in every round, F1+F2 on one tree (2026-09-15)
-- **Journal entries:** 52 · tasks completed on board `smartware`: 51
+- **Journal:** [`2026-09-15-t_fa18b2bf.md`](journal/2026-09-15-t_fa18b2bf.md) — VERIFY (independent, F1–F3 fix): hold-release keying + duty-scoped replay convergence + durable config writes + v0.5.0 ops enum completion (wip/neo/legal-hold-findings @ 29f5642, PR #12) (2026-09-15)
+- **Journal entries:** 59 · tasks completed on board `smartware`: 58
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
+| `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
 | `wip/neo/tombstone-backfill-writer` | 53 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_9e124fe6) |
+| `wip/neo/ops-enum-symmetry` | 52 | 2026-09-15 | ops-log: pin the writer OpType to the published enum; precise MCP refusal wording (t_0e3989eb) |
+| `wt/t_ba868906` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
+| `wip/neo/legal-hold-findings` | 51 | 2026-09-15 | docs: state delta for t_7a64ded2 (gate evidence, conformance counts, STATUS projection) |
 | `wip/smarty/tombstone-snapshot-envelope` | 51 | 2026-09-15 | fix(schemas): tombstone snapshot block enumerates the claim record envelope |
 | `wip/neo/repick-survivor` | 50 | 2026-09-15 | docs: regenerate STATUS (board counters; drift is projection-only) |
-| `wip/neo/legal-hold-findings` | 49 | 2026-09-15 | docs: state delta for t_463c1ff9 (legal-hold marker) + journal/STATUS projections |
+| `wip/neo/storage-fencing` | 50 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_695656d8) |
 | `wip/neo/legal-hold-marker` | 49 | 2026-09-15 | docs: state delta for t_463c1ff9 (legal-hold marker) + journal/STATUS projections |
 | `wip/neo/f1b-demoted-fingerprint` | 48 | 2026-09-15 | fix: a fingerprint hit on a demoted duplicate routes corroboration to the fact's survivor (ADR-0005 F1b) |
 | `falsifier/t_e8bd6747` | 47 | 2026-09-15 | test-tree: compose F1 + F2 onto one tree for the ADR-0005 steady-state falsifier |
 | `wt/t_c5c999ba` | 47 | 2026-09-14 | docs: decide legal hold — v1 composition stands, marker not built (ADR-0008) |
 | `feat/deepseek-provider` | 46 | 2026-09-15 | feat(extraction): add deepseek provider (OpenAI-compatible, api.deepseek.com) |
 | `wip/neo/fencing-token` | 46 | 2026-09-15 | docs: fencing evidence — before/after gauntlet pair, measured cost, guard-list fix |
-| `wip/neo/storage-fencing` | 46 | 2026-09-15 | docs: fencing evidence — before/after gauntlet pair, measured cost, guard-list fix |
 | `wip/smarty/demotion-handbuilt-records` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
 | `wt/t_65569b9e` | 46 | 2026-09-15 | health: host-facing health/metrics contract, lane-explicit counts, Coffee-trial SLOs (ADR-0008) |
 | `wt/t_ad51d0e2` | 46 | 2026-09-14 | docs: regenerate STATUS projection (lifecycle composition lane) |
@@ -54,6 +58,7 @@
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
+| `docs/saas-retention-ops-entry` | 36 | 2026-09-12 | Merge pull request #6 from technodotventures/feat/corroboration-reachable |
 | `feat/corroboration-reachable` | 33 | 2026-09-12 | feat: make corroboration reachable, and demonstrate it in the reference example |
 | `fix/concurrent-schema-migration` | 32 | 2026-09-11 | fix: make column migrations idempotent when two processes open one brain |
 | `fix/public-surface-and-docs` | 31 | 2026-09-11 | fix: make the public surface sufficient for host-side claim persistence |
@@ -69,14 +74,15 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_9740ae98` [todo] GATE run: realistic Coffee company-brain acceptance and soak (created 2026-09-13, assignee neo)
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
-- `t_229601e4` [todo] DECIDE: is claim.schema.json the L1 record or the spec §6 claim version? An active record's internal `semantic` block fails the published schema (created 2026-09-15, assignee tech-head)
+- `t_3ba3ee39` [todo] L1 record writer: `insertClaim`'s forgotten path omits `supersedes`, so the record fails claim.schema.json's forgotten branch (measured, carded out of t_229601e4) (created 2026-09-15, assignee smarty-pants)
+- `t_9a700aed` [todo] Library-written L1 records: pod-profile scopes (`pod/<pod>/<lane>`) and `substrate:<ULID>` actor ids are rejected by the v0.5.0 Scope/ActorId patterns (measured, carded out of t_229601e4) (created 2026-09-15, assignee neo)
+- `t_432be9c9` [todo] STATUS projection: the ADR README template's `- **Status:**` bullet is not read by scripts/substrate-status.mjs (every template-shaped ADR shows "(no status line)" and is invisible as a pending decision) (created 2026-09-15, assignee smarty-pants)
 
 ## Blockers and stale work
 
-- No blocked tasks on the board.
+- `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
 
 ## Decisions
 
@@ -90,6 +96,7 @@ Unmerged work — read the branch before assuming this tree is current.
 | [0007](adr/0007-fencing-token-at-the-mutation-boundary.md) | ADR-0007 — A fencing token validated at the brain mutation boundary | (no status line) |  |
 | [0008](adr/0008-host-facing-health-contract.md) | ADR-0008 — A host-facing health contract with a three-state SLO verdict | (no status line) |  |
 | [0010](adr/0010-coffee-reference-adapter.md) | ADR-0010 — Coffee reference adapter: public-surface ports, settle-before-write, and a deterministic local proof | (no status line) |  |
+| [0011](adr/0011-coffee-company-brain-acceptance-gate.md) | ADR-0011 — Coffee company-brain acceptance gate: the packaged artifact, a six-business fixture, and the surface it forced | (no status line) |  |
 
 ## Verification state
 
@@ -101,8 +108,9 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (60 tasks, 2610 events)
+- ✅ kanban board readable (68 tasks, 2911 events)
 - ✅ every completed task has a journal entry
+- ⚠️ 1 blocked task(s)
 
 ## Canonical index
 

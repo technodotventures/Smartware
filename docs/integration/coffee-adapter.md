@@ -13,6 +13,7 @@ code calls and the contract you must satisfy.
 | Adapter implementation | [`examples/coffee-adapter/adapter.mjs`](../../examples/coffee-adapter/adapter.mjs) |
 | Provisioning template | [`examples/coffee-adapter/config.template.json`](../../examples/coffee-adapter/config.template.json) |
 | Executable proof | [`scripts/coffee-adapter-smoke.mjs`](../../scripts/coffee-adapter-smoke.mjs) — `npm run verify:coffee-adapter` |
+| Acceptance gate (packaged artifact) | [`scripts/coffee-company-brain-fixture.mjs`](../../scripts/coffee-company-brain-fixture.mjs) + [`scripts/coffee-company-brain-gate.mjs`](../../scripts/coffee-company-brain-gate.mjs) — `npm run verify:coffee-gate` (ADR-0011) |
 | Resilient host patterns it productizes | [saas-integration.md §1h](saas-integration.md) (lease, guard, fence, app-store outage) |
 | Fence semantics it relies on | [ADR-0007](../adr/0007-fencing-token-at-the-mutation-boundary.md) |
 | Health surface it embeds | [observability.md](observability.md), ADR-0008 |
@@ -225,14 +226,27 @@ and recent changes; client-facing surfaces never show sources or staff names.
 VERIFIED: the smoke asserts the actor line renders for `surface:'staff'` and
 never for `surface:'client'`.
 
-## 7. Owner operations, lease-routed
+## 7. Owner and lifecycle operations, lease-routed
 
 `registerSource`, `addClient` (new client ⇒ new `#N` scope via `ensureScopes`),
-`exportClientScope`, `forgetClientScope` are pass-throughs that refuse on a
-standby (503 + holder) and surface the substrate's codes verbatim on the holder.
-`exportClientScope` is scope-exclusive and idempotent per `operation_id`;
-`forgetClientScope` is owner-gated and reason-aware (`offboarding` vs
-`erasure`).
+`exportClientScope`, `forgetClientScope`, `expireRetention`, `restoreScope` and
+`correctClaim` are pass-throughs that refuse on a standby (503 + holder) and
+surface the substrate's codes verbatim on the holder.
+
+| Method | Who may call | What it runs |
+|---|---|---|
+| `exportClientScope({ actor, client \| scope, operation_id? })` | owner | Scope-exclusive EXPORT.SCOPE package (ADR-0006); idempotent per `operation_id` |
+| `forgetClientScope({ actor, client \| scope, reason, export_id?, owner_pointer?, operation_id? })` | owner | `offboarding` tombstones, revokes grants and keeps the scope entry so a future `#n` can be minted; `erasure` purges every claimed lane and retires the id. Grant revocation is **row-scoped**: a grant that lists several clients is revoked whole (spec §10b.3) — a staff member serving other clients loses those too until re-granted |
+| `expireRetention({ actor, client \| scope, as_of?, operation_id? })` | owner, or a `forget` grant on the scope | ADR-0001 sweep: tombstones elapsed `duration`-policy observations and retracts claims whose only evidence they were; idempotent by nature and per `operation_id` |
+| `restoreScope({ actor, package_dir, operation_id? })` | owner | ADR-0006 return path: verifies manifest checksums and refuses a non-empty target scope, a tampered package or a package crossing its scope boundary **before writing anything** |
+| `correctClaim({ actor, target_claim_id, corrected_predicate?, corrected_object?, corrected_validity?, change_time?, reason })` | a `correct` grant on the claim's scope | Spec verb CORRECT/REVISE: appends a correction observation and spawns a new claim version. **One-shot** — the verb carries no `operation_id`, so a blind retry after a timeout creates a second correction version; settle ambiguity by reading the brain, not by retrying the write |
+
+Provisioning issues the capabilities:
+`coffeeTenantConfig({ staff: [{ actorId, scopes, correct, forget }], agents: [...] })`.
+Each is an exact-scope list (`forget` used to be hard-wired empty, which made the
+retention sweep unreachable for anyone but the owner). A capability granted with
+no adapter method — and a method callable by nobody — are both contract holes;
+the acceptance gate exercises each path with a granted and an ungranted actor.
 
 ## 8. Migration (adding the brain to a running Coffee)
 
@@ -275,7 +289,8 @@ Rollback, at any stage:
 ## 9. Verification — what to run, and what it proves
 
 ```sh
-npm run verify:coffee-adapter      # builds, then runs the deterministic smoke
+npm run verify:coffee-adapter      # builds, then runs the deterministic smoke (unit proof)
+npm run verify:coffee-gate         # packs the artifact, installs it, runs the acceptance fixture
 ```
 
 53 checks, no network, no Redis, no model key, no sleeps: two businesses with
@@ -295,16 +310,44 @@ refused by the guard (nothing written) and, in the race the guard cannot cover,
 by the brain fence before any canonical artifact; two businesses never share a
 key; export is scope-exclusive; health carries no tenant content.
 
+### The acceptance gate — the packaged artifact, six businesses (ADR-0011)
+
+`npm run verify:coffee-gate` packs the build, `npm install`s the tarball into a
+scratch app, copies this adapter next to the install, and drives the installed
+package's own `exports` surface. 79 checks, one `PASS` line each: six businesses
+with overlapping client names, staff + agents + strangers, shared and private
+sources, duplicates and paraphrases, contradictions, corrections (granted and
+un-granted), offboarding, erasure (including a derived-index wipe), retention
+expiry, export → disaster → restore equivalence and tamper refusal, replica
+failover with degraded reads, the guard/fence stale-writer pair, restart during
+load (a replica restarted mid-loop, plus a modelled process death between the two
+stores and its replay), ~180 unauthorized fuzz requests, and a soak reporting
+p50/p95, per-business resource growth and claim/evidence counts. Every response
+is scanned for foreign-business markers; every brain directory is scanned for the
+others' bytes.
+
+The run writes `results.json`, `summary.json`, `README.md` and the raw log to an
+evidence directory (override with `GATE_EVIDENCE_DIR`), records the artifact
+sha256 and the machine, and exits non-zero on any failed check — a partial pass
+is a failed gate.
+
 **NOT YET PROVEN / out of scope for this cut:**
 - Coffee staging or production traffic (staging unavailable) — the ports above
   are the interface you test against staging.
-- Cross-replica behaviour under real Redis (the smoke's ports are in-memory
-  implementations of the same contract; the pilot measured the Redis-shaped
-  paths in the resilience gauntlet).
+- Cross-replica behaviour under real Redis (both the smoke and the gate use
+  in-memory ports implementing the same contract; the pilot measured the
+  Redis-shaped paths in the resilience gauntlet, including SIGKILL→TTL takeover).
+- Cross-process crash at the adapter level over real Redis: the gate models the
+  crash window in-process (app record stands, no brain artifact, replay
+  completes); the primitive itself was proven cross-process in the gauntlet.
 - The drift counter counts divergences **this process observed**; reconcile from
   the app store to catch the ones it did not.
 - No cross-store transaction exists by design; a crash between steps 4 and 6
   leaves an app record whose brain half is replayable with the same
   `operation_id` and is meanwhile counted as drift.
+- L0 raw-content erasure: `erasure` clears every claimed lane (recall, export,
+  settled stores, rebuilt indexes), but the append-only evidence JSONL keeps the
+  plaintext until the deferred L0 path (spec §16) lands. Word client-facing
+  promises with that bound.
 - Storage-level fencing for a pause *inside* one mutation (ADR-0007's stated
   residual).
