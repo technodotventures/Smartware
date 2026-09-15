@@ -343,7 +343,7 @@ export function createSmartwareMcpServer(
 
   server.tool(
     'smartware_revise',
-    'Revise claim admission metadata and relations',
+    'Revise claim admission metadata and relations, or re-pick which duplicate of a fact survives',
     {
       actor_id: z.string(),
       target: z.string(),
@@ -357,6 +357,7 @@ export function createSmartwareMcpServer(
         'contested',
       ]).optional(),
       adopt_body: z.boolean().optional(),
+      repick_survivor: z.boolean().optional(),
       reason: z.string(),
       operation_id: z.string(),
     },
@@ -367,6 +368,7 @@ export function createSmartwareMcpServer(
       set_confidence: args.set_confidence,
       set_epistemic_tag: args.set_epistemic_tag,
       adopt_body: args.adopt_body,
+      repick_survivor: args.repick_survivor,
       reason: args.reason,
       operation_id: args.operation_id,
     }), 'revise'),

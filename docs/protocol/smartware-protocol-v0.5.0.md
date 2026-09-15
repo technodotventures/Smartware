@@ -253,6 +253,7 @@ revise:
   add_derived_from: [obs_<hash>, ...]
   invalidate_relations: [rel_<ulid>, ...]
   adopt_body: <boolean>
+  repick_survivor: <boolean>          # v0.5.0: user-only re-pick of the surviving duplicate
   reason: <non-empty string>
   operation_id: op_<ulid>
   actor_id: user:<slug>
@@ -274,6 +275,36 @@ reconciliation is separate and does not use this user action.
 
 Admitting `supersedes` or `corrects` must reject a cycle with
 `effective_current_cycle`.
+
+#### Re-picking the survivor (`repick_survivor`, v0.5.0)
+
+The one user act that releases a mechanical demotion (ADR-0003 → *Releasing a
+demotion*). `target` must be a demoted duplicate — its latest version carries
+`superseded_by`; otherwise the operation is rejected with `not_demoted` and
+nothing is written. `repick_survivor` is the operation's only action in v0.5.0:
+combining it with any other action is rejected (`invalid_parameter`, and the
+schema enforces the same).
+
+One atomic commit appends two version records under one OperationId:
+
+- the **release** — the target's new active version with `superseded_by` /
+  `superseded_at` cleared, `epistemic_owner: user`, and the audit-only
+  `reinstated_by: 'user'`; and
+- the **demotion** — a new version of the fact's current active copy (or copies)
+  with `superseded_by: <released claim>`, `superseded_at` and the warrant
+  `superseded_by_origin: 'user'`. Mechanical demotions leave that warrant absent.
+
+The demotion uses the mechanical channel (`status: superseded`), deliberately
+not an admitted `supersedes` edge: it is not subject to `effective_current_cycle`
+and `invalidate_relations` neither touches nor undoes it. Exactly one copy of the
+fact stays recall-eligible; the next §1e write touching the fact finds only the
+released claim. If the survivor is already forgotten, the release happens alone
+(rescue mode; `demoted: []`).
+
+The result reports `demoted: [claim_<ulid>, ...]` (empty in rescue mode) and — the
+target being released — carries no `superseded_by`. Replay and crash recovery
+follow §5: the intent names both artifacts, and recovery commits only a complete,
+exact set (a partial set fails closed to manual review).
 
 #### Page endorsement
 

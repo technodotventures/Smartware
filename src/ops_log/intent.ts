@@ -56,6 +56,19 @@ export interface ReviseOperationIntent {
     version: number;
     record_hash: string;
     relation_ids: string[];
+    /**
+     * Present iff the operation is a user re-pick (`repick_survivor`, protocol v0.5.0): the
+     * active copies the same commit demotes, each as `(claim_id, version, record_hash)`. The
+     * released copy is `claim_id`/`version`/`record_hash` above. Recovery treats the set as the
+     * commit's full artifact list — every one exact, or the operation fails closed.
+     */
+    repick?: {
+      demoted: Array<{
+        claim_id: string;
+        version: number;
+        record_hash: string;
+      }>;
+    };
   };
   result: {
     claim_id: string;
@@ -68,8 +81,14 @@ export interface ReviseOperationIntent {
      * demoted duplicate (ADR-0003 → *Carry-forward across hand-built version records*). A REVISE
      * changes metadata, never the asserted fact, so the demotion survives it; recording the pointer
      * on the intent keeps a recovered or replayed commit reporting the same result as the original.
+     * Never set on a re-pick, which releases the target instead.
      */
     superseded_by?: string;
+    /**
+     * Present iff the operation is a re-pick: the copies it demoted (claim ids, oldest first;
+     * empty in rescue mode). Mirrors `expected.repick.demoted` by claim_id.
+     */
+    demoted?: string[];
   };
   details: {
     claim_id: string;
@@ -311,6 +330,26 @@ function isReviseIntent(value: unknown): value is ReviseOperationIntent {
   const expected = intent.expected as ReviseOperationIntent['expected'] | undefined;
   const result = intent.result as ReviseOperationIntent['result'] | undefined;
   const details = intent.details as ReviseOperationIntent['details'] | undefined;
+  const repick = expected?.repick;
+  const demoted = result?.demoted;
+  const repickWellFormed = repick === undefined || (
+    typeof repick === 'object'
+    && Array.isArray(repick.demoted)
+    && repick.demoted.every(artifact =>
+      !!artifact
+      && typeof artifact.claim_id === 'string'
+      && Number.isInteger(artifact.version)
+      && typeof artifact.record_hash === 'string'
+      && /^[a-f0-9]{64}$/.test(artifact.record_hash))
+  );
+  const demotedWellFormed = demoted === undefined || (
+    Array.isArray(demoted) && demoted.every(claimId => typeof claimId === 'string')
+  );
+  const repickConsistent = repick === undefined
+    ? demoted === undefined
+    : demoted !== undefined
+      && repick.demoted.length === demoted.length
+      && demoted.every((claimId, index) => claimId === repick.demoted[index]!.claim_id);
   return hasCommonIntentFields(intent)
     && intent.op === 'revise.claim'
     && expected?.surface === 'l1'
@@ -320,12 +359,18 @@ function isReviseIntent(value: unknown): value is ReviseOperationIntent {
     && /^[a-f0-9]{64}$/.test(expected.record_hash)
     && Array.isArray(expected.relation_ids)
     && expected.relation_ids.every(relationId => typeof relationId === 'string')
+    && repickWellFormed
+    && demotedWellFormed
+    && repickConsistent
     && result?.claim_id === expected.claim_id
     && result.new_version === expected.version
     && (result.epistemic_owner === 'agent' || result.epistemic_owner === 'user')
     && result.operation_id === intent.operation_id
     && result.status === 'revised'
     && (result.superseded_by === undefined || typeof result.superseded_by === 'string')
+    // A re-pick releases its target: it never reports `superseded_by`, and its demotions are
+    // always named (empty array included, for rescue mode).
+    && (repick === undefined || result.superseded_by === undefined)
     && details?.claim_id === expected.claim_id
     && details.new_version === expected.version;
 }

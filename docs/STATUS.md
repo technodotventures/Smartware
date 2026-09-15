@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/smarty/demotion-handbuilt-records` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/repick-survivor` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -25,16 +25,22 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-14-t_ec159c21.md`](journal/2026-09-14-t_ec159c21.md) — P0 fix: deterministic corroboration proof in Coffee-shaped pilot (2026-09-14)
-- **Journal entries:** 35 · tasks completed on board `smartware`: 35
+- **Journal entries:** 35 · tasks completed on board `smartware`: 40
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wt/t_c5c999ba` | 47 | 2026-09-14 | docs: decide legal hold — v1 composition stands, marker not built (ADR-0008) |
+| `feat/deepseek-provider` | 46 | 2026-09-15 | feat(extraction): add deepseek provider (OpenAI-compatible, api.deepseek.com) |
+| `wip/smarty/demotion-handbuilt-records` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
+| `wt/t_ad51d0e2` | 46 | 2026-09-14 | docs: regenerate STATUS projection (lifecycle composition lane) |
+| `wip/neo/p0-sources-ingestion` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
+| `wt/t_65569b9e` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
 | `wip/neo/demotion-durability` | 43 | 2026-09-14 | docs(journal): state delta for t_01ef0ede (demotion durability) + STATUS regen |
-| `wip/neo/p0-sources-ingestion` | 42 | 2026-09-14 | restore: EXPORT.SCOPE packages get a tested return path (ADR-0006) |
-| `docs/protocol-identity-adr` | 40 | 2026-09-14 | docs: decide protocol claim identity — one fact-identity predicate, one creation key |
+| `docs/protocol-identity-adr` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
+| `wip/neo/f1-reflect-auto-identity` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
@@ -53,18 +59,16 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_ad51d0e2` [todo] P1 verify/fix: retention, forget, offboarding, export/import and legal-hold composition (created 2026-09-13, assignee neo)
-- `t_65569b9e` [todo] P1 implement: company-brain observability and SLO contract (created 2026-09-13, assignee neo)
 - `t_ba868906` [todo] P1 build: Coffee reference adapter for workspaces, staff and agents (created 2026-09-13, assignee neo)
 - `t_9740ae98` [todo] GATE run: realistic Coffee company-brain acceptance and soak (created 2026-09-13, assignee neo)
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
-- `t_2996a3ab` [todo] Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) (created 2026-09-14, assignee neo)
-- `t_1db21462` [todo] DECIDE: a user-only way to re-pick which duplicate survives (release a mechanical demotion) — protocol surface + owner sign-off (created 2026-09-14, assignee default)
 
 ## Blockers and stale work
 
-- `t_15bb0cd0` Decide protocol identity: does claim fact identity include claim_type, or is the spec fingerprint the autonomous-path truth? (ADR-0003 vs spec §193)
+- `t_65569b9e` P1 implement: company-brain observability and SLO contract
+- `t_9ee8bd54` P1 design+impl: fencing token at the brain mutation boundary (close the residual lease window)
+- `t_c5c999ba` DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition)
 
 ## Decisions
 
@@ -83,10 +87,10 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Health
 
-- ✅ declared block fresh (3d old)
-- ✅ kanban board readable (46 tasks, 1243 events)
-- ✅ every completed task has a journal entry
-- ⚠️ 1 blocked task(s)
+- ✅ declared block fresh (4d old)
+- ✅ kanban board readable (49 tasks, 1873 events)
+- ⚠️ 5 completed task(s) have no journal entry — run: npm run journal:sync
+- ⚠️ 3 blocked task(s)
 
 ## Canonical index
 

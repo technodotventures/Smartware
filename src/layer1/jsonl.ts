@@ -106,10 +106,28 @@ interface ClaimVersionBase {
    * canonical `supersedes` relation edge (spec §6: canonical epistemic edges are
    * user-admitted in beta). The demotion does not change `state`: a superseded claim
    * stays `active` for history and audit, exactly as spec §6 says.
+   *
+   * `superseded_by_origin` distinguishes the two demotion channels: absent = the
+   * library's mechanical duplicate resolution; `'user'` = the user re-picked against
+   * this copy (`REVISE` with `repick_survivor`, ADR-0003 → *Releasing a demotion*).
+   * Either way recall eligibility derives from the pointer alone (`status === 'active'`).
    */
   superseded_by?: string;
   /** ISO 8601 commit time of the demotion; present whenever `superseded_by` is. */
   superseded_at?: string;
+  /**
+   * The warrant a demotion carries. Absent when the demotion is mechanical — the dedup
+   * resolved two copies of one fact and has no user act to point at; `'user'` when the
+   * user re-picked the survivor, so audit and replay can tell a user-demotion from the
+   * library's own duplicate resolution.
+   */
+  superseded_by_origin?: 'user';
+  /**
+   * Audit-only marker on the version that released a demotion: the user reinstated this
+   * claim as the recall-eligible copy (`REVISE` with `repick_survivor`). `status` never
+   * derives from this field — it is the record of the act, not a lifecycle input.
+   */
+  reinstated_by?: 'user';
   /** Set on endorsement-cascade-produced versions. */
   endorsement_source?: string;
   /** Set on revival-produced versions. */

@@ -250,4 +250,56 @@ describe('Smartware v0.5.0 schemas', () => {
     // 7. additional properties are rejected (payload is closed).
     assert.equal(forgetScope({ ...base, extra: true }), false);
   });
+
+  test('REVISE repick_survivor: the release form and the demotion record fields', () => {
+    const ajv = createAjv();
+    const revise = validator(ajv, 'revise-request.schema.json');
+    const claim = validator(ajv, 'claim.schema.json');
+
+    // A re-pick names the demoted duplicate and nothing else: it is a user epistemic judgment,
+    // and the surface keeps it a single action (protocol v0.5.0).
+    const repick = {
+      target: CLAIM_A,
+      expected_base_version: 2,
+      repick_survivor: true,
+      reason: 'the duplicate is the copy that should surface.',
+      actor_id: 'user:owner',
+      operation_id: OPERATION_A,
+    };
+    assert.equal(revise(repick), true, JSON.stringify(revise.errors));
+
+    // Not an action on its own, and not combinable with one in beta.
+    assert.equal(revise({ ...repick, repick_survivor: false }), false);
+    assert.equal(revise({ ...repick, set_confidence: 'high' }), false);
+    assert.equal(revise({ ...repick, adopt_body: true }), false);
+    // ...while an inert `repick_survivor: false` may sit beside a normal action.
+    assert.equal(revise({
+      target: CLAIM_A,
+      expected_base_version: 2,
+      set_confidence: 'high',
+      repick_survivor: false,
+      reason: 'raise the confidence.',
+      actor_id: 'user:owner',
+      operation_id: OPERATION_A,
+    }), true, JSON.stringify(revise.errors));
+
+    // The demotion record envelope: a user-demoted duplicate and a released (reinstated) version.
+    assert.equal(claim({
+      ...activeClaim(),
+      version: 2,
+      supersedes: 1,
+      superseded_by: CLAIM_B,
+      superseded_at: NOW,
+      superseded_by_origin: 'user',
+    }), true, JSON.stringify(claim.errors));
+    assert.equal(claim({
+      ...activeClaim(),
+      version: 2,
+      supersedes: 1,
+      reinstated_by: 'user',
+    }), true, JSON.stringify(claim.errors));
+    // Both fields are warrants, not free text.
+    assert.equal(claim({ ...activeClaim(), superseded_by_origin: 'model' }), false);
+    assert.equal(claim({ ...activeClaim(), reinstated_by: 'agent' }), false);
+  });
 });

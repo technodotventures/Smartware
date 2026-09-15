@@ -128,6 +128,28 @@
     "revived_via": {
       "$ref": "common.schema.json#/$defs/TombstoneId",
       "description": "TombstoneId of the revival source"
+    },
+    "superseded_by": {
+      "$ref": "common.schema.json#/$defs/ClaimId",
+      "description": "Set on a demoted duplicate (resolved fact match, §1e): the surviving claim that supersedes this one. The claim stays state=active for history and audit; recall eligibility derives from this pointer (status 'superseded')."
+    },
+    "superseded_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601",
+      "description": "Commit time of the demotion; present whenever superseded_by is."
+    },
+    "superseded_by_origin": {
+      "type": "string",
+      "enum": [
+        "user"
+      ],
+      "description": "Warrant for the demotion. Absent = the library's mechanical duplicate resolution; 'user' = the user re-picked against this copy (REVISE repick_survivor, protocol v0.5.0)."
+    },
+    "reinstated_by": {
+      "type": "string",
+      "enum": [
+        "user"
+      ],
+      "description": "Audit-only marker on a version that released a demotion: the user reinstated this claim as the recall-eligible copy (REVISE repick_survivor). Never a lifecycle input."
     }
   },
   "allOf": [
