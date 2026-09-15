@@ -35,6 +35,31 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
+evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
+`t_0920aa1d`, ADR-0013 — schema/contract accuracy plus a disclosed boundary; **no published schema byte
+moves**, `SHA256SUMS` unchanged): **541 tests across 76 files** (540 passed; the single failure is
+`mcp_smoke`'s 10 s stdio-transport hook under a load average of 23–27 with five sibling lanes running
+vitest — re-run alone on the same tree: 4/4 pass, exit 0), 31 schema files. The delta over the entry below is 4
+tests in two new files — `test/layer0/l0-record-wire-boundary.test.ts` (2) and
+`test/layer2/l2-page-frontmatter-boundary.test.ts` (2) — which pin, for the first time, which schema
+belongs to which artifact: no `src/` file referenced either schema, and no normative text assigned one
+to a surface (the contract prints the OBSERVE payload in prose without naming `observation.schema.json`,
+and mentions `page-frontmatter` only in its Scope-vocabulary list). Measured on the
+protocol-native flow (`observe → reflect → compile → exportScope`, raw bytes + Ajv 2020):
+`observation.schema.json` accepts the contract's OBSERVE payload plus the stamped identity and rejects
+the on-disk **record envelope** by construction (4 `required`, 9 `additionalProperties`,
+`/source:type` — the record's nested `source`, `status`, `visibility`, `version`, `policy` and
+`integrity` chain have no place in a closed wire schema), **including the byte-identical copies
+`EXPORT.SCOPE` ships in `observations.jsonl`/`evidence.jsonl` while its manifest declares
+`"schemas": "v0.5.0"`**; `page-frontmatter.schema.json` accepts the spec §9 projection of the frontmatter
+the compiler itself writes and rejects the raw form with 19 errors (2 `required`, 12
+`additionalProperties`, `category` enum, `sources/0` pattern, `updated` format, `confidence`
+type+enum), so there the writer is the side that is wrong. Both divergences are **disclosed** in
+`schemas/v0.5.0/README.md` → *Which schema covers which surface*, not silently relaxed; the two fixes
+(the L2 page writer, and a published record schema plus an honest export-manifest label) are carded with
+their measured evidence (`t_8d6f4a5c`, `t_f1157ed4`). No other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the **substrate ActorId and the host-lane scope disclosure**
 (`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0012 — a writer-identity fix plus a stated
 conformance boundary; no schema byte moves, `SHA256SUMS` unchanged): **537 tests across 74 files**, 31
@@ -255,6 +280,24 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
+- **The L0 evidence record's field shape is not published in v0.5.0.** `observation.schema.json` covers the
+  observation object *on the wire* (the OBSERVE payload plus the stamped identity), not the record the
+  substrate appends to `<data_dir>/evidence/<date>.jsonl` — which carries the same information under
+  different names plus `status`, `visibility`, `version`, `policy` and the `integrity` chain, none of
+  which a closed wire schema can hold. **This includes the copies `EXPORT.SCOPE` ships** in
+  `observations.jsonl` / `evidence.jsonl`, in a package whose manifest declares `"schemas": "v0.5.0"`.
+  An integrator validating raw evidence — or a third-party implementation claiming v0.5.0 — has no
+  published contract for the record until the carded record schema lands (`t_f1157ed4`). Disclosed in
+  `schemas/v0.5.0/README.md` → *Which schema covers which surface*; decided in
+  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md); pinned by
+  `test/layer0/l0-record-wire-boundary.test.ts` (the record envelope, the wire projection validating,
+  the record's exact 14-error rejection, and the export package carrying the same bytes).
+- **The reference implementation's compiled page frontmatter does not yet validate against
+  `page-frontmatter.schema.json`** — 19 Ajv errors (`created`/`epistemic_tag` missing, plural `category`,
+  ISO `updated`, numeric `confidence`, observation ids under `sources`, plus the compile envelope). The
+  schema is the contract for that artifact (spec §9 prints the same field set); the writer fix is carded
+  (`t_8d6f4a5c`), disclosed in the same README section, and pinned by
+  `test/layer2/l2-page-frontmatter-boundary.test.ts`.
 - **Host-registered lanes are outside the v0.5.0 `Scope` vocabulary.** The reference implementation's
   pod-profile helper registers `pod/<pod>/<lane>` ids — a host's own lanes, and the live Pod product's
   scope ids — and the published vocabulary admits no host-lane form. A canonical record written in a

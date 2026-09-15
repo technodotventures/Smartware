@@ -63,6 +63,43 @@ Changes vs v0.4.2 (schema-surface only):
 `integrity-manifest-entry.schema.json` describes an optional post-beta surface.
 Its presence does not make the integrity manifest a beta requirement.
 
+## Which schema covers which surface
+
+Three surfaces are easy to confuse. An integrator validating Smartware records should
+use the schema named here and no other (ADR-0013, kanban `t_0920aa1d`):
+
+| surface | what it is | what validates it |
+|---|---|---|
+| `observation.schema.json` | **the observation object on the wire** — the OBSERVE payload (`content`, `source` identifier string, `scope`, `metadata{timestamp, actor, informed_by, tags}`, `idempotency_key`) plus the server-stamped `observation_id`, `operation_id`, `actor_id` | itself |
+| `<data_dir>/evidence/<date>.jsonl` (one line per observation) | **the L0 record** — the append-only storage envelope. It carries the wire payload's information under different names (`id`, `source.app`, `source.observed_at`, `source.actor`) **plus** canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` tamper-evidence chain | **no schema in this set** — see the gap below |
+| `page-frontmatter.schema.json` | **L2 page frontmatter** (spec §9) for `wiki/<category>/<slug>.md` | itself |
+
+**Known gaps, disclosed rather than silently relaxed** (both carded with measured
+evidence; the measurement is `test/layer0/l0-record-wire-boundary.test.ts` and the
+rationale is ADR-0013):
+
+1. **The L0 record shape is unpublished in v0.5.0.** Applying `observation.schema.json`
+   to an evidence line yields errors by construction (4 `required`, 9
+   `additionalProperties`, `/source:type`). This includes the copies in
+   `EXPORT.SCOPE` packages (`observations.jsonl`, `evidence.jsonl`) — a package whose
+   `manifest.json` declares `"schemas": "v0.5.0"` while shipping a record shape no
+   v0.5.0 schema describes. A record schema is required for that manifest claim to be
+   honest; until it exists, treat the exported record shape as defined by the
+   implementation, not by this set.
+2. **The reference implementation's compiled page frontmatter does not yet validate
+   against `page-frontmatter.schema.json`.** The compiler emits the L2 page with a
+   legacy internal envelope and a different vocabulary (`category` plural,
+   `confidence` numeric, `epistemic` for `epistemic_tag`, observation ids under
+   `sources`); the schema's field set is the normative one, and spec §9 prints the same field set
+   (`tags`, `aliases` and `notices` optional). The writer fix is carded. `page-frontmatter.schema.json`
+   is the contract
+   for that artifact — do not read the implementation's current output as an
+   alternative contract.
+
+`tombstone-frontmatter.schema.json` covers `wiki/tombstones/*.md` and
+`profile-frontmatter.schema.json` covers `wiki/profiles/*.md`; the page schema's
+`category` enum deliberately excludes `tombstone` and `profile` for that reason.
+
 Canonical relation schemas intentionally reject `origin: model` and
 `origin: reviewed`: model output is a derived candidate, and delegated reviewed
 admission is post-beta. In beta, epistemic edges are user-admitted; autonomous
