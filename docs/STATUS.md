@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/neo/repick-survivor` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/tombstone-backfill-writer` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -25,22 +25,26 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-14-t_ec159c21.md`](journal/2026-09-14-t_ec159c21.md) — P0 fix: deterministic corroboration proof in Coffee-shaped pilot (2026-09-14)
-- **Journal entries:** 35 · tasks completed on board `smartware`: 40
+- **Journal entries:** 35 · tasks completed on board `smartware`: 44
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/smarty/tombstone-snapshot-envelope` | 51 | 2026-09-15 | fix(schemas): tombstone snapshot block enumerates the claim record envelope |
+| `wip/neo/repick-survivor` | 50 | 2026-09-15 | docs: regenerate STATUS (board counters; drift is projection-only) |
+| `wip/neo/legal-hold-marker` | 47 | 2026-09-14 | docs: decide legal hold — v1 composition stands, marker not built (ADR-0008) |
 | `wt/t_c5c999ba` | 47 | 2026-09-14 | docs: decide legal hold — v1 composition stands, marker not built (ADR-0008) |
+| `falsifier/t_e8bd6747` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
 | `feat/deepseek-provider` | 46 | 2026-09-15 | feat(extraction): add deepseek provider (OpenAI-compatible, api.deepseek.com) |
 | `wip/smarty/demotion-handbuilt-records` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
 | `wt/t_ad51d0e2` | 46 | 2026-09-14 | docs: regenerate STATUS projection (lifecycle composition lane) |
 | `wip/neo/p0-sources-ingestion` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
 | `wt/t_65569b9e` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
+| `wip/neo/f1-reflect-auto-identity` | 44 | 2026-09-15 | docs(journal): record the pilot cross-check and gate evidence for t_2996a3ab |
 | `wip/neo/demotion-durability` | 43 | 2026-09-14 | docs(journal): state delta for t_01ef0ede (demotion durability) + STATUS regen |
 | `docs/protocol-identity-adr` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
-| `wip/neo/f1-reflect-auto-identity` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
@@ -66,9 +70,7 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Blockers and stale work
 
-- `t_65569b9e` P1 implement: company-brain observability and SLO contract
-- `t_9ee8bd54` P1 design+impl: fencing token at the brain mutation boundary (close the residual lease window)
-- `t_c5c999ba` DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition)
+- No blocked tasks on the board.
 
 ## Decisions
 
@@ -88,9 +90,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (49 tasks, 1873 events)
-- ⚠️ 5 completed task(s) have no journal entry — run: npm run journal:sync
-- ⚠️ 3 blocked task(s)
+- ✅ kanban board readable (53 tasks, 2044 events)
+- ⚠️ 9 completed task(s) have no journal entry — run: npm run journal:sync
 
 ## Canonical index
 
