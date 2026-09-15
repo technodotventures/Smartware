@@ -46,7 +46,7 @@ v0.5.0 schema-conformance claim — the contract's conformance boundary requires
 schema validity on every canonical write. A host that needs v0.5.0
 schema-conformant records writes protocol-native lanes. The decision (and the
 recommendation to define a host-lane form in a later protocol revision) is
-[ADR-0012](../../docs/adr/0012-host-registered-lanes-and-the-substrate-actor-id.md);
+[ADR-0015](../../docs/adr/0015-host-registered-lanes-and-the-substrate-actor-id.md);
 `test/schemas-v0.5.0.test.ts` pins the closed vocabulary and
 `test/layer1/pod-profile-conformance.test.ts` pins what the writers emit.
 

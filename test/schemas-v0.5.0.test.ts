@@ -188,7 +188,7 @@ describe('Smartware v0.5.0 schemas', () => {
     assert.equal(observe({ ...validObs, scope: 'client:acme#0' }), false);
   });
 
-  test('Scope vocabulary is closed at v0.5.0: host-registered lanes are not Scope values (ADR-0012)', () => {
+  test('Scope vocabulary is closed at v0.5.0: host-registered lanes are not Scope values (ADR-0015)', () => {
     const ajv = createAjv();
     const claim = validator(ajv, 'claim.schema.json');
     const common = ajv.getSchema('https://smartware.dev/schemas/v0.5.0/common.schema.json#/$defs/Scope');
@@ -198,7 +198,7 @@ describe('Smartware v0.5.0 schemas', () => {
     // `pod/<pod>/<lane>` ids as HOST-REGISTERED lanes: legitimate scope-registry ids and live
     // product scope ids, but not v0.5.0 `Scope` values. The published vocabulary admits no
     // host-lane form, so a record whose scope is one of them is outside the schema's Scope
-    // vocabulary and outside the v0.5.0 schema-conformance claim. Decided in ADR-0012 (with the
+    // vocabulary and outside the v0.5.0 schema-conformance claim. Decided in ADR-0015 (with the
     // substrate ActorId aligned to the published pattern); the record-level pin is
     // test/layer1/pod-profile-conformance.test.ts. If a later revision admits host lanes, this
     // fixture and the README qualification change in that revision's own change.

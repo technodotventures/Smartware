@@ -1,4 +1,4 @@
-// The pod-profile surface vs the published v0.5.0 Scope/ActorId patterns (ADR-0012).
+// The pod-profile surface vs the published v0.5.0 Scope/ActorId patterns (ADR-0015).
 //
 // Two halves, measured on `wip/tech-head/claim-record-semantic` and decided on kanban
 // `t_9a700aed`:
@@ -109,7 +109,7 @@ async function observeAndReflect(core: SmartwareCore, scope: string): Promise<vo
   await core.reflect({ actor, scope, use_llm: false });
 }
 
-describe('pod-profile records and the published v0.5.0 Scope/ActorId patterns (ADR-0012)', () => {
+describe('pod-profile records and the published v0.5.0 Scope/ActorId patterns (ADR-0015)', () => {
   it('mints one lowercase substrate ActorId; the only pattern error left is the host-lane scope', async () => {
     const core = await openCore('pod-profile-conformance');
     const profile = core.createPodProfile('conformance-pod');
@@ -174,7 +174,7 @@ describe('pod-profile records and the published v0.5.0 Scope/ActorId patterns (A
     expect(dreamEntries.length).toBeGreaterThan(0);
     const actorIds = new Set(entries.map(entry => entry.actor_id));
     // One substrate identity per instance: reflect.auto and dream agree with each other and with
-    // the canonical helper. (Before ADR-0012, `substrate:<ULID>` and `substrate:smartware-<ulid>`
+    // the canonical helper. (Before ADR-0015, `substrate:<ULID>` and `substrate:smartware-<ulid>`
     // were two different spellings — the first rejected by the published pattern.)
     expect(actorIds).toEqual(new Set([expectedActorId]));
   });

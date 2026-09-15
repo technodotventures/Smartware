@@ -428,7 +428,7 @@ export class SmartwareCore {
    * **host-registered lanes**, not protocol-native v0.5.0 `Scope` values: they
    * are registered in this brain's scope registry and are the pod's live scope
    * ids, but the published vocabulary admits no host-lane form, so a record
-   * written in one is outside the v0.5.0 schema-conformance claim (ADR-0012).
+   * written in one is outside the v0.5.0 schema-conformance claim (ADR-0015).
    * Hosts that need schema-conformant records use protocol-native lanes
    * (`self` / `workspace` / `project:<slug>` / `agent:<slug>`).
    */

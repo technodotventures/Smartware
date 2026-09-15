@@ -136,7 +136,7 @@ describe('reflect.auto semantic materialization', () => {
 
     for (const record of active) {
       // The scope substitution is the one remaining, disclosed divergence: a pod-profile host lane
-      // is not a v0.5.0 Scope value (ADR-0012, schemas/v0.5.0/README.md). The actor id is no longer
+      // is not a v0.5.0 Scope value (ADR-0015, schemas/v0.5.0/README.md). The actor id is no longer
       // substituted — the writers mint one canonical lowercase `substrate:<slug>`, pinned in
       // test/layer1/pod-profile-conformance.test.ts together with this record-level pin.
       const conformant = { ...record, scope: 'workspace' };

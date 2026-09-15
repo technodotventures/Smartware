@@ -1,4 +1,4 @@
-# ADR 0012 — Host-registered lanes are not v0.5.0 scopes, and the substrate has exactly one ActorId
+# ADR 0015 — Host-registered lanes are not v0.5.0 scopes, and the substrate has exactly one ActorId
 
 **Status:** Proposed — owner approval is the gate before merge (it states what the v0.5.0 conformance
 claim covers; no published schema byte moves)
@@ -8,8 +8,10 @@ claim covers; no published schema byte moves)
 the boundary of the v0.5.0 conformance claim, and the follow-up is a protocol-surface fork the owner
 picks.
 **Supersedes:** none
-**Numbering note:** `0004`–`0011` are held by other in-flight branches and three numbers are already
-double-allocated (`0008`, `0010`, `0011`); `0012` was taken to avoid adding a fourth collision.
+**Numbering note:** this record is **0015**. It was drafted as `0012` branch-locally; three unmerged lanes
+had minted `0012` (grant granularity, `wt/t_f2b584dc`, keeps it; L1 forgotten-version, refiled `0014`).
+Renumbered before merge under the board arbitration `t_201cdca8`, every lane reference updated in the
+same commit — ADRs are never renumbered once merged.
 Branch: `wip/neo/host-lane-identity` (forked from `wip/tech-head/claim-record-semantic` @ `981e5a7`).
 
 ## Context

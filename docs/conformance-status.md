@@ -36,7 +36,7 @@ Specification v1.6.16 conformance.
 ## Verified baseline
 
 Verified 2026-09-15 on Node v26.5.1 for the **substrate ActorId and the host-lane scope disclosure**
-(`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0012 — a writer-identity fix plus a stated
+(`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0015 — a writer-identity fix plus a stated
 conformance boundary; no schema byte moves, `SHA256SUMS` unchanged): **537 tests across 74 files**, 31
 schema files. The delta over the entry below is 5 tests — a new `test/layer1/pod-profile-conformance.test.ts`
 (4: the pod-profile record's complete Ajv error list is exactly `["/scope:pattern"]` with a conformant
@@ -69,7 +69,7 @@ divergences*): `insertClaim`'s forgotten path omits `supersedes` that the schema
 requires (`t_3ba3ee39`), and pod-profile records carry `pod/<pod>/<lane>` scopes and
 `substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed` — both halves
 settled in the entry above: the ActorId defect fixed in the writers, the host-lane scope disclosed as
-outside the v0.5.0 `Scope` vocabulary, ADR-0012). No other
+outside the v0.5.0 `Scope` vocabulary, ADR-0015). No other
 suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
@@ -262,7 +262,7 @@ The exact ordering and recovery state table are documented in
   canonical write"); hosts that need v0.5.0 schema-conformant records write protocol-native lanes
   (`self` / `workspace` / `project:<slug>` / `agent:<slug>` / `client:<id>[#n]`). Decided, with the
   measured evidence and the recommendation to define a host-lane form in a later protocol revision:
-  [ADR-0012](adr/0012-host-registered-lanes-and-the-substrate-actor-id.md). Pinned by
+  [ADR-0015](adr/0015-host-registered-lanes-and-the-substrate-actor-id.md). Pinned by
   `test/schemas-v0.5.0.test.ts` (the vocabulary rejects host lanes) and
   `test/layer1/pod-profile-conformance.test.ts` (a pod-profile record's only Ajv error is
   `/scope:pattern`; a protocol-native record's complete error list is empty).
