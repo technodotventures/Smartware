@@ -41,6 +41,7 @@ const ULID_A = '0'.repeat(26);
 const ULID_B = '1'.repeat(26);
 const CLAIM_A = `claim_${ULID_A}`;
 const CLAIM_B = `claim_${ULID_B}`;
+const TOMBSTONE_A = `tomb_${ULID_A}`;
 const OPERATION_A = `op_${ULID_A}`;
 const OBSERVATION_A = `obs_${'a'.repeat(16)}`;
 const RELATION_A = `rel_${ULID_A}`;
@@ -318,5 +319,94 @@ describe('Smartware v0.5.0 schemas', () => {
       ...activeClaim(),
       semantic: { ...semantic, t_valid_from: { value: NOW, state: 'known', basis: 7 } },
     }), false, 'the valid-time basis is a string label, not free data');
+  });
+
+  test('tombstone-frontmatter: the snapshot carries the claim record envelope', () => {
+    const ajv = createAjv();
+    const tombstone = validator(ajv, 'tombstone-frontmatter.schema.json');
+
+    const tombstoneFor = (snapshot: Record<string, unknown>) => ({
+      tombstone_id: TOMBSTONE_A,
+      claim_id: CLAIM_A,
+      forgotten_at: NOW,
+      forgotten_by: 'user:owner',
+      operation_id: OPERATION_A,
+      reason: 'the client asked us to stop keeping this.',
+      snapshot,
+      blast_radius_summary: {
+        pages_affected: 0,
+        agent_blocks_marked: 0,
+        user_pages_notified: 0,
+      },
+      affected_pages: [],
+    });
+
+    // Control: a snapshot of an ordinary active version — the envelope fields absent, not
+    // merely falsy — still validates. The fields are additive; nothing written before this
+    // change stops validating.
+    assert.equal(tombstone(tombstoneFor(activeClaim())), true, JSON.stringify(tombstone.errors));
+
+    // 1. A demoted duplicate can be forgotten: the snapshot keeps the demotion pair, so the
+    //    forgotten version is still reconstructible from the tombstone alone.
+    assert.equal(tombstone(tombstoneFor({
+      ...activeClaim(),
+      superseded_by: CLAIM_B,
+      superseded_at: NOW,
+    })), true, JSON.stringify(tombstone.errors));
+
+    // 2. ...and a user-warranted demotion keeps its warrant (REVISE repick_survivor).
+    assert.equal(tombstone(tombstoneFor({
+      ...activeClaim(),
+      superseded_by: CLAIM_B,
+      superseded_at: NOW,
+      superseded_by_origin: 'user',
+    })), true, JSON.stringify(tombstone.errors));
+
+    // 3. A version that released a demotion keeps its audit-only marker.
+    assert.equal(tombstone(tombstoneFor({
+      ...activeClaim(),
+      version: 2,
+      supersedes: 1,
+      reinstated_by: 'user',
+    })), true, JSON.stringify(tombstone.errors));
+
+    // 4. Both warrants are closed enums, not free text — a tombstone cannot launder a
+    //    mechanical ('model') demotion into a user warrant, or vice versa.
+    assert.equal(tombstone(tombstoneFor({ ...activeClaim(), superseded_by_origin: 'model' })), false);
+    assert.equal(tombstone(tombstoneFor({ ...activeClaim(), reinstated_by: 'agent' })), false);
+
+    // 5. The snapshot block stays closed: an unenumerated field is still rejected.
+    assert.equal(tombstone(tombstoneFor({ ...activeClaim(), invented_field: true })), false);
+  });
+
+  test('tombstone-frontmatter snapshot mirrors the claim schema envelope field-for-field', () => {
+    const readSchema = (file: string): Record<string, unknown> =>
+      JSON.parse(readFileSync(path.join(schemaDir, file), 'utf8')) as Record<string, unknown>;
+    const claimProperties = readSchema('claim.schema.json').properties as Record<string, unknown>;
+    const tombstoneProperties = readSchema('tombstone-frontmatter.schema.json')
+      .properties as Record<string, unknown>;
+    const snapshotProperties = (tombstoneProperties.snapshot as Record<string, unknown>)
+      .properties as Record<string, unknown>;
+
+    // Same definitions, same descriptions: the snapshot is a claim version, so the two blocks
+    // must not drift apart as the envelope grows.
+    for (const field of ['superseded_by', 'superseded_at', 'superseded_by_origin', 'reinstated_by']) {
+      assert.ok(claimProperties[field], `claim.schema.json does not define ${field}`);
+      assert.deepEqual(
+        snapshotProperties[field],
+        claimProperties[field],
+        `${field} must mirror claim.schema.json`,
+      );
+    }
+
+    // Every field the claim schema requires is enumerated (the block's own promise), and the
+    // forget-only fields stay out (the snapshot is of an active version).
+    const claimRequired = readSchema('claim.schema.json').required as string[];
+    for (const field of claimRequired) {
+      assert.ok(snapshotProperties[field], `snapshot does not enumerate required field ${field}`);
+    }
+    for (const field of ['tombstone_id', 'forgotten_at', 'forgotten_by']) {
+      assert.equal(snapshotProperties[field], undefined);
+    }
   });
 });
