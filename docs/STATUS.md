@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/neo/ops-enum-symmetry` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/optype-derivation-guard` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -25,18 +25,25 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-15-t_c5c999ba.md`](journal/2026-09-15-t_c5c999ba.md) — DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition) (2026-09-15)
-- **Journal entries:** 45 · tasks completed on board `smartware`: 58
+- **Journal entries:** 45 · tasks completed on board `smartware`: 65
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/neo/host-lane-identity` | 59 | 2026-09-15 | docs: state the ADR-0012 delta — verified baseline, remaining limits, journal entry |
+| `wip/smarty/canonical-schema-boundary` | 59 | 2026-09-15 | docs: state the ADR-0012 delta — verified baseline, remaining limits, journal entry |
+| `wip/smarty/l1-forgotten-supersedes` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
+| `fix/status-projection-adr-bullet` | 58 | 2026-09-15 | fix(status): the ADR reader accepts the template's `- **Status:**` bullet |
 | `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
+| `wip/smarty/retention-payload-identity` | 56 | 2026-09-15 | fix(protocol): the retention sweep matches the OperationId payload, not just the id |
+| `wt/t_f2b584dc` | 56 | 2026-09-15 | docs(adr-0012): tighten the context paragraph (scope spelling, amended-binding pointer) |
 | `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
+| `wt/t_9740ae98` | 54 | 2026-09-15 | docs: regenerate STATUS projection (board counters and branch tips moved while this lane ran; no content lines differ) |
+| `wip/neo/ops-enum-symmetry` | 53 | 2026-09-15 | docs: state delta for t_0e3989eb (gate evidence, conformance counts, STATUS projection) |
 | `wip/neo/tombstone-backfill-writer` | 53 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_9e124fe6) |
-| `wt/t_9740ae98` | 53 | 2026-09-15 | gate: Coffee company-brain acceptance run — packaged artifact, 79/79, two defects fixed in-lane (ADR-0011) |
 | `wt/t_ba868906` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
 | `wip/neo/legal-hold-findings` | 51 | 2026-09-15 | docs: state delta for t_7a64ded2 (gate evidence, conformance counts, STATUS projection) |
 | `wip/smarty/tombstone-snapshot-envelope` | 51 | 2026-09-15 | fix(schemas): tombstone snapshot block enumerates the claim record envelope |
@@ -49,6 +56,7 @@
 | `feat/deepseek-provider` | 46 | 2026-09-15 | feat(extraction): add deepseek provider (OpenAI-compatible, api.deepseek.com) |
 | `wip/neo/fencing-token` | 46 | 2026-09-15 | docs: fencing evidence — before/after gauntlet pair, measured cost, guard-list fix |
 | `wip/smarty/demotion-handbuilt-records` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
+| `wip/tech-head/retention-sweep-audit` | 46 | 2026-09-15 | docs: fencing evidence — before/after gauntlet pair, measured cost, guard-list fix |
 | `wt/t_65569b9e` | 46 | 2026-09-15 | health: host-facing health/metrics contract, lane-explicit counts, Coffee-trial SLOs (ADR-0008) |
 | `wt/t_ad51d0e2` | 46 | 2026-09-14 | docs: regenerate STATUS projection (lifecycle composition lane) |
 | `wip/neo/f1-reflect-auto-identity` | 44 | 2026-09-15 | docs(journal): record the pilot cross-check and gate evidence for t_2996a3ab |
@@ -74,15 +82,17 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
-- `t_3ba3ee39` [todo] L1 record writer: `insertClaim`'s forgotten path omits `supersedes`, so the record fails claim.schema.json's forgotten branch (measured, carded out of t_229601e4) (created 2026-09-15, assignee smarty-pants)
-- `t_9a700aed` [todo] Library-written L1 records: pod-profile scopes (`pod/<pod>/<lane>`) and `substrate:<ULID>` actor ids are rejected by the v0.5.0 Scope/ActorId patterns (measured, carded out of t_229601e4) (created 2026-09-15, assignee neo)
-- `t_432be9c9` [todo] STATUS projection: the ADR README template's `- **Status:**` bullet is not read by scripts/substrate-status.mjs (every template-shaped ADR shows "(no status line)" and is invisible as a pending decision) (created 2026-09-15, assignee smarty-pants)
-- `t_f2b584dc` [todo] DECIDE: FORGET.SCOPE revokes whole grant rows — multi-client staff lose their other clients (Coffee gate finding, ADR-0011) (created 2026-09-15, assignee tech-head)
+- `t_f2b584dc` [ready] DECIDE: FORGET.SCOPE revokes whole grant rows — multi-client staff lose their other clients (Coffee gate finding, ADR-0011) (created 2026-09-15, assignee tech-head)
+- `t_864a5900` [todo] IMPL (ADR-0012): one grant row per (actor, client) + degraded-precheck union — close the FORGET.SCOPE multi-client access-loss finding (created 2026-09-15, assignee neo)
+- `t_ef77c695` [todo] L1 replay: a `wrong`/`extraction_error` correction writes `state: 'active'`, so the retraction never reaches the canonical JSONL (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_0b079fbf` [todo] L1 replay mints `claim_<lowercase hex>` / `tomb_<lowercase hex>`, which the published ClaimId/TombstoneId patterns reject (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_8098b097` [todo] L1 writer: `insertClaim` drops a caller-supplied `superseded_by` on the forgotten path (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_102f3dfa` [todo] REVIEW (independent): ADR-0012 — is option (a) the right call, and is the §10b amendment + re-grant requirement correctly recorded? (created 2026-09-15, assignee smarty-pants)
 
 ## Blockers and stale work
 
+- `t_66f1dd7d` GATE review: independent Coffee company-brain release verdict
 - `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
 
 ## Decisions
@@ -107,9 +117,9 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (69 tasks, 2917 events)
-- ⚠️ 13 completed task(s) have no journal entry — run: npm run journal:sync
-- ⚠️ 1 blocked task(s)
+- ✅ kanban board readable (82 tasks, 3389 events)
+- ⚠️ 20 completed task(s) have no journal entry — run: npm run journal:sync
+- ⚠️ 2 blocked task(s)
 
 ## Canonical index
 
