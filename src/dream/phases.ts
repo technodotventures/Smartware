@@ -5,7 +5,7 @@ import { ulid } from 'ulid';
 
 import type { CommitContext } from '../ops_log/commit.js';
 import { runCommitSync } from '../ops_log/commit.js';
-import { runRecovery, type RecoveryContext } from '../ops_log/recovery.js';
+import { runRecovery, type RecoveryContext, type RecoveryFence } from '../ops_log/recovery.js';
 import { extractDeterministic } from '../extraction/deterministic.js';
 import { readAll } from '../layer0/log.js';
 import {
@@ -116,6 +116,8 @@ export interface DreamOptions {
   reportDir?: string;
   /** Explicit opt-in for operator-controlled L2 recompilation. Off by default. */
   recompile?: () => void;
+  /** Storage-level fencing (ADR-0010): the scan applies epoch dispositions; absent = legacy. */
+  fence?: RecoveryFence;
 }
 
 function latestClaimVersions(dataDir: string): ClaimVersionRecord[] {
@@ -280,6 +282,7 @@ export function runDefaultDream(
     claimsDir: options.claimsDir,
     wikiDir: options.wikiDir,
     quarantineDir: options.quarantineDir ?? '',
+    ...(options.fence ? { fence: options.fence } : {}),
   });
 
   phases.push(runPhase(ctx, podActorId, runId, 'verify', 'dream.verify', scope, () => {

@@ -17,12 +17,22 @@
 // use it. We land the API now so consumers can review the shape and so
 // the conformance fixture has a target.
 
-import { appendOpLogEntry, readAllOpLogEntries } from './log.js';
+import { appendCommittedOpLogEntry, readAllOpLogEntries, type CommitFence } from './log.js';
+import type { RecoveryFence } from './recovery.js';
 import type { OpLogEntry, OpType } from './types.js';
+
+/**
+ * The full fencing surface a mutation carries (ADR-0010): the writer-path commit gate plus the
+ * recovery-path dispositions (`RecoveryFence`). One adapter object implements both; handlers
+ * that both commit and run a retry-time recovery scan take this type.
+ */
+export type MutationFence = CommitFence & RecoveryFence;
 
 export interface CommitContext {
   /** Pod-wide `pod_data/operations/` */
   opsDir: string;
+  /** Storage-level fencing (ADR-0010). Absent = unfenced caller (legacy behaviour). */
+  fence?: MutationFence | null;
 }
 
 export class IdempotencyConflictError extends Error {
@@ -37,6 +47,13 @@ function findExistingOp(opsDir: string, operationId: string): OpLogEntry | undef
     if (entry.operation_id === operationId) return entry;
   }
   return undefined;
+}
+
+/** Compare descriptor details ignoring the fencing stamp recovery/gating adds (ADR-0010). */
+function withoutFenceStamp(details: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!details || details['fence'] === undefined) return details;
+  const { fence: _fence, ...rest } = details;
+  return rest;
 }
 
 export interface CommitDescriptor {
@@ -76,7 +93,8 @@ export async function runCommit<T>(
 ): Promise<CommitResult<T>> {
   const existing = findExistingOp(ctx.opsDir, descriptor.operation_id);
   if (existing) {
-    if (existing.op === descriptor.op && JSON.stringify(existing.details) === JSON.stringify(descriptor.details)) {
+    if (existing.op === descriptor.op
+      && JSON.stringify(withoutFenceStamp(existing.details)) === JSON.stringify(withoutFenceStamp(descriptor.details))) {
       return { commit_ts: existing.timestamp, value: undefined as T };
     }
     throw new IdempotencyConflictError(descriptor.operation_id);
@@ -92,7 +110,7 @@ export async function runCommit<T>(
     op: descriptor.op,
     details: descriptor.details,
   };
-  appendOpLogEntry(ctx.opsDir, entry);
+  appendCommittedOpLogEntry(ctx.opsDir, entry, ctx.fence);
 
   return { commit_ts, value };
 }
@@ -104,7 +122,8 @@ export function runCommitSync<T>(
 ): CommitResult<T> {
   const existing = findExistingOp(ctx.opsDir, descriptor.operation_id);
   if (existing) {
-    if (existing.op === descriptor.op && JSON.stringify(existing.details) === JSON.stringify(descriptor.details)) {
+    if (existing.op === descriptor.op
+      && JSON.stringify(withoutFenceStamp(existing.details)) === JSON.stringify(withoutFenceStamp(descriptor.details))) {
       return { commit_ts: existing.timestamp, value: undefined as T };
     }
     throw new IdempotencyConflictError(descriptor.operation_id);
@@ -120,6 +139,6 @@ export function runCommitSync<T>(
     op: descriptor.op,
     details: descriptor.details,
   };
-  appendOpLogEntry(ctx.opsDir, entry);
+  appendCommittedOpLogEntry(ctx.opsDir, entry, ctx.fence);
   return { commit_ts, value };
 }

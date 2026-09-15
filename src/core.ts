@@ -63,11 +63,12 @@ import type { Actor, Observation } from './layer0/types.js';
 import type { ClaimRelation, EpistemicTag } from './layer1/types.js';
 import { epistemicToTag } from './layer1/types.js';
 import { runDefaultDream, type DreamResult } from './dream/phases.js';
-import { runRecovery } from './ops_log/recovery.js';
+import { runRecovery, type RecoveryReport } from './ops_log/recovery.js';
+import type { MutationFence } from './ops_log/commit.js';
 import { ensurePrivateDirectory } from './storage/private-fs.js';
 import { FenceStore } from './storage/fence.js';
 
-import { handleObserve, type ObserveParams, type ObserveResult } from './protocol/observe.js';
+import { handleObserve, type ObserveParams, type ObserveResult, type ObserveCommitHooks } from './protocol/observe.js';
 import {
   handleQuery,
   recallMinimumConfidence,
@@ -136,6 +137,12 @@ export interface SmartwareCoreOptions {
    * higher epoch. Omit for legacy, unfenced operation.
    */
   fencingToken?: number;
+  /**
+   * Crash-boundary test seam (not for production use): hooks fired inside OBSERVE's commit
+   * sequence (after the intent, after the L0 artifact, after the commit signal). The resilience
+   * gauntlet uses them to pause a process deterministically mid-mutation. No effect when omitted.
+   */
+  commitHooks?: ObserveCommitHooks;
 }
 
 /** Public fencing state of a core writer (ADR-0007). */
@@ -370,6 +377,12 @@ export class SmartwareCore {
   /** Fencing epoch state (ADR-0007); null token = legacy unfenced writer. */
   private readonly fence: FenceStore;
   private fenceToken: number | null = null;
+  /** The brain's canonical writer identity (config.writer_id) — stamped with the epoch. */
+  private writerId = '';
+  /** Crash-boundary test seam forwarded into OBSERVE (see SmartwareCoreOptions.commitHooks). */
+  private observeHooks: ObserveCommitHooks | null = null;
+  /** Recovery report captured at open (ADR-0010); see lastRecoveryReport(). */
+  private openRecoveryReport: RecoveryReport | null = null;
 
   private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore) {
     this.dataDir = dataDir;
@@ -401,6 +414,9 @@ export class SmartwareCore {
     const fence = FenceStore.open(dbPath);
 
     const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence);
+    // Canonical writer identity + the crash-boundary hook seam (ADR-0010 / test harness).
+    core.writerId = loadConfig(options.dataDir).writer_id;
+    core.observeHooks = options.commitHooks ?? null;
     // ADR-0007: a fenced writer claims its epoch before any recovery or derived-index
     // work. A stale owner fails fast here — it must not run recovery or write anything.
     if (options.fencingToken !== undefined) {
@@ -416,14 +432,18 @@ export class SmartwareCore {
     store.setDataDir(options.dataDir);
     // Finalize only exact intent-backed canonical artifacts before derived
     // indices catch up. Ambiguous operations remain untouched for Dream/manual
-    // review; startup never invents a completion decision.
+    // review; startup never invents a completion decision. Storage-level fencing
+    // (ADR-0010): uncommitted sets from an epoch behind the high-water mark are
+    // rejected as a set and reported — never finalized, never merged.
     const recovery = runRecovery({
       opsDir: core.opsDir,
       evidenceDir: core.evidenceDir,
       claimsDir: core.dataDir,
       wikiDir: core.wikiDir,
       quarantineDir: path.join(core.dataDir, 'quarantine', 'operations'),
+      fence: core.mutationFence(),
     });
+    core.openRecoveryReport = recovery;
     layer0.catchUp(core.evidenceDir);
     if (recovery.pendingOperations.length === 0) {
       await replayCatchUp(core.evidenceDir, store, layer0);
@@ -514,6 +534,38 @@ export class SmartwareCore {
    */
   private fenceGuard(op: string): void {
     this.fence.guard(this.fenceToken, op);
+  }
+
+  /**
+   * The mutation fence adapter (ADR-0010) handed to every canonical writer: the writer-path
+   * commit gate (`stamp` + `guardCommit`) and the recovery dispositions (`highWater`,
+   * `authorization`, `authorizeAtEpoch`) over this brain's fence store.
+   */
+  private mutationFence(): MutationFence {
+    return {
+      stamp: () => (this.fenceToken === null
+        ? null
+        : { epoch: this.fenceToken, writer_id: this.writerId }),
+      guardCommit: (operationIds: string[], op: string) => {
+        const stamp = this.fenceToken === null
+          ? null
+          : { epoch: this.fenceToken, writer_id: this.writerId };
+        this.fence.guardCommit(operationIds, stamp, op);
+      },
+      highWater: () => this.fence.highWater(),
+      authorization: (operationId: string) => this.fence.authorization(operationId),
+      authorizeAtEpoch: (operationIds: string[], epoch: number, writerId: string) =>
+        this.fence.authorizeAtEpoch(operationIds, epoch, writerId),
+    };
+  }
+
+  /**
+   * The recovery report from this writer's open (ADR-0010 surface): how the brain classified
+   * intent-backed state when it last opened, including `staleEpochRejected` — uncommitted sets
+   * from an epoch behind the high-water mark, rejected and never merged. Null before open.
+   */
+  lastRecoveryReport(): RecoveryReport | null {
+    return this.openRecoveryReport;
   }
 
   getConfig(): SmartwareConfig {
@@ -639,6 +691,7 @@ export class SmartwareCore {
 
   async observe(params: ObserveParams): Promise<ObserveResult> {
     this.fenceGuard('observe');
+    const hostHooks = this.observeHooks;
     return handleObserve(
       params,
       this.evidenceDir,
@@ -647,9 +700,15 @@ export class SmartwareCore {
       this.sessionStore,
       this.opsDir,
       {
-        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1).
-        afterObservation: obs => this.afterObservationCommitted(obs),
+        ...(hostHooks ?? {}),
+        afterObservation: obs => {
+          // Sync-raw freshness (spec §10a) + async-compile (spec §9.1), then the host hook
+          // (crash-boundary test seam; may be async — awaited inside handleObserve).
+          this.afterObservationCommitted(obs);
+          return hostHooks?.afterObservation?.(obs);
+        },
       },
+      this.mutationFence(),
     );
   }
 
@@ -1162,7 +1221,7 @@ export class SmartwareCore {
       this.searchIndex,
       this.getConfig(),
       this.dataDir,
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
   }
 
@@ -1189,6 +1248,7 @@ export class SmartwareCore {
       searchIndex: this.searchIndex,
       config: this.getConfig(),
       opsDir: this.opsDir,
+      fence: this.mutationFence(),
       queue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
     };
@@ -1223,7 +1283,7 @@ export class SmartwareCore {
     }
     const substrateId = `substrate:${config.instance_id.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
     return runDefaultDream(
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
       substrateId,
       params.scope,
       {
@@ -1232,6 +1292,7 @@ export class SmartwareCore {
         wikiDir: this.wikiDir,
         quarantineDir: path.join(this.dataDir, 'quarantine', 'operations'),
         reportDir: path.join(this.dataDir, 'derived', 'dream'),
+        fence: this.mutationFence(),
       },
     );
   }
@@ -1402,7 +1463,7 @@ export class SmartwareCore {
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
   }
 
@@ -1414,7 +1475,7 @@ export class SmartwareCore {
       this.layer0,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
     // Keep the raw-search window truthful after mutations: a terminal
     // observation (tombstone/redaction → tombstoned/redacted) must leave the
@@ -1445,7 +1506,7 @@ export class SmartwareCore {
       store: this.store,
       searchIndex: this.searchIndex,
       config,
-      commitCtx: { opsDir: this.opsDir },
+      commitCtx: { opsDir: this.opsDir, fence: this.mutationFence() },
       semanticStore: options.semanticStore ?? null,
       compileQueue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
@@ -1483,6 +1544,7 @@ export class SmartwareCore {
       opsDir: this.opsDir,
       store: this.store,
       config,
+      fence: this.mutationFence(),
     });
     if (result.status === 'restored') {
       this.layer0.catchUp(this.evidenceDir);
@@ -1509,6 +1571,7 @@ export class SmartwareCore {
       store: this.store,
       config,
       opsDir: this.opsDir,
+      fence: this.mutationFence(),
     });
   }
 
@@ -1524,7 +1587,7 @@ export class SmartwareCore {
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
     // Keep the claim-FTS surface truthful: the consolidated claim must be
     // findable and the tombstoned inputs must leave the index.
@@ -1553,7 +1616,7 @@ export class SmartwareCore {
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
       this.store.getDB(),
     );
   }
@@ -1566,7 +1629,7 @@ export class SmartwareCore {
       this.store,
       this.previewStore,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
   }
 

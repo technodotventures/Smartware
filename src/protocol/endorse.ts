@@ -18,7 +18,7 @@ import { CascadePreviewStore, type CascadePreviewPayload } from '../preview_stor
 import { requireRegisteredActor, ProtocolError } from '../auth/middleware.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   persistOperationIntent,
   readAllOpLogEntries,
@@ -229,6 +229,7 @@ export async function handleEndorse(
         claimsDir: dataDir,
         wikiDir: wikiRoot,
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -314,6 +315,7 @@ export async function handleEndorse(
   const pageHash = computePayloadHash(pageContent);
   let intent: EndorseOperationIntent | null = null;
   if (commitCtx) {
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     intent = {
       version: 1,
       operation_id: params.operation_id,
@@ -321,6 +323,7 @@ export async function handleEndorse(
       op: 'endorse',
       payload_hash: payloadHash,
       prepared_at: commitTs,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'endorse',
         page: { page_id: params.page_id, content_hash: pageHash },
@@ -354,7 +357,7 @@ export async function handleEndorse(
   }
 
   if (commitCtx && intent) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: commitTs,
@@ -366,7 +369,7 @@ export async function handleEndorse(
         claims: expectedClaims,
         claims_endorsed: endorsedRecords.length,
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   }

@@ -21,6 +21,7 @@ import {
   type ReviseOperationIntent,
   type ReviveOperationIntent,
   type ReflectClaimOperationIntent,
+  type OperationIntent,
 } from './intent.js';
 import { appendOpLogEntry, readAllOpLogEntries } from './log.js';
 
@@ -35,10 +36,42 @@ export interface RecoveryReport {
   requiresManualReview: string[];
   /** Exact intent-backed operations finalized during this scan. */
   completed: string[];
+  /**
+   * ADR-0010: uncommitted artifact sets whose ownership epoch is behind the brain's high-water
+   * mark (or unknown on a fenced brain). Rejected as a set — never finalized, never merged,
+   * never resumable — and reported here for review. Not a writer refusal: the writer is gone.
+   */
+  staleEpochRejected: StaleEpochRejection[];
   /** Reserved until an append-only quarantine transition is specified. */
   quarantined: string[];
   /** Prepared internal REFLECT claims with no artifact; safe to recompute. */
   aborted: string[];
+}
+
+export type StaleEpochReason = 'epoch_behind_high_water' | 'unstamped_on_fenced_brain';
+
+export interface StaleEpochRejection {
+  operation_id: string;
+  reason: StaleEpochReason;
+  /** The epoch the set was prepared under; null when the intent carries no stamp. */
+  epoch: number | null;
+  high_water: number;
+  /** Canonical artifacts found for this operation across the scanned surfaces. */
+  artifacts: number;
+}
+
+/**
+ * The recovery-path fence surface (ADR-0010) — a subset of the writer-path `CommitFence`.
+ * Absent = legacy caller (unfenced brain: dispositions are unchanged and byte-identical).
+ */
+export interface RecoveryFence {
+  highWater(): number;
+  authorization(operationId: string): { epoch: number } | null;
+  /**
+   * Atomically authorize a set prepared under `epoch` (re-checked against the high-water mark
+   * inside the transaction). False = the epoch is behind the mark: reject the set as stale.
+   */
+  authorizeAtEpoch(operationIds: string[], epoch: number, writer_id: string): boolean;
 }
 
 export interface OrphanArtifact {
@@ -53,6 +86,8 @@ export interface RecoveryContext {
   /** Smartware data directory containing claims/. */
   claimsDir?: string;
   wikiDir?: string;
+  /** Storage-level fencing (ADR-0010). Absent = legacy scan (no epoch dispositions). */
+  fence?: RecoveryFence;
   /** Reserved for future intent-backed quarantine. */
   quarantineDir: string;
 }
@@ -305,6 +340,57 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
   const manualReview = new Set<string>();
   const intentErrors: string[] = [];
   const aborted: string[] = [];
+  const staleEpochRejected: StaleEpochRejection[] = [];
+  const staleRejectedIds = new Set<string>();
+
+  // ── Storage-level fencing (ADR-0010) ───────────────────────────────────────────────────────
+  // An uncommitted artifact set whose epoch is behind the high-water mark (or unknown on a
+  // fenced brain) is rejected as a set: never finalized, never merged, never resumable. A set
+  // whose commit was already AUTHORIZED at the gate is projected instead — the authorization
+  // row is durable proof the commit decision happened while the epoch was current.
+  const highWater = ctx.fence ? ctx.fence.highWater() : 0;
+  const intentStamp = (intent: OperationIntent): { epoch: number; writer_id: string } | null =>
+    (intent as { fence?: { epoch: number; writer_id: string } }).fence ?? null;
+  const staleReason = (intent: OperationIntent): StaleEpochReason | null => {
+    if (!ctx.fence) return null; // legacy caller: no epoch dispositions
+    if (ctx.fence.authorization(intent.operation_id)) return null; // authorized: project
+    const stamp = intentStamp(intent);
+    if (!stamp) return highWater > 0 ? 'unstamped_on_fenced_brain' : null;
+    return stamp.epoch < highWater ? 'epoch_behind_high_water' : null;
+  };
+  const recordStale = (intent: OperationIntent, reason: StaleEpochReason): void => {
+    if (staleRejectedIds.has(intent.operation_id)) return;
+    staleRejectedIds.add(intent.operation_id);
+    staleEpochRejected.push({
+      operation_id: intent.operation_id,
+      reason,
+      epoch: intentStamp(intent)?.epoch ?? null,
+      high_water: highWater,
+      artifacts: (l0ByOperation.get(intent.operation_id)?.length ?? 0)
+        + (l1ByOperation.get(intent.operation_id)?.length ?? 0)
+        + (pagesByOperation.get(intent.operation_id)?.length ?? 0),
+    });
+  };
+  /** Finalize one exact set: gate the commit decision atomically, then append the signal. */
+  const finalizeRecovered = (intent: OperationIntent, entry: Parameters<typeof appendOpLogEntry>[1]): boolean => {
+    if (ctx.fence && !ctx.fence.authorization(intent.operation_id)) {
+      const stamp = intentStamp(intent);
+      const authorized = stamp
+        ? ctx.fence.authorizeAtEpoch([intent.operation_id], stamp.epoch, stamp.writer_id)
+        : highWater === 0;
+      if (!authorized) {
+        // The epoch went stale during the scan (a claim landed): reject, do not finalize.
+        recordStale(intent, staleReason(intent) ?? 'epoch_behind_high_water');
+        return false;
+      }
+    }
+    const stamp = intentStamp(intent);
+    appendOpLogEntry(
+      ctx.opsDir,
+      stamp ? { ...entry, details: { ...(entry.details ?? {}), fence: stamp } } : entry,
+    );
+    return true;
+  };
 
   for (const record of readOperationIntentRecords(ctx.opsDir)) {
     if (!record.intent) {
@@ -314,6 +400,21 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
     }
     const intent = record.intent;
     const existing = entries.filter(entry => entry.operation_id === intent.operation_id);
+
+    // ADR-0010: reject (never finalize, never merge) an uncommitted artifact set whose epoch is
+    // behind the high-water mark — or unknown on a fenced brain. A set with no artifacts is
+    // left to the existing dispositions: none of them finalize without artifacts.
+    if (existing.length === 0) {
+      const artifacts = (l0ByOperation.get(intent.operation_id)?.length ?? 0)
+        + (l1ByOperation.get(intent.operation_id)?.length ?? 0)
+        + (pagesByOperation.get(intent.operation_id)?.length ?? 0);
+      const reason = artifacts > 0 ? staleReason(intent) : null;
+      if (reason) {
+        recordStale(intent, reason);
+        continue;
+      }
+    }
+
     if (intent.op === 'forget') {
       const auditArtifacts = l0ByOperation.get(intent.operation_id) ?? [];
       const claimArtifacts = l1ByOperation.get(intent.operation_id) ?? [];
@@ -351,7 +452,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
         continue;
       }
 
-      appendOpLogEntry(ctx.opsDir, {
+      if (!finalizeRecovered(intent, {
         operation_id: intent.operation_id,
         actor_id: intent.actor_id,
         timestamp: intent.prepared_at,
@@ -368,7 +469,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           claims_reduced: intent.result.claims_reduced,
           recovered: true,
         },
-      });
+      })) continue;
       committed.add(intent.operation_id);
       completed.push(intent.operation_id);
       removeOperationIntent(ctx.opsDir, intent.operation_id);
@@ -401,7 +502,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
         pendingOperations.push(intent.operation_id);
         continue;
       }
-      appendOpLogEntry(ctx.opsDir, {
+      if (!finalizeRecovered(intent, {
         operation_id: intent.operation_id,
         actor_id: intent.actor_id,
         timestamp: intent.prepared_at,
@@ -419,7 +520,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           recovered: true,
           export_id: intent.details.export_id ?? null,
         },
-      });
+      })) continue;
       committed.add(intent.operation_id);
       completed.push(intent.operation_id);
       removeOperationIntent(ctx.opsDir, intent.operation_id);
@@ -450,7 +551,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
         manualReview.add(intent.operation_id);
         continue;
       }
-      appendOpLogEntry(ctx.opsDir, {
+      if (!finalizeRecovered(intent, {
         operation_id: intent.operation_id,
         actor_id: intent.actor_id,
         timestamp: intent.prepared_at,
@@ -464,7 +565,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           record_hash: intent.expected.record_hash,
           recovered: true,
         },
-      });
+      })) continue;
       committed.add(intent.operation_id);
       completed.push(intent.operation_id);
       removeOperationIntent(ctx.opsDir, intent.operation_id);
@@ -509,7 +610,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
         pendingOperations.push(intent.operation_id);
         continue;
       }
-      appendOpLogEntry(ctx.opsDir, {
+      if (!finalizeRecovered(intent, {
         operation_id: intent.operation_id,
         actor_id: intent.actor_id,
         timestamp: intent.prepared_at,
@@ -522,7 +623,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           claims_endorsed: intent.result.claims_endorsed,
           recovered: true,
         },
-      });
+      })) continue;
       committed.add(intent.operation_id);
       completed.push(intent.operation_id);
       removeOperationIntent(ctx.opsDir, intent.operation_id);
@@ -553,7 +654,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
         manualReview.add(intent.operation_id);
         continue;
       }
-      appendOpLogEntry(ctx.opsDir, {
+      if (!finalizeRecovered(intent, {
         operation_id: intent.operation_id,
         actor_id: intent.actor_id,
         timestamp: intent.prepared_at,
@@ -566,7 +667,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           record_hash: intent.expected.record_hash,
           recovered: true,
         },
-      });
+      })) continue;
       committed.add(intent.operation_id);
       completed.push(intent.operation_id);
       removeOperationIntent(ctx.opsDir, intent.operation_id);
@@ -612,7 +713,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
     }
 
     if (intent.op === 'observe') {
-      appendOpLogEntry(ctx.opsDir, {
+      if (!finalizeRecovered(intent, {
         operation_id: intent.operation_id,
         actor_id: intent.actor_id,
         timestamp: intent.prepared_at,
@@ -626,9 +727,9 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           sequence: intent.result.sequence,
           recovered: true,
         },
-      });
+      })) continue;
     } else {
-      appendOpLogEntry(ctx.opsDir, {
+      if (!finalizeRecovered(intent, {
         operation_id: intent.operation_id,
         actor_id: intent.actor_id,
         timestamp: intent.prepared_at,
@@ -641,7 +742,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           record_hash: intent.expected.record_hash,
           recovered: true,
         },
-      });
+      })) continue;
     }
     committed.add(intent.operation_id);
     completed.push(intent.operation_id);
@@ -650,7 +751,8 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
 
   const orphans: OrphanArtifact[] = [];
   for (const observation of observations) {
-    if (observation.operation_id && !committed.has(observation.operation_id)) {
+    if (observation.operation_id && !committed.has(observation.operation_id)
+      && !staleRejectedIds.has(observation.operation_id)) {
       orphans.push({
         surface: 'l0',
         locator: observation.id,
@@ -661,7 +763,8 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
 
   if (ctx.claimsDir) {
     for (const version of claimVersions) {
-      if (version.operation_id && !committed.has(version.operation_id)) {
+      if (version.operation_id && !committed.has(version.operation_id)
+        && !staleRejectedIds.has(version.operation_id)) {
         orphans.push({
           surface: 'l1',
           locator: `${version.claim_id}@${version.version}`,
@@ -674,7 +777,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
   if (ctx.wikiDir) {
     for (const filePath of markdownFiles(ctx.wikiDir)) {
       const operationId = pageOperationId(filePath);
-      if (!operationId || committed.has(operationId)) continue;
+      if (!operationId || committed.has(operationId) || staleRejectedIds.has(operationId)) continue;
       orphans.push({
         surface: filePath.includes(`${join('', 'tombstones')}/`) ? 'tombstone' : 'l2',
         locator: relative(ctx.wikiDir, filePath),
@@ -697,6 +800,7 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
     intentErrors,
     requiresManualReview: [...manualReview].sort(),
     completed: [...new Set(completed)].sort(),
+    staleEpochRejected: [...staleEpochRejected].sort((a, b) => (a.operation_id < b.operation_id ? -1 : 1)),
     quarantined: [],
     aborted: [...new Set(aborted)].sort(),
   };

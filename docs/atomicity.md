@@ -23,6 +23,10 @@ For an operation carrying an `operation_id`:
 4. Append and sync one canonical operations-log entry last.
 5. Remove the intent.
 
+On a brain that has adopted an ownership arbiter (ADR-0007), a gate is added between steps 3 and
+4, and every intent and operations-log entry carries the ownership epoch that prepared it — see
+"Storage-level fencing" below.
+
 The operation ID and prepared timestamp correlate every artifact. The same ID
 and payload replays the prior result; the same ID with a different payload
 fails with `conflict`.
@@ -69,6 +73,41 @@ position. L1 and L2 recovery verifies exact identities, versions, actor,
 timestamp, and record or content hashes. The canonical operations entry is
 therefore written only when the expected set can be proven.
 
+## Storage-level fencing (ADR-0010)
+
+A boundary check runs before a mutation starts; it cannot see a process paused *inside* one. On a
+brain that has adopted fencing, therefore:
+
+- each intent-backed mutation stamps the ownership epoch that prepared it into the intent
+  (`fence: { epoch, writer_id }`) and into its operations-log entry (`details.fence`);
+- the **commit signal passes an atomic gate**: one immediate SQLite transaction in the brain's own
+  database that re-validates the writer's epoch against the persisted high-water mark
+  (`writer_fence`) and records the authorization (`writer_fence_commits`) before the entry is
+  appended. A writer resuming from an in-mutation pause across a handoff is refused here with the
+  same codes as the boundary guard (`fencing_token_stale` / `fencing_token_missing`), and — because
+  check and record are one transaction — there is no window between "verified current" and
+  "commit authorised";
+- the authorization row also makes the *other* crash window recoverable: a commit that was
+  authorized while its epoch was current is never lost — recovery projects the missing entry.
+
+Dispositions on a fenced brain for an intent-backed set with **no** matching operations entry:
+
+| Persisted state | Disposition |
+|---|---|
+| Gate authorization row present | Project the commit signal (`recovered: true`) and remove the intent — the commit decision happened while the epoch was current. |
+| Stamped epoch ≥ high-water mark | Authorize atomically (re-checked inside the transaction) and finalize as above. |
+| Stamped epoch < high-water mark | **Rejected as a set**: never finalized, never pending, never merged; reported under `staleEpochRejected` (reason, epoch, high-water mark, artifact count). |
+| Intent unstamped, fenced brain | **Rejected as a set** (`unstamped_on_fenced_brain`): the epoch is unknown, so fail closed. |
+| Unfenced brain (high-water mark 0) | The legacy dispositions in the table above, unchanged. |
+
+Rejected artifacts are not deleted — append-only surfaces are not rewritten. "Rejected" means
+classified and never merged: such sets appear in `staleEpochRejected`, not in `orphans` and not in
+the manual-review list. Hosts should surface the field (the pilot exposes its open-time report on
+`/health`); a non-empty `staleEpochRejected` means a writer was paused past its ownership term and
+its half-mutation was refused — no speculative repair is implied. Drain pending operations before
+adopting fencing on an existing brain: an intent prepared without an epoch is
+`unstamped_on_fenced_brain` once the brain has seen a claim.
+
 ## Derived projections
 
 Search indices, recall databases, SQLite caches, and compiled views are
@@ -82,6 +121,9 @@ the same recovery report but does not perform speculative repair.
   retained for manual review.
 - The tested guarantee covers single-process `SIGKILL` and retry recovery. It
   does not establish concurrent multi-writer serialisation.
+- Storage-level fencing (ADR-0010) covers the intent-backed mutation set on
+  brains that adopted it; session bookkeeping and writers without intents are
+  not epoch-gated.
 - File appends and intent files are explicitly synced, but the suite does not
   claim sudden-power-loss guarantees for every filesystem and storage device.
 - This implementation evidence does not by itself establish full
