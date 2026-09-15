@@ -11,6 +11,7 @@
 // `drainCompileQueue` is a host concern over the existing compile primitives.
 
 import type { Observation, Actor } from '../layer0/types.js';
+import { ulid } from 'ulid';
 import { appendObservation, readAll } from '../layer0/log.js';
 import { assignIntegrity } from '../layer0/integrity.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
@@ -189,6 +190,20 @@ export async function handleExpireRetention(
       if (otherEvidence.length > 0) continue;
       const latest = deps.dataDir ? readLatestVersion(deps.dataDir, claim.id) : null;
       if (!latest || latest.state !== 'active') continue;
+      // The forgotten record carries an OperationId the published contract accepts:
+      // `schemas/v0.5.0/claim.schema.json` requires it for every version (active and forgotten),
+      // typed by `common.schema.json#/$defs/OperationId` — `^op_[0-9A-HJKMNP-TV-Z]{26}$`, Crockford
+      // base32 (no I/L/O/U). When the caller supplies none, mint one the way the sibling forget
+      // writers do (`forget.ts`, `forget_scope.ts`, `session.ts`, `dream/phases.ts`): a fresh
+      // `op_<ulid>` per record, valid by construction.
+      //
+      // Deliberately not the payload hash. This line's pre-fix fallback was
+      // `op_${computePayloadHash(...)}` — 67 chars of sha256 hex, which that pattern rejects
+      // (measured on kanban t_0177d9c3: a sweep with no operation_id wrote a forgotten line whose
+      // ONLY schema error was `/operation_id`). A hash buys no idempotency here anyway: the sweep's
+      // replay path is the ops-log lookup gated on `params.operation_id`, and a retry without one is
+      // already idempotent by effect (an already-tombstoned observation is skipped, and a claim whose
+      // latest version is `forgotten` is skipped), so this id has to identify the write, not replay it.
       const forgotten: ForgottenClaimVersion = carryDemotion({
         claim_id: latest.claim_id,
         version: latest.version + 1,
@@ -208,7 +223,7 @@ export async function handleExpireRetention(
         relations: latest.relations,
         created_at: latest.created_at,
         version_at: now,
-        operation_id: params.operation_id ?? `op_${computePayloadHash({ sweep: 'expire', claim: claim.id, seq })}`,
+        operation_id: params.operation_id ?? `op_${ulid()}`,
         actor_id: params.actor.id,
         tags: latest.tags,
         supersedes: latest.version,

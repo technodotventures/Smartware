@@ -35,6 +35,20 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the **retention sweep's OperationId**
+(`wip/smarty/retention-op-id`, kanban `t_0177d9c3`): **534 tests across 74 files**, 31 schema files, no
+schema file changed (the `OperationId` pattern is unchanged). The delta over the entry below is 4 tests
+in one new file (`test/protocol/retention-operation-id.test.ts`), which drives `handleExpireRetention`
+with no caller `operation_id`, reads the `state: "forgotten"` L1 line back off disk, and validates it
+against `schemas/v0.5.0/claim.schema.json`. The sweep's fallback was
+`op_${computePayloadHash({ sweep: 'expire', claim, seq })}` — 67 characters of sha256 hex, which the
+published Crockford-base32 pattern rejects; measured, it was the **only** schema error on that line. It
+is now `op_${ulid()}` per retracted record, the convention the sibling writers already use
+(`forget.ts`, `forget_scope.ts`, `session.ts`, `dream/phases.ts`), and the spec's canonical form is
+`OperationId = op_<ulid>`. A forgotten record carries no `semantic` block, so a swept line now validates
+with zero errors — the active-record `semantic` divergence noted in the entry below is untouched. No
+other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
 (`wip/smarty/l1-legacy-op-id`, kanban `t_85817375`): **530 tests across 73 files**, 31 schema files, no
 schema file changed (the `OperationId` pattern is unchanged). The delta over the baseline below is 6
