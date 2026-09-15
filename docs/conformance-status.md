@@ -35,29 +35,33 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-14 on Node v26.5.1 for the duplicate-claim-identity change
-(`fix/duplicate-claim-recipe`), the demotion-durability fix on top of it
-(`wip/neo/demotion-durability`), and the carry-forward of a demotion through the
-flows that hand-build a version record (`wip/smarty/demotion-handbuilt-records`),
-superseding the 2026-09-10 0.7.0 release-cut baseline (which recorded **446 tests
-across 64 files**): **507 tests across 70 files**, 31 schema files. The delta over
-the parent commit is 6 tests — `test/layer1/demotion-durability.test.ts` (4:
-`REVISE`, `FORGET` → `REVIVE`, endorsement, consolidation), plus one each in
-`test/protocol/forget-scope.test.ts` (offboarding) and
-`test/protocol/retention-expire.test.ts` (expiry) — and the eight
-demotion-durability tests of the parent change are all still green; no other suite
-changed. The retrieval-kernel contract (9/9 scenarios) and the activation contract
-(fails closed) were last measured on the parent revision of this baseline; this
-change touches Layer 1 version records only, not the retrieval kernel or the
-extractor. (CI re-runs the same gate via `npm ci` from `package-lock.json` on Node
-22 and 24, so the two runtime lines are verified by CI rather than by this local
-run.)
+Verified 2026-09-15 on Node v26.5.1 for the **composed identity tree** — the
+duplicate-claim-identity change (`fix/duplicate-claim-recipe` @ `93a7cfd`), both
+demotion-durability fixes on top of it (`wip/neo/demotion-durability` @ `e5f093e`,
+extended by the carry-forward through the flows that hand-build a version record on
+`wip/smarty/demotion-handbuilt-records` @ `3ae8a6b`), and the creation-side identity
+change (F1 of [ADR-0005](adr/0005-protocol-claim-identity.md): `reflect.auto`
+consults fact identity before creating) on one tree, `falsifier/t_e8bd6747` —
+superseding the 2026-09-14 duplicate-claim-identity baseline (which recorded **493
+tests across 69 files**) and the 2026-09-10 0.7.0 release-cut baseline (**446 tests
+across 64 files**): **511 tests across 71 files**, 31 schema files, and the
+public-API smoke passing end to end (12/12 PASS lines, `SMOKE_OUTCOME=pass`). The
+deltas over `93a7cfd` are 18 tests: the demotion-durability fixes (8 in
+`test/layer1/demotion-durability.test.ts` from the parent change — all still green —
+plus 4 more in that file, one in `test/protocol/forget-scope.test.ts` and one in
+`test/protocol/retention-expire.test.ts` from the carry-forward) and F1's 4
+(`test/protocol/reflect-auto-fact-identity.test.ts`); no other suite changed. The
+retrieval-kernel contract (9/9 scenarios) and the activation
+contract (fails closed) were **not re-run** for this tree — it touches no retrieval
+surface — and stand as recorded. (CI re-runs the same gate via `npm ci` from
+`package-lock.json` on Node 22 and 24, so the two runtime lines are verified by CI
+rather than by this local run.)
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **507 tests across 70 files** with no skips.
+- The standalone suite passes **511 tests across 71 files** with no skips.
 - The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
   claim write-path identity contract documented in the integration guide §1e:
   `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
@@ -77,16 +81,27 @@ run.)
   hand-build a version record). The same 6 fixtures as the
   host-side pilot reference implementation are reproduced 1:1, so the pilot's
   deterministic suite remains a valid cross-check.
-- The same suite pins the **known divergence between that write-path identity and
-  the pre-existing structured claim fingerprint** (`computeStructuredClaimFingerprint`,
+- The same suite pins the **crossing between that write-path identity and the
+  structured claim fingerprint** (`computeStructuredClaimFingerprint`,
   `reflect.auto` idempotency, spec §193/§238) in both measured directions: two
   active rows differing only in `claim_type` are one fact to the write path and two
   to the fingerprint, while two rows differing only in text case are the reverse.
-  The divergence is recorded, unreconciled, with a reversal trigger in
-  [ADR-0003](adr/0003-claim-fact-identity.md) → *Known divergence*; reconciliation
-  needs owner sign-off. Re-closing it silently fails the suite (measured: dropping
-  `claim_type` from the fingerprint fails 1 test, case-folding a text value in
-  `normaliseValue` fails 3, making fact identity depend on `claim_type` fails 1).
+  The relationship is decided in [ADR-0005](adr/0005-protocol-claim-identity.md)
+  (one fact-identity predicate, `claim_type` excluded; the fingerprint is the
+  autonomous-creation key only), with a reversal trigger in
+  [ADR-0003](adr/0003-claim-fact-identity.md) → *Known divergence*. Re-closing the
+  crossing silently fails the suite (measured: dropping `claim_type` from the
+  fingerprint fails 1 test, case-folding a text value in `normaliseValue` fails 3,
+  making fact identity depend on `claim_type` fails 1).
+- `test/protocol/reflect-auto-fact-identity.test.ts` (4 tests) pins F1 of ADR-0005
+  on the in-repo protocol surface: a host-held fact restated by an autonomous
+  observation **under another classification** gets corroboration (`derived_from`
+  extended, one active claim, recall answers once, receipt records the decision)
+  instead of a second claim; a protected (`epistemic_owner: user`) claim is neither
+  corroborated nor duplicated; the matching-classification control still converges
+  through the fingerprint key; and creation is unchanged when no claim holds the
+  fact. RED-first evidence: against pre-fix `src/` the suite reports
+  `Tests 2 failed | 2 passed (4)`, after the change `4 passed`.
 - `npm run verify:saas` (public-API smoke) exercises the same contract end to end
   against the packaged surface: a store seeded with two active claims for one fact
   answers **2** recall results for that fact and **1** after
@@ -179,12 +194,15 @@ The exact ordering and recovery state table are documented in
   guarantee.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts
   remain available for manual review.
-- Duplicate-claim convergence is **host-triggered**, not automatic: an existing
+- Duplicate-claim convergence is **write-triggered**, not automatic: an existing
   store keeps two active claims for one fact until a write touching that fact
   resolves them or the host sweeps the scope (`ClaimStore.findActiveFactMatches`
   + `resolveFactMatches`, integration guide §1e). Identity is
   `(subject, predicate, scope, object value)` — the same fact asserted in two
-  different scopes is never merged.
+  different scopes is never merged. The autonomous path **no longer creates** such
+  a duplicate for a fact the store already holds (`reflect.auto` consults fact
+  identity before creating and attaches corroboration instead — F1 of ADR-0005),
+  but it does not retro-repair a store that already holds one.
 - The demotion is durable **from the version that records it** — a compile-path
   row sync and a canonical replay both reconstruct it from the claim's canonical
   version records — and **every flow that hand-builds a claim's next version
@@ -202,16 +220,18 @@ The exact ordering and recovery state table are documented in
   — the fact is then audit-visible only. Reasoning and the rejected alternatives:
   [ADR-0003](adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built
   version records*.
-- **Two identity rules over the claim table are unreconciled.** The write-path
-  identity above governs the host write path; the autonomous-creation path
-  (`reflect.auto`) is idempotent on the structured claim fingerprint instead
-  (`claim_type` included, text lowercased), and `insertClaim` stamps that
-  fingerprint on every claim when the store has a `data_dir`. A host running both
-  surfaces over one store can therefore end up with a duplicate the write path would
-  have merged, or a merge the compile path does not see. Recorded with the measured
-  cases and a reversal trigger in
-  [ADR-0003](adr/0003-claim-fact-identity.md) → *Known divergence*; reconciling the
-  two is protocol identity semantics and needs owner sign-off.
+- **Two keys over the claim table, one fact-identity predicate.** The write-path
+  identity above is the fact-identity predicate (`claim_type` excluded); the
+  structured claim fingerprint (`claim_type` included, text lowercased) is the
+  autonomous-creation key and answers a different question — it must not be read as
+  a fact verdict, and the two relations cross in both directions (two active rows
+  differing only in `claim_type` are one fact and two fingerprints; two rows
+  differing only in text case are the reverse — the second direction is unchanged).
+  The relationship is decided in
+  [ADR-0005](adr/0005-protocol-claim-identity.md) with measured cases and limits;
+  the write-path contract stands in
+  [ADR-0003](adr/0003-claim-fact-identity.md). "The library has one notion of a
+  fact" remains false and must stay unwritten.
 - The suite does not prove concurrent multi-writer serialization or universal
   sudden-power-loss durability.
 - REFLECT page output and search databases are rerunnable projections rather
