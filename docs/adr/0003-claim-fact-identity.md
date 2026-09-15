@@ -7,11 +7,17 @@
   **Amended again 2026-09-14** (`t_742e31f9`): the demotion's durability is extended to every flow
   that hand-builds a version record — preserved by all of them, reported on `REVISE`
   (*Carry-forward across hand-built version records*).
+  **Amended 2026-09-15** (`t_1db21462`, owner directive on the card: "proceed with the
+  `repick_survivor` REVISE param recommendation, record in ADR, implement"): the demotion gains its
+  release vocabulary — a user-only `REVISE` **re-pick** that releases the duplicate and demotes the
+  current active copy, atomically (*Releasing a demotion*).
 - **Deciders:** @smarty-pants (protocol stewardship / research). No owner sign-off gate for the
   **additive SDK surface** itself — no protocol invariant, schema, cryptography, or authority-table
   change. The disposition in *Known divergence* (leaving the pre-existing fingerprint rule
   unreconciled) is a deliberate deferral: **reconciling the two rules is protocol identity semantics
-  and needs owner sign-off.** No published contract is widened here.
+  and needs owner sign-off.** No published contract is widened here. The `repick_survivor` surface
+  (2026-09-15) is owner-directed protocol surface, specified before it was built and reviewed as a
+  PR-style glance rather than a blocking gate.
 - **Supersedes:** —
 
 ## Context
@@ -109,10 +115,12 @@ every materialisation derives `status` purely from the record, touching a demote
 them silently released the demotion in live **and** replayed state. This subsection decides the
 semantics per flow and removes the boundary.
 
-**Decision: every flow preserves the demotion. Nothing in beta releases it, and no flow reverses it
-silently.** A user act that touches a demoted claim is recorded *and reported*, so that the mirror
-failure mode — an act that appears to succeed while the claim stays out of recall — is not silent
-either.
+**Decision: every flow preserves the demotion. Nothing in beta releases it implicitly, and no flow
+reverses it silently.** A user act that touches a demoted claim is recorded *and reported*, so that
+the mirror failure mode — an act that appears to succeed while the claim stays out of recall — is not
+silent either. (The one *explicit* release — a user re-pick — was added the next day by
+`t_1db21462`; see *Releasing a demotion* below. It is a new act, not a revision of this rule: every
+flow below still preserves the demotion whenever it is not that act.)
 
 | Flow | Site | Disposition |
 | --- | --- | --- |
@@ -156,8 +164,9 @@ Alternatives considered and rejected:
   adjudication of an auditable claim (confidence, epistemic tag, relations, `add_derived_from`,
   protection) and still could not give the user what they asked for, because the survivor *is* the
   claim for that fact. Reporting is the honest version of the same information.
-- **Add the un-supersede vocabulary now.** Deferred — new protocol surface, owner sign-off required.
-  See *Remaining limit* below, which also names the shape that vocabulary should take.
+- **Add the un-supersede vocabulary now.** Deferred in this card — new protocol surface, owner
+  sign-off required. **Shipped 2026-09-15 as `repick_survivor`**, on owner directive; see *Releasing
+  a demotion* below for the shape and why it is a re-pick rather than an un-supersede.
 
 Evidence: `test/layer1/demotion-durability.test.ts` (REVISE, FORGET→REVIVE, ENDORSE, CONSOLIDATE —
 each asserting the record, the derived row, the recall-eligible set and a canonical replay),
@@ -175,17 +184,88 @@ re-issuing it under a fresh `operation_id` resolves it.
 **Remaining limit (recorded, not fixed here).** Two consequences of the decision are worth stating
 plainly, because a reader could otherwise assume the substrate can do something it cannot:
 
-- **Beta has no way to release a mechanical demotion.** `invalidate_relations` releases an *admitted*
-  `supersedes`/`corrects` edge; a mechanical demotion is deliberately not an edge, so there is no
-  relation to withdraw. If the survivor is itself later forgotten, the fact leaves default recall
-  entirely (the duplicate stays demoted and audit-visible). The useful vocabulary is probably not
-  "un-supersede the loser" — after which the next §1e write would re-demote it — but a user-only
-  **re-pick the survivor** act that demotes the other copy. Owner decision, new protocol surface.
+- **Releasing a mechanical demotion is now a user-only re-pick (`repick_survivor`).** Shipped
+  2026-09-15 (`t_1db21462`, protocol v0.5.0) — see *Releasing a demotion* below. `invalidate_relations`
+  still cannot release one (the demotion is deliberately not an edge, so there is no relation to
+  withdraw); the re-pick is the vocabulary, and it works in both swap mode (the survivor is active) and
+  rescue mode (the survivor is already forgotten — the fact returns from audit-only visibility).
 - **`FingerprintIndex.activeByFingerprint` filters on `state`, not on the demotion**, so a demoted
   claim can be the fingerprint holder `reflect.auto` folds a restatement into. Measured
   (`t_01ef0ede` step 2): recall stays at 1 after an autonomous restatement — correct — but the added
   evidence lands on the copy that is out of recall. Reconciling that is the fingerprint/write-path
   identity divergence (*Known divergence*, owner-gated `t_15bb0cd0`), not a carry-forward defect.
+
+### Releasing a demotion — the user re-pick (added 2026-09-15 · kanban `t_1db21462`)
+
+The subsection above left a deliberate gap: every flow preserves a mechanical demotion, and nothing
+releases it. The consequence that hurts: a user who believes the *duplicate* is the copy that should
+surface has no path, and if the survivor is later forgotten the fact leaves default recall entirely
+(the duplicate stays demoted, audit-visible only). This subsection closes the gap — on owner directive
+("proceed with the `repick_survivor` REVISE param recommendation, record in ADR, implement") — and
+records the shape that ships.
+
+**Decision: a user-only `REVISE` re-pick — `repick_survivor: true` on the claim-admission form —
+releases the demoted duplicate and demotes the fact's current active copy, in one atomic commit.**
+
+The act and its semantics (protocol v0.5.0; spec §9):
+
+- **The target is the demoted duplicate.** `REVISE { target: claim_<B>, expected_base_version: <n>,
+  repick_survivor: true, reason, operation_id, actor_id: user:<slug> }`. If the target's latest version
+  carries no `superseded_by`, there is nothing to re-pick and the call is rejected (`not_demoted`, the
+  mirror of `REVIVE`'s `not_forgotten`) — nothing is written.
+- **The release.** A new active version of the duplicate with `superseded_by`/`superseded_at` cleared,
+  `epistemic_owner: user` (a re-pick is an epistemic adjudication), and the audit-only
+  `reinstated_by: 'user'`. The body is not adopted and no confidence/tag value changes.
+- **The demotion.** The current active copy (or copies — a store that predates §1e convergence can
+  hold more than one) gets a new version with `superseded_by: <released claim>` and the warrant
+  `superseded_by_origin: 'user'` (absent on mechanical demotions). Exactly one copy of the fact stays
+  recall-eligible.
+- **The channel is mechanical, deliberately.** The demotion records `status: superseded`; it does
+  **not** admit a `supersedes` edge. No effective-current cycle check, no `invalidate_relations`
+  interaction, no second identity rule involved. This is the load-bearing simplification: an admitted
+  edge would leave the demoted copy `status: active`, so `findActiveFactMatches` would still return it
+  and the next §1e write would re-demote the released claim.
+- **Stability is by invariant, not by warrant.** Because the *other* copy is demoted outright, the next
+  §1e write finds only the released claim and corroborates it. The `origin: 'user'` warrant is audit,
+  not machinery. (The alternative — release the loser and leave both active — was measured unstable in
+  `t_30732060`: `[S] → [S,D] → [S] → [S,D] → [S]`.)
+- **Rescue mode.** The re-pick is not gated on the survivor being active: if the survivor is already
+  forgotten, the release happens alone (`demoted: []`). The active copy is resolved through
+  `findActiveFactMatches` on the target's own fact — never from the target's possibly-stale
+  `superseded_by` pointer — so a second re-pick over the same fact composes: it targets the copy the
+  first one demoted.
+- **Atomicity.** One commit, one `operation_id`, two version records appended in one
+  `appendClaimVersions` call — release first, so a torn write can only degrade to the pre-op state
+  (two active copies, which the next §1e write converges), never to a fact with no recall-eligible
+  copy. The durable intent names every artifact; recovery finalises when the set is complete and fails
+  closed to manual review when it is not.
+- **Beta limits (deliberate).** `repick_survivor` is the operation's *only* action in beta — schema and
+  handler both reject combining it with the metadata actions, because a combined commit would mix two
+  mutation kinds under one warrant whose interaction is unspecified. And the demotion is still not an
+  admitted edge, so `invalidate_relations` neither touches nor undoes it; re-picking back is done by
+  re-picking against the copy now demoted.
+
+Rejected alternatives:
+
+- **A sixth verb.** The five-verb surface is frozen; re-picking is a user epistemic adjudication, and
+  `REVISE` already is the user-only verb with the version-pinned, crash-safe path.
+- **A bare release ("un-supersede the loser").** Unstable — measured, above.
+- **A `supersedes` edge from the released claim.** Leaves the demoted copy `status: active`, so the
+  next §1e write re-demotes the release, and it entangles the mechanical channel with effective-current
+  and acyclicity.
+- **An `origin` on `invalidate_relations`.** There is no `relation_id` to withdraw: the mechanical
+  demotion is deliberately not an edge.
+
+Evidence: `test/protocol/repick-survivor.test.ts` (swap, stability, rescue, multi-copy demotion, the
+two rejections, the two crash legs and the torn-set fail-closed case), the schema fixtures in
+`test/schemas-v0.5.0.test.ts`, and the gate recorded on the card (tsc clean · 519/519 vitest / 71 files
+· 31 schemas · `SMOKE_OUTCOME=pass`).
+
+**Record envelope (additive).** Two optional fields on the claim version record:
+`superseded_by_origin?: 'user'` (the warrant on a demotion) and `reinstated_by?: 'user'` (audit-only
+marker on a release). `schemas/v0.5.0/claim.schema.json` now enumerates both, together with the two
+pre-existing demotion fields (`superseded_by`/`superseded_at`) it had been missing since they shipped —
+additive optional fields only, so no record written before this change stops validating.
 
 ## Consequences
 

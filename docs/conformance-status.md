@@ -35,6 +35,15 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the mechanical demotion's **release** vocabulary —
+`REVISE` with `repick_survivor` (`wip/neo/repick-survivor`, kanban `t_1db21462`, ADR-0003 →
+*Releasing a demotion*): **519 tests across 71 files**, 31 schema files. The delta over the
+2026-09-14 baseline below is 12 tests — `test/protocol/repick-survivor.test.ts` (11: swap,
+stability, rescue, multi-copy demotion, the two rejections, the two crash legs, the torn-set
+fail-closed case, plus rebuild-equivalence assertions) and one schema fixture group in
+`test/schemas-v0.5.0.test.ts` (the `repick_survivor` form and the demotion record fields) — and no
+other suite changed.
+
 Verified 2026-09-14 on Node v26.5.1 for the duplicate-claim-identity change
 (`fix/duplicate-claim-recipe`), the demotion-durability fix on top of it
 (`wip/neo/demotion-durability`), and the carry-forward of a demotion through the
@@ -57,7 +66,7 @@ run.)
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **507 tests across 70 files** with no skips.
+- The standalone suite passes **519 tests across 71 files** with no skips.
 - The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
   claim write-path identity contract documented in the integration guide §1e:
   `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
@@ -155,7 +164,10 @@ and user-facing authorization against the exact Smartware version they ship.
 
 Operation-ID-backed OBSERVE, REVISE, FORGET, REVIVE, ENDORSE, automatic
 REFLECT, and FORGET.SCOPE claim writes persist a content-free expected-artifact
-intent before canonical mutation.
+intent before canonical mutation. (A `REVISE` re-pick commits **two** version
+records — the release and the demotion(s) — as one exact artifact set: the
+records land in one append, and recovery commits only when every named artifact
+is present.)
 
 Startup recovery:
 
@@ -191,17 +203,19 @@ The exact ordering and recovery state table are documented in
   record carries it forward**: user `REVISE` (whose result reports `superseded_by`,
   because a revise changes metadata and not the asserted fact), the `FORGET`
   tombstone, `REVIVE`'s restore from the snapshot, the endorsement cascade,
-  consolidation's input tombstones, scope offboarding and retention expiry. Two
-  limits remain. A demotion written before this fix was projection-only and is not
-  reconstructible from canonical data. And **nothing in beta releases a mechanical
-  demotion**: `invalidate_relations` withdraws an *admitted* `supersedes`/`corrects`
-  edge, and the mechanical demotion is deliberately not an edge, so the vocabulary
-  needed is a new, explicitly user-only **re-pick the survivor** act (un-superseding
-  the loser would be re-demoted by the next write touching that fact). Until it
-  ships, a demoted duplicate stays demoted even if the survivor is later forgotten
-  — the fact is then audit-visible only. Reasoning and the rejected alternatives:
+  consolidation's input tombstones, scope offboarding and retention expiry. One
+  limit remains: a demotion written before this fix was projection-only and is not
+  reconstructible from canonical data. **Releasing a demotion is a user-only
+  re-pick** — `REVISE` with `repick_survivor: true` on the demoted duplicate
+  (protocol v0.5.0, shipped 2026-09-15): one atomic commit releases the duplicate
+  and demotes the fact's current active copy with a `superseded_by_origin: 'user'`
+  warrant, so exactly one copy stays recall-eligible. It works in swap mode (the
+  survivor is active) and rescue mode (the survivor is already forgotten — the
+  fact returns from audit-only visibility). `invalidate_relations` still cannot
+  release one (the demotion is deliberately not an edge); a bare release remains
+  unstable and is rejected as a design. Reasoning and the rejected alternatives:
   [ADR-0003](adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built
-  version records*.
+  version records* and *Releasing a demotion*.
 - **Two identity rules over the claim table are unreconciled.** The write-path
   identity above governs the host write path; the autonomous-creation path
   (`reflect.auto`) is idempotent on the structured claim fingerprint instead

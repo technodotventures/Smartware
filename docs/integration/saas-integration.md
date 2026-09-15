@@ -203,8 +203,8 @@ survivor order — so `matches[0]` is the survivor even if you only need the id.
   user `REVISE` (whose result reports `superseded_by`, because the revision changes metadata and not
   the asserted fact — so the claim stays out of the recall-eligible set), `FORGET`'s tombstone,
   `REVIVE`'s restore, the endorsement cascade, consolidation's input tombstones, scope offboarding
-  and retention expiry. Nothing in beta *releases* a mechanical demotion; §10 names the boundary that
-  remains.
+  and retention expiry. **Releasing** one is the deliberate user act described in §10 — a `REVISE`
+  **re-pick** — never a side effect of those flows.
 - **The decision is reported.** `ambiguous_matches` and `superseded_claims` come back to the caller
   instead of a choice being made silently.
 
@@ -519,7 +519,7 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 501 tests / 70 files, no skips. The Coffee-specific suites:
+- `npm test` — 519 tests / 71 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
@@ -529,11 +529,16 @@ on the exact version you ship:
   every duplicate found, earliest-minted survivor in both insertion orders,
   evidence unioned, losers demoted not deleted, sweep without a new observation —
   plus 3 tests pinning the *known divergence* from `computeStructuredClaimFingerprint`
-  recorded in ADR-0003), and
+  recorded in ADR-0003),
   `test/layer1/demotion-durability.test.ts` (8 tests: the §1e demotion is recorded
   in canonical version records and reconstructed by a compile-path row sync and a
   full canonical replay; live and replayed projections agree on the recall-eligible
-  set).
+  set), and
+  `test/protocol/repick-survivor.test.ts` (11 tests: the user re-pick releases the
+  duplicate and demotes the survivor in one atomic commit — swap, stability under
+  the next §1e write, rescue after a forgotten survivor, multi-copy demotion, the
+  rejections, both crash legs and the torn-set fail-closed case — with the
+  rebuild-equivalence assertions).
 - `npm run verify:saas` — public-API smoke on the packaged surface, including the
   §1e duplicate contract end to end: 2 recall results for one fact → 1 after
   resolution, duplicate superseded with its evidence unioned.
@@ -569,13 +574,20 @@ on the exact version you ship:
   and not the asserted fact), the `FORGET` tombstone, `REVIVE`'s restore from the snapshot, the
   endorsement cascade, consolidation's input tombstones, scope offboarding and retention expiry. So
   a claim demoted as a duplicate stays out of the recall-eligible set through all of them, including
-  a later `REVIVE`. **Releasing** a mechanical demotion needs a new, explicitly user-only vocabulary
-  ("re-pick the survivor" — the loser cannot win, because the next write touching that fact would
-  re-demote it); until it ships, a demoted duplicate also stays demoted if the survivor is itself
-  forgotten, and the fact is then audit-visible only. Reasoning:
-  [`ADR-0003`](../adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built version
-  records*. Pinned by `test/layer1/demotion-durability.test.ts` plus the FORGET.SCOPE and retention
-  suites.
+  a later `REVIVE`.
+- **Releasing a mechanical demotion is a user-only re-pick** — `smartware_revise` with
+  `repick_survivor: true` on the demoted duplicate (protocol v0.5.0): one atomic commit releases the
+  duplicate and demotes the fact's current active copy with a `superseded_by_origin: 'user'`
+  warrant, so exactly one copy stays recall-eligible. It works in **swap** mode (the survivor is
+  still active) and in **rescue** mode (the survivor was already forgotten — the fact returns from
+  audit-only visibility, `demoted: []`). In beta it is the operation's *only* action — the schema
+  and the handler both reject combining it with the metadata actions — and it deliberately does not
+  admit a `supersedes` edge, so `invalidate_relations` neither touches nor undoes it. A bare release
+  ("un-supersede the loser", leaving both copies active) is rejected as a design: the next write
+  touching that fact re-demotes the earliest-minted copy, measurably. Reasoning:
+  [`ADR-0003`](../adr/0003-claim-fact-identity.md) → *Releasing a demotion*. Pinned by
+  `test/protocol/repick-survivor.test.ts`, `test/layer1/demotion-durability.test.ts` plus the
+  FORGET.SCOPE and retention suites.
 - Passing schemas + behavioral invariants is **not** exhaustive
   requirement-by-requirement conformance to Specification v1.6.16.
 

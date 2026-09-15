@@ -122,6 +122,11 @@
           "type": "boolean",
           "default": false
         },
+        "repick_survivor": {
+          "type": "boolean",
+          "default": false,
+          "description": "User-only re-pick of which copy of one fact survives (protocol v0.5.0). The target must be a demoted duplicate; the operation atomically releases it and demotes the fact's current active copy, recording superseded_by_origin: user. In beta it is the operation's only action."
+        },
         "reason": {
           "type": "string",
           "minLength": 1
@@ -168,6 +173,71 @@
           "required": [
             "adopt_body"
           ]
+        },
+        {
+          "properties": {
+            "repick_survivor": {
+              "const": true
+            }
+          },
+          "required": [
+            "repick_survivor"
+          ]
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "repick_survivor": {
+                "const": true
+              }
+            },
+            "required": [
+              "repick_survivor"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "add_relations"
+                  ]
+                },
+                {
+                  "required": [
+                    "set_confidence"
+                  ]
+                },
+                {
+                  "required": [
+                    "set_epistemic_tag"
+                  ]
+                },
+                {
+                  "required": [
+                    "add_derived_from"
+                  ]
+                },
+                {
+                  "required": [
+                    "invalidate_relations"
+                  ]
+                },
+                {
+                  "properties": {
+                    "adopt_body": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "adopt_body"
+                  ]
+                }
+              ]
+            }
+          }
         }
       ],
       "additionalProperties": false
