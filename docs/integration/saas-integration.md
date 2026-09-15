@@ -208,27 +208,37 @@ published package surface. The rule and the reasoning behind it are recorded in
 
 **Which surface this rule governs — read this if you also run the compile path.** The identity above
 is the rule for **the host write path**: the moment you decide whether an extracted fact restates a
-claim you already hold. Smartware carries a **second, different identity rule over the same `claims`
-rows**: the structured claim fingerprint
+claim you already hold. Smartware carries a **second, different key over the same `claims` rows**:
+the structured claim fingerprint
 (`computeStructuredClaimFingerprint` — `subject_name`, `predicate`, `object`, `scope` **and**
-`claim_type`), which `reflect.auto` uses for autonomous-creation idempotency (spec §193/§238). The
-two are **not reconciled**, and they disagree in both measured directions:
+`claim_type`), which `reflect.auto` uses for autonomous-creation idempotency (spec §193/§238). It is
+a *creation key*, not a fact verdict: the two rules still disagree in both measured directions, so
+do not read one as evidence about the other.
 
 - Two active rows asserting one fact that differ only in `claim_type` (say `'preference'` vs
-  `'finding'`) have **different** fingerprints — two claims to the compile path — while
+  `'finding'`) have **different** fingerprints and **the same** fact identity —
   `findActiveFactMatches` returns **2** and resolves them into one. A host that leaves `claim_type`
-  unset hits this: `reflect.auto` defaults it to `'hypothesis'`, `ClaimStore` to `'finding'`.
+  unset lives here: `reflect.auto` defaults it to `'hypothesis'`, `ClaimStore` to `'finding'`.
 - Two rows whose text values differ only in case (`'Quarterly'` vs `'quarterly'`) have the **same**
-  fingerprint — one claim to the compile path — while fact identity keeps them apart (it does not
-  case-fold a `text` value).
+  fingerprint and **different** fact identities (fact identity does not case-fold a `text` value) —
+  one claim to a Rule-B consumer, two facts to the write path.
 
-So a host running both surfaces can end up with a duplicate the write path would have merged, or a
-demotion the compile path does not see. Nothing is silently wrong — `resolveFactMatches` reports what
-it merged — but do not build policy on the assumption that the two identity rules agree. The
-divergence, its measured cases and its reversal trigger are recorded in
-[ADR-0003](../adr/0003-claim-fact-identity.md) → *Known divergence*, and pinned by tests
-(`test/layer1/fact-identity.test.ts`); reconciliation is an open owner decision. The §1e sweep below
-converges duplicates whichever path minted them.
+**The creation path no longer mints that twin.** Before creating a claim, the autonomous path
+(`reflect.auto`) consults fact identity: when the store already holds the fact as an active claim it
+attaches the observation as corroboration (extending `derived_from`) instead of creating a second
+one — same protection rule as above, and against a protected (`epistemic_owner: user`) claim it
+writes nothing at all. That closes the *creation* path: it does not retro-repair a store that
+already holds duplicates (the §1e sweep above converges those), and it does not make the two rules
+one rule.
+
+So a host running both surfaces must not assume the two agree: a Rule-B consumer can report
+differently from the write path on the same rows, and duplicates that predate the creation-side fix
+stay until a §1e write or sweep converges them. Nothing is silently wrong — `resolveFactMatches`
+reports what it merged — but do not build policy on the assumption that one key answers both
+questions. The relationship, its measured cases, its limits and its reversal trigger are recorded
+in [ADR-0005](../adr/0005-protocol-claim-identity.md); the write-path contract itself stays
+[ADR-0003](../adr/0003-claim-fact-identity.md). Both are pinned by tests
+(`test/layer1/fact-identity.test.ts`, `test/protocol/reflect-auto-fact-identity.test.ts`).
 
 **Do not do this** — it is what this guide used to teach:
 
@@ -481,7 +491,7 @@ await memory.forgetScope({
 npm ci
 npm run build        # tsc → dist/
 npm run verify:schemas
-npm test             # 493 tests across 69 files, no skips
+npm test             # 497 tests across 70 files, no skips
 npm pack             # → smartware-0.7.0.tgz
 ```
 
@@ -511,17 +521,21 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 493 tests / 69 files, no skips. The Coffee-specific suites:
+- `npm test` — 497 tests / 70 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
   indexes, erasure vs offboarding semantics, provenance integrity),
-  `test/render/provenance-rendering.test.ts` (33 exact-string tests), and
+  `test/render/provenance-rendering.test.ts` (33 exact-string tests),
   `test/layer1/fact-identity.test.ts` (22 tests: the §1e identity contract —
   every duplicate found, earliest-minted survivor in both insertion orders,
   evidence unioned, losers demoted not deleted, sweep without a new observation —
-  plus 3 tests pinning the *known divergence* from `computeStructuredClaimFingerprint`
-  recorded in ADR-0003).
+  plus 3 tests pinning the *crossing* between fact identity and
+  `computeStructuredClaimFingerprint`, decided in ADR-0005), and
+  `test/protocol/reflect-auto-fact-identity.test.ts` (4 tests: the autonomous path
+  consults fact identity before creating — corroboration instead of a duplicate,
+  protection respected, the fingerprint control, and creation unchanged when no
+  claim holds the fact).
 - `npm run verify:saas` — public-API smoke on the packaged surface, including the
   §1e duplicate contract end to end: 2 recall results for one fact → 1 after
   resolution, duplicate superseded with its evidence unioned.
@@ -545,11 +559,13 @@ on the exact version you ship:
 - Automatic quarantine is not implemented; ambiguous append-only artifacts
   remain available for manual review.
 - Duplicate-claim convergence is a **write-path or sweep** action, not a background
-  guarantee: a store that already holds two active claims for one fact keeps both
-  until a write touching that fact runs `resolveFactMatches`, or a host sweeps the
-  scope (`§1e`). Identity is `(subject, predicate, scope, object value)` — two rows
-  asserting the same fact in **different scopes** are never merged, so scope
-  isolation always wins over deduplication.
+  guarantee. The autonomous path no longer mints a claim for a fact the store already
+  holds (it attaches corroboration — `§1e`), but a store that **already** holds two
+  active claims for one fact keeps both until a write touching that fact runs
+  `resolveFactMatches`, or a host sweeps the scope (`§1e`). Identity is
+  `(subject, predicate, scope, object value)` — two rows asserting the same fact in
+  **different scopes** are never merged, so scope isolation always wins over
+  deduplication.
 - Passing schemas + behavioral invariants is **not** exhaustive
   requirement-by-requirement conformance to Specification v1.6.16.
 
@@ -575,6 +591,7 @@ Two host-triggered lifecycle surfaces, both owner/staff-gated and receipt-backed
 
 - Specification v1.6.16: `docs/spec/smartware-spec-v1.6.16.md`
 - Claim fact identity (ADR-0003): `docs/adr/0003-claim-fact-identity.md`
+- Protocol claim identity vs the autonomous-creation key (ADR-0005): `docs/adr/0005-protocol-claim-identity.md`
 - Protocol v0.5.0: `docs/protocol/smartware-protocol-v0.5.0.md` (v0.4.2 retained)
 - Schemas v0.5.0: `schemas/v0.5.0/`
 - Config-shape proof: `scripts/verify-config-shape.mjs`
