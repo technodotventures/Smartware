@@ -421,4 +421,83 @@ describe('expireRetention OperationId payload identity', () => {
     expect(readLatestVersion(dataDir, other.claimId)?.state).toBe('active');
     expect(opsEntries().count).toBe(1);
   });
+
+  // ------------------------------------------------------------------------------------------
+  // An OperationId is owned globally, not per verb (reviewer finding on t_06db00ce, §7 F1, carded
+  // t_598278eb and measured on c39e1cf). The lookup filtered `op === 'retention.expire'` *before* it
+  // matched payload identity, so an id a host had already spent on a different op was invisible to
+  // the sweep: the sweep ran anyway, tombstoned the elapsed observation, retracted the claim, and
+  // appended a second ops entry under the id the host had used for the observe. `observe`, `forget`,
+  // `forget.scope` and `reflect` select on the id alone and check `op` as part of the match, so every
+  // sibling writer already treats a cross-op reuse as `conflict`. One id identifying two operations in
+  // the append-only log is the audit-trail defect class: "did this actually happen" stops being
+  // answerable from the log.
+  // ------------------------------------------------------------------------------------------
+
+  it('returns conflict when the id was already consumed by a different op — and sweeps nothing', async () => {
+    const c = await openBothScopes();
+    const acme = await seedExpiredClaim(ACME, 'Acme prefers email');
+
+    // The ordinary way an id gets spent: one accepted observation committed under OP_2.
+    await c.observe({
+      actor: OWNER, type: 'message', content: { format: 'text/plain', body: 'Acme called' },
+      scope: ACME, observed_at: OLD, operation_id: OP_2,
+    });
+    expect(opsEntries().count).toBe(1);
+
+    // Pre-fix this returned { observations_expired: 1, claims_retracted: 1 } for the same id and the
+    // ops log ended up with TWO operations under OP_2.
+    await expect(
+      c.expireRetention({ actor: OWNER, scope: ACME, as_of: AS_OF, operation_id: OP_2 }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+
+    // The requested scope is left exactly as found: no tombstone, no retraction, no second ops entry.
+    expect(c.readObservationEvidence({ actor: OWNER, observation_id: acme.obsId })?.status).toBe('accepted');
+    expect(readLatestVersion(dataDir, acme.claimId)?.state).toBe('active');
+    const { count, details } = opsEntries();
+    expect(count).toBe(1);
+    expect(details[0]?.['observations_expired']).toBeUndefined();
+  });
+
+  it('a non-sweep entry under this id conflicts even when its details satisfy the legacy fallback', async () => {
+    const c = await openBothScopes();
+    const acme = await seedExpiredClaim(ACME, 'Acme prefers email');
+
+    // Legacy shape: no `payload_hash`, written by a DIFFERENT op, carrying the same `scope` and
+    // `as_of` the sweep call supplies. The scope/as_of fallback exists for pre-identity *sweep*
+    // entries only, so it must not be reachable for another verb's entry under the same id.
+    appendOpLogEntry(path.join(dataDir, 'operations'), {
+      operation_id: OP_1,
+      actor_id: 'user:owner',
+      timestamp: new Date().toISOString(),
+      op: 'observe',
+      details: { scope: ACME, as_of: AS_OF },
+    });
+
+    await expect(
+      c.expireRetention({ actor: OWNER, scope: ACME, as_of: AS_OF, operation_id: OP_1 }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+
+    expect(c.readObservationEvidence({ actor: OWNER, observation_id: acme.obsId })?.status).toBe('accepted');
+    expect(readLatestVersion(dataDir, acme.claimId)?.state).toBe('active');
+    expect(opsEntries().count).toBe(1);
+  });
+
+  it('the reverse direction stays guarded: a swept id cannot then be spent on an observe', async () => {
+    const c = await openBothScopes();
+    await seedExpiredClaim(ACME, 'Acme prefers email');
+    const swept = await c.expireRetention({ actor: OWNER, scope: ACME, as_of: AS_OF, operation_id: OP_1 });
+    expect(swept).toMatchObject({ observations_expired: 1, claims_retracted: 1 });
+
+    // Control: this half of the invariant was already true before the sweep's lookup was aligned
+    // with it (`observe` filters on the id alone), so a fix that only touched the sweep must not
+    // regress it.
+    await expect(
+      c.observe({
+        actor: OWNER, type: 'message', content: { format: 'text/plain', body: 'late note' },
+        scope: ACME, observed_at: OLD, operation_id: OP_1,
+      }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    expect(opsEntries().count).toBe(1);
+  });
 });

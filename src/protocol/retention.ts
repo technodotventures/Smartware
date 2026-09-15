@@ -186,12 +186,21 @@ export async function handleExpireRetention(
   // key: keyed on the id alone, a host reusing one id across scopes (or retrying with a corrected
   // `as_of`) was handed the *other* sweep's counts under the requested scope's name while the
   // requested scope was never swept, and nothing in the result said so.
+  //
+  // An OperationId is owned globally, not per verb: the lookup selects on the id alone and requires
+  // `op === 'retention.expire'` *inside* the payload match, exactly as `observe`, `forget`,
+  // `forget.scope` and `reflect` do. Filtering the id down to this verb first made the sweep blind to
+  // an id a host had already spent on another op, so the sweep re-used it and the append-only log
+  // ended up with two operations under one id — the audit-trail defect class this invariant exists to
+  // prevent. A legacy entry written under this id by another op fails the op check rather than falling
+  // through to the scope/`as_of` fallback below, which describes pre-identity *sweep* entries only.
   const payloadHash = sweepPayloadHash(params, operationActorId);
   if (params.operation_id) {
     const priorEntries = [...readAllOpLogEntries(deps.opsDir)]
-      .filter(entry => entry.operation_id === params.operation_id && entry.op === 'retention.expire');
+      .filter(entry => entry.operation_id === params.operation_id);
     if (priorEntries.length > 0) {
-      const exact = priorEntries.find(entry => sweepPayloadMatches(entry, params, asOf, payloadHash));
+      const exact = priorEntries.find(entry =>
+        entry.op === 'retention.expire' && sweepPayloadMatches(entry, params, asOf, payloadHash));
       if (!exact) {
         throw new ProtocolError('conflict', `operation_id '${params.operation_id}' was already used with a different payload`);
       }
