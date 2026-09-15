@@ -55,6 +55,7 @@ describe('MCP Server Smoke', () => {
       'smartware_read',
       'smartware_explain',
       'smartware_export_scope',
+      'smartware_hold_release',
     ]));
     expect(names).toEqual(expect.arrayContaining([
       'smartware_query',

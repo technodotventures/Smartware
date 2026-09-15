@@ -50,7 +50,7 @@ import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SearchIndex } from '../layer3/search.js';
 import type { SmartwareConfig } from '../config.js';
-import { loadConfig, saveConfig } from '../config.js';
+import { loadConfig, saveConfig, isScopeHeld } from '../config.js';
 import {
   appendClaimVersions,
   iterAllClaimVersions,
@@ -330,6 +330,18 @@ export async function handleForgetScope(
     }
   }
 
+  // ── Legal hold (ADR-0009): erasure does not run while the scope is held.
+  //    Checked AFTER idempotent replay + intent recovery (a committed erasure
+  //    still replays; an interrupted intent is never abandoned mid-purge) and
+  //    BEFORE planning, so a refusal mutates nothing and leaves the
+  //    operation_id unconsumed — retryable once the hold is released.
+  if (params.reason === 'erasure' && isScopeHeld(loadConfig(dataDir), params.scope)) {
+    throw new ProtocolError(
+      'legal_hold_open',
+      `Scope '${params.scope}' has an open legal hold (ADR-0009) — release it (hold.release) before erasure`,
+    );
+  }
+
   // ── Plan: count everything BEFORE any mutation (counts fidelity, §10).
   //    The derived store is authoritative for the live surface; the JSONL is
   //    the canonical replay source. max() guards against a store that is not
@@ -562,6 +574,25 @@ export async function handleForgetScope(
     config.scopes = config.scopes.filter(entry => entry.id !== params.scope);
     scopeEntryRemoved = config.scopes.length < before;
   }
+  if (params.reason === 'offboarding') {
+    // ── The hold lane IS the hold open (ADR-0009): the same commit that
+    //    tombstones the scope records its preservation duty, so a dispute can
+    //    never leave erasure unrefused by forgetting to set a flag. Re-running
+    //    the lane after a release opens a NEW hold (a new duty); a committed
+    //    replay returns early above and never re-mutates.
+    const holds = config.holds ?? {};
+    holds[params.scope] = {
+      scope: params.scope,
+      opened_at: now,
+      opened_by: params.actor.id,
+      operation_id: params.operation_id ?? null,
+      released_at: null,
+      released_by: null,
+      release_operation_id: null,
+      release_statement: null,
+    };
+    config.holds = holds;
+  }
   saveConfig(dataDir, config);
 
   // ── L0 audit marker: written LAST, after every mutation. If the process
@@ -596,6 +627,7 @@ export async function handleForgetScope(
         vector_entries_removed: vectorEntriesRemoved,
         export_id: params.export_id ?? null,
         attestation: params.attestation ?? null,
+        hold_opened: params.reason === 'offboarding',
       },
     });
     commitHooks?.afterCommit?.();

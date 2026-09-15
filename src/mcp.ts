@@ -418,6 +418,23 @@ export function createSmartwareMcpServer(
   );
 
   server.tool(
+    'smartware_hold_release',
+    'Release an open legal hold on a client scope (owner only; ADR-0009). While a hold is open, FORGET.SCOPE reason=erasure is refused (legal_hold_open) and the retention sweep skips the scope; release is the audited owner act that lifts both. Idempotent per operation_id. Does not revive offboarded state.',
+    {
+      actor_id: z.string(),
+      scope: z.string().describe('Scope id, e.g. client:acme#1'),
+      statement: z.string().optional().describe('Owner hold-release statement (non-PII), e.g. "no pending dispute / hold released"'),
+      operation_id: z.string().optional().describe('Idempotency key — a retry returns the same release receipt'),
+    },
+    async args => wrap(() => core.releaseHold({
+      actor: actor(args.actor_id, 'person'),
+      scope: args.scope,
+      statement: args.statement,
+      operation_id: args.operation_id,
+    }), 'hold_release'),
+  );
+
+  server.tool(
     'smartware_export_scope',
     'Export every canonical record for exactly one scope (owner only; spec §10c.4). Package: <data_dir>/exports/<export_id>/ with observations/claims/evidence/operations/entities .jsonl + manifest.json; derived indexes excluded. Idempotent per operation_id. Read-only to pod data.',
     {

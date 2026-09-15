@@ -579,20 +579,30 @@ never see the affordance.
   persists an owner-approved non-PII `owner_pointer` for a later `#N` return.
 - **Erasure (terminal)** → `FORGET.SCOPE { reason: 'erasure' }`. Physical
   purge in every lane. **Erasure never fires under dispute** — the hold lane is
-  offboarding + export snapshot; erasure only after owner attestation, and the
-  attestation is recorded: `attestation: 'no pending dispute / hold released'`
-  (erasure lane only; `details.attestation` in the ops entry). The audit marker
-  is the deletion certificate.
-  **Decision (2026-09-14, ADR-0008): the substrate holds no legal-hold state and
-  will not refuse on one.** It records: the ops entry always carries
-  `attestation` — the statement, or an explicit `null` — plus `export_id`, so an
-  audit can always tell whether the owner claimed the hold released. Keep the
-  hold **in the integrator's flow** (a dispute → the hold lane only; erasure
-  offered only behind the attestation), and read a held scope from its F1
-  snapshot: a held scope is lane-silent by design. An elapsed retention sweep
-  over a held scope tombstones nothing (the hold lane already did), and evidence
-  written after the hold is tombstoned — non-destructively, with the scope still
-  exportable in full.
+  offboarding + export snapshot; erasure only after the hold is released. The
+  audit marker is the deletion certificate.
+  **Decision (2026-09-15, ADR-0009 — supersedes ADR-0008): the substrate holds
+  legal-hold state and refuses on it.** Offboarding opens a hold in
+  `config.holds` in the same commit; while it is open, `erasure` throws
+  `legal_hold_open` (nothing mutates, the `operation_id` is not consumed) and
+  the retention sweep skips the scope (`details.skipped: 'legal_hold'` —
+  post-hold evidence is preserved, not tombstoned). Release it with the
+  owner-only, receipted act:
+
+```ts
+await memory.releaseHold({
+  actor: owner,                              // owner-only
+  scope: 'client:acme#1',
+  statement: 'no pending dispute / hold released',
+  operation_id: 'op_01J8ZP…',                // idempotency key
+});
+// → { status: 'released', scope, released_at, released_by, statement, operation_id }
+```
+
+  Then run F1 (snapshot) and erase — the optional erasure `attestation` string
+  is still recorded for payload identity, but the release receipt is the
+  canonical hold-release record. Release does not revive the scope. A scope
+  offboarded before ADR-0009 has no hold entry and erases as before.
 
 ```ts
 await memory.forgetScope({

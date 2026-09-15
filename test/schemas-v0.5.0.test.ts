@@ -212,6 +212,27 @@ describe('Smartware v0.5.0 schemas', () => {
     assert.equal(opsEntry({ ...forgetScopeEntry, op: 'forget.scope.evil' }), false);
   });
 
+  test('operation-log-entry op enum gains hold.release (ADR-0009)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    const holdReleaseEntry = {
+      operation_id: OPERATION_A,
+      actor_id: 'user:ava',
+      timestamp: NOW,
+      op: 'hold.release',
+      details: {
+        payload_hash: 'abc123',
+        scope: 'client:gate#1',
+        released_at: NOW,
+        released_by: 'user:ava',
+        statement: 'no pending dispute / hold released',
+      },
+    };
+    assert.equal(opsEntry(holdReleaseEntry), true, JSON.stringify(opsEntry.errors));
+    assert.equal(opsEntry({ ...holdReleaseEntry, op: 'hold.release.evil' }), false);
+  });
+
   test('forget-scope-request: reason semantics and owner pointer rules', () => {
     const ajv = createAjv();
     const forgetScope = validator(ajv, 'forget-scope-request.schema.json');

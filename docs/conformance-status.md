@@ -57,13 +57,17 @@ time 2026-09-14 after the legal-hold composition suite landed and the hold
 decision was recorded (`test/conformance/r_legal_hold_composition.test.ts`,
 t_c5c999ba → ADR-0008): **532 tests across 74 files**, build clean (`tsc`),
 31 schema files verified, `verify:saas` pass — same kernel and conformance
-results.
+results. Re-measured a seventh time 2026-09-15 after the explicit legal-hold
+marker landed (ADR-0009, card t_463c1ff9; the legal-hold suite rewritten to
+R1–R4 and the ops-log schema op enum extended with `hold.release`):
+**534 tests across 74 files**, build clean (`tsc`), 31 schema files verified,
+`verify:saas` pass — same kernel and conformance results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **532 tests across 74 files** with no skips
+- The standalone suite passes **534 tests across 74 files** with no skips
   (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
@@ -88,22 +92,28 @@ results.
   markers; (d) provenance integrity — every recall hit resolves its source
   observation + ops entry, superseded claims never satisfy recall/get, and
   multi-version history is order-correct, including on rebuilt state.
-- The legal-hold composition suite
-  (`test/conformance/r_legal_hold_composition.test.ts`, 3 tests, added
-  2026-09-14, t_c5c999ba → [ADR-0008](adr/0008-legal-hold-composition.md)) is
-  the executable half of the hold decision: with an **elapsed time-bound**
-  observation in a scope that took the hold lane, (R1) the sweep over the held
-  scope expires nothing and writes no bytes — the hold lane *is* the skip, by
-  construction, not by a flag the sweep consults; (R2) evidence written into the
-  held scope *after* the hold is tombstoned by an elapsed sweep, non-destructively
-  — nothing is removed from the canonical log and a post-sweep F1 export of the
-  held scope still carries every observation row with no deletion certificate, so
-  the defense record survives every non-erasure lifecycle act; (R3) erasure on a
-  held scope is the owner's terminal act, recorded not gated — it succeeds with an
-  explicit `attestation: null`, the only substrate-side refusal being
-  `requireOwner`. (C8 of the lifecycle-composition suite asserted the same "skip"
-  claim on `forever`-policy evidence, where it could not have failed; R1 reruns it
-  on time-bound evidence.)
+- The legal-hold marker suite
+  (`test/conformance/r_legal_hold_composition.test.ts`, 4 tests, rewritten
+  2026-09-15, t_463c1ff9 → [ADR-0009](adr/0009-explicit-legal-hold-marker.md);
+  supersedes the ADR-0008 composition pins, whose R2/R3 were the assertions the
+  marker had to change) is the executable half of the marker decision: with an
+  **elapsed time-bound** observation in a scope that took the hold lane, (R1)
+  the hold lane opens the hold in the same commit (`config.holds`, ops receipt
+  `hold_opened: true`) and the sweep **skips** the held scope explicitly —
+  nothing expires, no bytes are written, post-hold evidence stays `accepted`,
+  and the skip is receipted (`details.skipped: 'legal_hold'`); (R2) erasure on
+  the held scope is **refused** (`legal_hold_open`, no mutation, the
+  `operation_id` is not consumed) and release is the audited owner act —
+  receipt + config + one `hold.release` ops entry, idempotent per
+  `operation_id`, `conflict` on a different payload, `no_open_hold` when nothing
+  is open, owner-only; (R3) release lifts the gate (the sweep resumes; erasure
+  runs with its attestation/export receipts; the release record survives the
+  scope; a terminal erasure still replays by `operation_id`); (R4) backward
+  compatibility and payload identity — a never-held scope erases as before,
+  fresh configs carry no hold state, and the v0.5.0 payload-hash formula is
+  unchanged (replaying a committed hold lane does not re-open a released hold).
+  (C8 of the lifecycle-composition suite now runs the same dispute flow:
+  offboarding + snapshot → refused erasure → `hold.release` → erasure.)
 - The Coffee company-brain e2e suite (`test/conformance/coffee-company-brain.test.ts`,
   3 tests) proves the multi-actor product flow on the real core (spec §10b/§10c/§25):
   one business = one tenant; owner admin; clients as scopes under `workspace`

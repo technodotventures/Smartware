@@ -15,8 +15,8 @@
 //       already holds another client's content
 //   C6  returning client: fresh #2 marker inherits nothing, exact-id grants
 //   C7  consolidation preserves the correction path and the evidence lineage
-//   C8  legal-hold conflict (v1 composition): dispute → offboarding + export,
-//       erasure only after the owner attestation is recorded
+//   C8  legal-hold marker (ADR-0009): dispute → offboarding + export opens the
+//       hold; erasure is refused (legal_hold_open) until the owner releases it
 
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -626,7 +626,7 @@ describe('Coffee lifecycle composition', () => {
     }
   });
 
-  it('C8 · legal hold (v1 composition): dispute → offboarding + snapshot; erasure only after attestation', async () => {
+  it('C8 · legal hold (ADR-0009 marker): dispute → offboarding + snapshot; erasure refused until release', async () => {
     const fx = await newBrain();
     const obs = await observe(fx, GIGI, ACME, 'Acme dispute evidence — invoice 41');
     const claimId = persistClaim(fx, { scope: ACME, subject: 'Acme', predicate: 'dispute_note', value: 'invoice 41', evidence: [obs] });
@@ -654,7 +654,19 @@ describe('Coffee lifecycle composition', () => {
     expect(sweep.observations_expired).toBe(0);
     expect(evidenceBytes(fx)).toBe(evidenceBefore);
 
-    // 3. Hold releases — the owner attests and the erasure records it.
+    // 3. The marker gates erasure: while the hold is open the substrate refuses
+    //    (legal_hold_open, nothing mutated), and release is the audited owner
+    //    act that lifts the gate (ADR-0009).
+    await expect(fx.core.forgetScope({
+      actor: OWNER, scope: ACME, reason: 'erasure', operation_id: `op_${ulid()}`,
+    })).rejects.toMatchObject({ code: 'legal_hold_open' });
+    const release = await fx.core.releaseHold({
+      actor: OWNER, scope: ACME, statement: 'no pending dispute / hold released', operation_id: `op_${ulid()}`,
+    });
+    expect(release.status).toBe('released');
+    expect(loadConfig(fx.dataDir).holds?.[ACME]?.released_at).toBe(release.released_at);
+
+    // 4. Hold released — the erasure runs and links the snapshot + attestation.
     const eraseOp = `op_${ulid()}`;
     const erased = await fx.core.forgetScope({
       actor: OWNER, scope: ACME, reason: 'erasure',
@@ -674,8 +686,8 @@ describe('Coffee lifecycle composition', () => {
     const silent = await probeLanes(fx, OWNER, ACME, 'dispute');
     expect(silent).toEqual({ claimLane: 0, claimLaneWithForgotten: 0, rawWindow: 0, contextSeeds: 0, hybrid: 0 });
 
-    // 4. The DSR lane is not gated on a dispute: an erasure without an attestation
-    //    is still the owner's terminal act (v1 = composition, §10c.3).
+    // 5. The DSR lane is not gated on a dispute: a scope that never took the
+    //    hold lane erases without a release (ADR-0009 migration note).
     const fx2 = await newBrain();
     await observe(fx2, NOAH, BCAU, 'Bcau erasure request');
     const dsr = await fx2.core.forgetScope({ actor: OWNER, scope: BCAU, reason: 'erasure', operation_id: `op_${ulid()}` });

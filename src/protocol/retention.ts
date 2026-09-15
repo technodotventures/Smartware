@@ -17,6 +17,7 @@ import { computePayloadHash } from '../layer0/idempotency.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SmartwareConfig } from '../config.js';
+import { isScopeHeld, loadConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { readLatestVersion, appendClaimVersion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
@@ -55,6 +56,8 @@ export interface ExpireRetentionResult {
   observations_expired: number;
   claims_retracted: number;
   operation_id?: string;
+  /** Set when the sweep was skipped by an open legal hold (ADR-0009). */
+  skipped_reason?: 'legal_hold';
 }
 
 export interface RetentionDeps {
@@ -150,8 +153,42 @@ export async function handleExpireRetention(
         observations_expired: Number(prior.details?.['observations_expired'] ?? 0),
         claims_retracted: Number(prior.details?.['claims_retracted'] ?? 0),
         operation_id: params.operation_id,
+        ...(prior.details?.['skipped'] === 'legal_hold' ? { skipped_reason: 'legal_hold' as const } : {}),
       };
     }
+  }
+
+  const now = new Date().toISOString();
+
+  // ── Legal hold (ADR-0009): expiry never fires under a hold. The skip is
+  //    explicit and receipted — nothing is tombstoned, including evidence
+  //    written into the scope after the hold opened. The hold state is read
+  //    from disk (the hold lane writes config directly), and it is consulted
+  //    after the operation_id replay above so a sweep that already committed
+  //    still replays its recorded result.
+  if (isScopeHeld(loadConfig(deps.dataDir), params.scope)) {
+    if (params.operation_id) {
+      appendOpLogEntry(deps.opsDir, {
+        operation_id: params.operation_id,
+        actor_id: operationActorId,
+        timestamp: now,
+        op: 'retention.expire',
+        details: {
+          scope: params.scope,
+          observations_expired: 0,
+          claims_retracted: 0,
+          as_of: asOf.toISOString(),
+          skipped: 'legal_hold',
+        },
+      });
+    }
+    return {
+      scope: params.scope,
+      observations_expired: 0,
+      claims_retracted: 0,
+      operation_id: params.operation_id,
+      skipped_reason: 'legal_hold',
+    };
   }
 
   const expired: Observation[] = [];
@@ -162,7 +199,6 @@ export async function handleExpireRetention(
     expired.push(obs);
   }
 
-  const now = new Date().toISOString();
   let seq = deps.layer0.getLastSequence();
   let prevHash = deps.layer0.getLatestHashForWriter(deps.config.writer_id);
   let claimsRetracted = 0;

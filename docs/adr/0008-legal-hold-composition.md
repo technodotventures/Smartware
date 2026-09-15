@@ -1,7 +1,7 @@
 # ADR 0008 — Legal hold is composition, not a substrate marker
 
 **Date:** 2026-09-14
-**Status:** Accepted
+**Status:** Superseded by 0009
 **Deciders:** @tech-head (card t_c5c999ba, on the lifecycle-composition lane t_ad51d0e2)
 **Supersedes:** —
 **Interprets:** ADR-0001 §2.2(3) and §4 AC5–AC6 (wording reconciliation, §4 below); spec §10c.3 / §10c.7 (closes open decision 4 of §10c.7)

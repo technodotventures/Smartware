@@ -31,6 +31,7 @@
         "revive",
         "forget",
         "forget.scope",
+        "hold.release",
         "grant",
         "revoke",
         "session.start",

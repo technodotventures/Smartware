@@ -87,6 +87,11 @@ import {
   type ForgetScopeResult,
 } from './protocol/forget_scope.js';
 import {
+  handleHoldRelease,
+  type HoldReleaseParams,
+  type HoldReleaseResult,
+} from './protocol/hold_release.js';
+import {
   handleExportScope,
   type ExportScopeParams,
   type ExportScopeResult,
@@ -1367,6 +1372,21 @@ export class SmartwareCore {
       semanticStore: options.semanticStore ?? null,
       compileQueue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
+    });
+  }
+
+  /**
+   * HOLD.RELEASE (ADR-0009): the audited owner act that lifts a legal hold.
+   * Owner-only; idempotent per operation_id. While a hold is open, erasure is
+   * refused (`legal_hold_open`) and the retention sweep skips the scope; the
+   * release lifts both. It does not revive offboarded state.
+   */
+  async releaseHold(params: HoldReleaseParams): Promise<HoldReleaseResult> {
+    const config = this.getConfig();
+    return handleHoldRelease(params, {
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      config,
     });
   }
 

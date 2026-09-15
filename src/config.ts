@@ -72,6 +72,25 @@ export interface RetentionConfig {
   expire_action?: 'tombstone' | 'archive';
 }
 
+/**
+ * A legal-hold record on a client scope (ADR-0009). Opened by the hold lane
+ * (FORGET.SCOPE `offboarding`) in the same commit as its tombstone + grant
+ * revocation; released only by an audited owner act (`hold.release`). While
+ * open it refuses scope erasure and skips the retention sweep. The record is
+ * content-free (ids, timestamps, a non-PII statement).
+ */
+export interface LegalHold {
+  scope: string;
+  opened_at: string;
+  opened_by: string;
+  /** The hold-lane operation that opened it (null when called without one). */
+  operation_id: string | null;
+  released_at: string | null;
+  released_by: string | null;
+  release_operation_id: string | null;
+  release_statement: string | null;
+}
+
 export interface SmartwareConfig {
   instance_id: string;
   owner_id: string;
@@ -93,6 +112,12 @@ export interface SmartwareConfig {
   };
   /** Optional retention config (lifecycle). Absent ⇒ `forever` everywhere. */
   retention?: RetentionConfig;
+  /**
+   * Legal-hold state per client scope (ADR-0009). Absent ⇒ no hold state
+   * (pre-marker configs load unchanged). An entry exists once a scope has taken
+   * the hold lane; open ⇔ `released_at == null`.
+   */
+  holds?: Record<string, LegalHold>;
   entity_resolution?: {
     /** Score at or above this → auto-merge (default 0.92) */
     auto_merge_threshold: number;
@@ -170,4 +195,14 @@ export function toRetentionDurationString(setting: RetentionSetting): string | n
   if (setting.policy !== 'duration') return null;
   const days = setting.duration_days;
   return days != null && days > 0 ? `P${days}D` : null;
+}
+
+/**
+ * True when a scope has an OPEN legal hold (ADR-0009): an entry exists and has
+ * not been released. Consulted by FORGET.SCOPE erasure (refused while true) and
+ * by the retention sweep (skipped while true).
+ */
+export function isScopeHeld(config: SmartwareConfig, scope: string): boolean {
+  const hold = config.holds?.[scope];
+  return hold != null && hold.released_at == null;
 }
