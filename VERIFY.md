@@ -17,8 +17,9 @@ Run from a clean tree. Every line must pass; quote the real output, not a summar
 | 5 | `npm run verify:schemas` | Schema checksums match the published contracts | A schema was edited without regenerating its checksum |
 | 6 | `npm run verify:saas` | SaaS integration smoke (build + end-to-end integration path) | Integration surface broke |
 | 7 | `npm run status:check` | `docs/STATUS.md` is not a stale projection | Substrate state changed without regenerating the status |
+| 8 | `npm run verify:adrs` | ADR numbers are claimed in one place, registered, and collision-free | An ADR file has no registry row, two files share a number, or the registry is unsorted |
 
-Rows 1–5 run in CI (`.github/workflows/ci.yml`) on the **Node 22 and 24 matrix** for
+Rows 1–5 and 8 run in CI (`.github/workflows/ci.yml`) on the **Node 22 and 24 matrix** for
 every pull request and every push to `main` — CI is the authoritative acceptance
 gate for this repository, and a local pass that CI rejects is not a pass.
 
