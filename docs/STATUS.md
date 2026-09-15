@@ -25,13 +25,14 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-14-t_ec159c21.md`](journal/2026-09-14-t_ec159c21.md) — P0 fix: deterministic corroboration proof in Coffee-shaped pilot (2026-09-14)
-- **Journal entries:** 36 · tasks completed on board `smartware`: 65
+- **Journal entries:** 36 · tasks completed on board `smartware`: 67
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `fix/l1-replay-correction-state` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
 | `wip/neo/host-lane-identity` | 59 | 2026-09-15 | docs: state the ADR-0012 delta — verified baseline, remaining limits, journal entry |
 | `wip/smarty/canonical-schema-boundary` | 59 | 2026-09-15 | docs: state the ADR-0012 delta — verified baseline, remaining limits, journal entry |
 | `wip/smarty/l1-forgotten-supersedes` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
@@ -39,8 +40,8 @@
 | `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
 | `wip/smarty/retention-payload-identity` | 56 | 2026-09-15 | fix(protocol): the retention sweep matches the OperationId payload, not just the id |
 | `wt/t_f2b584dc` | 56 | 2026-09-15 | docs(adr-0012): tighten the context paragraph (scope spelling, amended-binding pointer) |
+| `wip/neo/optype-derivation-guard` | 55 | 2026-09-15 | docs: state delta for t_9f0f314c (gate evidence, STATUS projection) |
 | `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
-| `wip/neo/optype-derivation-guard` | 54 | 2026-09-15 | ops-log: guard the OpType derivation against silent widening (t_9f0f314c, F-1 of t_2b8776f7) |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
 | `wt/t_9740ae98` | 54 | 2026-09-15 | docs: regenerate STATUS projection (board counters and branch tips moved while this lane ran; no content lines differ) |
 | `wip/neo/ops-enum-symmetry` | 53 | 2026-09-15 | docs: state delta for t_0e3989eb (gate evidence, conformance counts, STATUS projection) |
@@ -83,29 +84,28 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Queued / next up
 
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
-- `t_f2b584dc` [ready] DECIDE: FORGET.SCOPE revokes whole grant rows — multi-client staff lose their other clients (Coffee gate finding, ADR-0011) (created 2026-09-15, assignee tech-head)
 - `t_864a5900` [todo] IMPL (ADR-0012): one grant row per (actor, client) + degraded-precheck union — close the FORGET.SCOPE multi-client access-loss finding (created 2026-09-15, assignee neo)
-- `t_ef77c695` [todo] L1 replay: a `wrong`/`extraction_error` correction writes `state: 'active'`, so the retraction never reaches the canonical JSONL (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
-- `t_0b079fbf` [todo] L1 replay mints `claim_<lowercase hex>` / `tomb_<lowercase hex>`, which the published ClaimId/TombstoneId patterns reject (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
-- `t_8098b097` [todo] L1 writer: `insertClaim` drops a caller-supplied `superseded_by` on the forgotten path (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_0b079fbf` [ready] L1 replay mints `claim_<lowercase hex>` / `tomb_<lowercase hex>`, which the published ClaimId/TombstoneId patterns reject (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_8098b097` [ready] L1 writer: `insertClaim` drops a caller-supplied `superseded_by` on the forgotten path (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
 - `t_102f3dfa` [todo] REVIEW (independent): ADR-0012 — is option (a) the right call, and is the §10b amendment + re-grant requirement correctly recorded? (created 2026-09-15, assignee smarty-pants)
 
 ## Blockers and stale work
 
 - `t_66f1dd7d` GATE review: independent Coffee company-brain release verdict
 - `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
+- `t_804449f1` DECIDE (owner): host-registered lanes in the next protocol revision, or hosts migrate onto the Scope vocabulary (ADR-0012 fork)
 
 ## Decisions
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| [0001](adr/0001-retention-expiry-archival.md) | ADR-0001 — Retention, Expiry & Archival | Approved (owner sign-off 2026-09-10 — Tier-1 invariants §2.2 frozen; `staleness` block deprecated §2.4) — **Tier-1 invariant 5 and the §2.3 / §2.5 / §4-AC3 description of the `retention.expire` entry are superseded by [ADR-0012](0012-retention-sweep-commit-identity.md) (Proposed, 2026-09-15: the sweep always commits under an OperationId); the other four Tier-1 invariants stand unchanged.** | 2026-09-10 |
+| [0001](adr/0001-retention-expiry-archival.md) | ADR-0001 — Retention, Expiry & Archival | Approved (owner sign-off 2026-09-10 — Tier-1 invariants §2.2 frozen; `staleness` block deprecated §2.4) — **Tier-1 invariant 5 and the §2.3 / §2.5 / §4-AC3 description of the `retention.expire` entry are superseded by [ADR-0013](0013-retention-sweep-commit-identity.md) (Proposed, 2026-09-15: the sweep always commits under an OperationId); the other four Tier-1 invariants stand unchanged.** | 2026-09-10 |
 | [0002](adr/0002-consolidation.md) | ADR-0002 — Consolidation of claim clusters | Approved (owner sign-off 2026-09-10 — Tier-1 invariant §2.2 frozen) | 2026-09-10 |
 | [0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md) | ADR-0004 — Contradiction and bi-temporal lifecycle | (no status line) |  |
 | [0005](adr/0005-sources-ingestion-and-federation.md) | ADR-0005 — Sources, connector ingestion and federated reads | (no status line) |  |
 | [0006](adr/0006-export-restore-return-path.md) | ADR-0006 — An export must have a return path: RESTORE.SCOPE | (no status line) |  |
 | [0007](adr/0007-fencing-token-at-the-mutation-boundary.md) | ADR-0007 — A fencing token validated at the brain mutation boundary | (no status line) |  |
-| [0012](adr/0012-retention-sweep-commit-identity.md) | ADR-0012 — The retention sweep always commits under an OperationId | (no status line) |  |
+| [0013](adr/0013-retention-sweep-commit-identity.md) | ADR-0013 — The retention sweep always commits under an OperationId | (no status line) |  |
 
 **Pending decision:** 0001 (ADR-0001 — Retention, Expiry & Archival)
 
@@ -119,9 +119,9 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (82 tasks, 3369 events)
-- ⚠️ 29 completed task(s) have no journal entry — run: npm run journal:sync
-- ⚠️ 2 blocked task(s)
+- ✅ kanban board readable (83 tasks, 3599 events)
+- ⚠️ 31 completed task(s) have no journal entry — run: npm run journal:sync
+- ⚠️ 3 blocked task(s)
 
 ## Canonical index
 
