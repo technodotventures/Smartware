@@ -135,11 +135,11 @@ describe('reflect.auto semantic materialization', () => {
     expect(validate).toBeDefined();
 
     for (const record of active) {
-      // The pod-profile surface mints `pod/<pod>/<lane>` scopes and `substrate:<ULID>` actor ids,
-      // which the v0.5.0 Scope/ActorId patterns reject — a measured, separate divergence outside
-      // this change (carded, see the handoff on kanban t_229601e4). Substitute pattern-conformant
-      // placeholders so this assertion is about the record envelope and its materialization block.
-      const conformant = { ...record, scope: 'workspace', actor_id: 'substrate:pod' };
+      // The scope substitution is the one remaining, disclosed divergence: a pod-profile host lane
+      // is not a v0.5.0 Scope value (ADR-0015, schemas/v0.5.0/README.md). The actor id is no longer
+      // substituted — the writers mint one canonical lowercase `substrate:<slug>`, pinned in
+      // test/layer1/pod-profile-conformance.test.ts together with this record-level pin.
+      const conformant = { ...record, scope: 'workspace' };
       expect(validate!(conformant)).toBe(true);
       expect(validate!.errors ?? []).toEqual([]);
       // The block is optional (records written before v0.6 omit it), and it is what carries the

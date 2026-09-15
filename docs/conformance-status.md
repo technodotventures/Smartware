@@ -35,6 +35,23 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the **substrate ActorId and the host-lane scope disclosure**
+(`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0015 — a writer-identity fix plus a stated
+conformance boundary; no schema byte moves, `SHA256SUMS` unchanged): **537 tests across 74 files**, 31
+schema files. The delta over the entry below is 5 tests — a new `test/layer1/pod-profile-conformance.test.ts`
+(4: the pod-profile record's complete Ajv error list is exactly `["/scope:pattern"]` with a conformant
+actor id equal across claims and operations-log entries, the protocol-native control record's list is
+empty, reflect.auto and dream carry the same `substrateActorId`, and the slug rule for named/ULID
+instances) and one fixture in `test/schemas-v0.5.0.test.ts` (host-lane spellings are not `Scope`
+values) — while `test/semantic-materialization.test.ts` substitutes only the scope now, because the
+actor id it used to substitute is written conformant. One instance now mints exactly one substrate
+identity (`substrate:<slug>`; `smartware_coffee` → `substrate:coffee`), where reflect.auto / the
+compile queue previously wrote `substrate:<ULID>` (uppercase, rejected by the published pattern) and
+`dream` a second spelling. `pod/<pod>/<lane>` scopes are disclosed as **host-registered lanes** outside
+the v0.5.0 `Scope` vocabulary and the schema-conformance claim (see *Remaining limits*). Mutation
+checks: reverting the writer mint fails 4 tests; widening the Scope pattern to admit host lanes fails
+the new closed-vocabulary fixture. No other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the **claim record's extraction materialization block**
 (`wip/tech-head/claim-record-semantic`, kanban `t_229601e4`, ADR-0011 — schema/contract accuracy, not a
 protocol change): **532 tests across 73 files**, 31 schema files, `claim.schema.json` the only schema
@@ -50,7 +67,9 @@ is optional, not a wire field, and no conformance claim depends on it. Two same-
 measured while deciding this and stay open, carded with their evidence (ADR-0011 → *Known
 divergences*): `insertClaim`'s forgotten path omits `supersedes` that the schema's forgotten branch
 requires (`t_3ba3ee39`), and pod-profile records carry `pod/<pod>/<lane>` scopes and
-`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed`). No other
+`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed` — both halves
+settled in the entry above: the ActorId defect fixed in the writers, the host-lane scope disclosed as
+outside the v0.5.0 `Scope` vocabulary, ADR-0015). No other
 suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
@@ -236,6 +255,17 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
+- **Host-registered lanes are outside the v0.5.0 `Scope` vocabulary.** The reference implementation's
+  pod-profile helper registers `pod/<pod>/<lane>` ids — a host's own lanes, and the live Pod product's
+  scope ids — and the published vocabulary admits no host-lane form. A canonical record written in a
+  host lane therefore does not meet this contract's conformance boundary ("schema validity on every
+  canonical write"); hosts that need v0.5.0 schema-conformant records write protocol-native lanes
+  (`self` / `workspace` / `project:<slug>` / `agent:<slug>` / `client:<id>[#n]`). Decided, with the
+  measured evidence and the recommendation to define a host-lane form in a later protocol revision:
+  [ADR-0015](adr/0015-host-registered-lanes-and-the-substrate-actor-id.md). Pinned by
+  `test/schemas-v0.5.0.test.ts` (the vocabulary rejects host lanes) and
+  `test/layer1/pod-profile-conformance.test.ts` (a pod-profile record's only Ajv error is
+  `/scope:pattern`; a protocol-native record's complete error list is empty).
 - Legacy direct calls without an operation ID are outside the recovery
   guarantee.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts

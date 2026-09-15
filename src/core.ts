@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { ulid } from 'ulid';
 
-import { loadConfig, saveConfig, type Grant, type ScopeEntry, type SmartwareConfig } from './config.js';
+import { loadConfig, saveConfig, substrateActorId, type Grant, type ScopeEntry, type SmartwareConfig } from './config.js';
 import { SMARTWARE_VERSION } from './version.js';
 import { Layer0Index } from './layer0/index.js';
 import { ClaimStore } from './layer1/store.js';
@@ -420,6 +420,18 @@ export class SmartwareCore {
     saveConfig(this.dataDir, config);
   }
 
+  /**
+   * Create a pod profile: the pod's memory policy, owner, and its two
+   * host-registered lanes.
+   *
+   * The ids in `scopes` (`pod/<pod>/personal`, `pod/<pod>/workspace`) are
+   * **host-registered lanes**, not protocol-native v0.5.0 `Scope` values: they
+   * are registered in this brain's scope registry and are the pod's live scope
+   * ids, but the published vocabulary admits no host-lane form, so a record
+   * written in one is outside the v0.5.0 schema-conformance claim (ADR-0015).
+   * Hosts that need schema-conformant records use protocol-native lanes
+   * (`self` / `workspace` / `project:<slug>` / `agent:<slug>`).
+   */
   createPodProfile(podId: string, name = 'Pod'): SmartwarePodProfile {
     const config = this.getConfig();
     const scope = (suffix: string) => `pod/${podId}/${suffix}`;
@@ -927,7 +939,7 @@ export class SmartwareCore {
     if (!isOwner(params.actor.id, config)) {
       throw new ProtocolError('owner_required', 'Dream is an owner-only operator command');
     }
-    const substrateId = `substrate:${config.instance_id.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
+    const substrateId = substrateActorId(config);
     return runDefaultDream(
       { opsDir: this.opsDir },
       substrateId,
