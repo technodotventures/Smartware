@@ -62,8 +62,9 @@ so the two runtime lines are verified by CI rather than by this local run.)
   confidence with the library formula, and reporting `ambiguous_matches` /
   `superseded_claims`. Both insertion orders of a duplicate pair yield the same
   survivor; a demoted duplicate is no longer matched. The same 6 fixtures as the
-  host-side pilot reference implementation are reproduced 1:1, so the pilot's
-  deterministic suite remains a valid cross-check.
+  host-side pilot reference implementation are reproduced 1:1, and the pilot's own
+  deterministic suite was re-run unchanged against this change's package (6/6 pass,
+  evidence on `t_2996a3ab`), so the pilot cross-check remains valid.
 - The same suite pins the **crossing between that write-path identity and the
   structured claim fingerprint** (`computeStructuredClaimFingerprint`,
   `reflect.auto` idempotency, spec §193/§238) in both measured directions: two
