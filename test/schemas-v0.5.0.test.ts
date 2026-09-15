@@ -467,7 +467,7 @@ describe('Smartware v0.5.0 schemas', () => {
   });
 
   test('claim.schema.json: a forgotten version names the version it replaces only when there is one', () => {
-    // ADR-0012. The forgotten branch used to require `supersedes` unconditionally, which made a
+    // ADR-0014. The forgotten branch used to require `supersedes` unconditionally, which made a
     // version-1 forgotten record unrepresentable — but a claim can be *born* forgotten: the legacy /
     // migration shape (`status: 'retracted'`, no prior canonical line) is what `ClaimStore.insertClaim`
     // appends on the retraction paths, what `src/layer1/tombstone-backfill.ts` reads, and what LC-04

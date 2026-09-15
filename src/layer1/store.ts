@@ -538,7 +538,7 @@ export class ClaimStore {
         // version ≥ 2 record it appended failed the contract (measured kanban t_3ba3ee39).
         // A version-1 record names nothing: a claim can be *born* forgotten on the legacy/migration
         // and `replay.ts` retraction paths, and there is no prior version to point at — which is why
-        // `claim.schema.json`'s forgotten branch does not require this field (ADR-0012).
+        // `claim.schema.json`'s forgotten branch does not require this field (ADR-0014).
         ...(version > 1 ? { supersedes: version - 1 } : {}),
         // A demotion rides the canonical record, not just the derived row: without this,
         // re-materialising the record (compile-path sync) or replaying the log restores the

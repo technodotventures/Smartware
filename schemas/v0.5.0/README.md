@@ -35,7 +35,7 @@ the measured divergences it does **not** cover: [ADR-0011](../adr/0011-claim-rec
 version-1 record, including a version-1 *forgotten* record: a claim can be born
 forgotten — a legacy/migration row, or a retraction of a claim that has no
 canonical version of its own — and there is no prior version for it to name.
-[ADR-0012](../adr/0012-forgotten-version-supersedes.md) settled both halves of
+[ADR-0014](../adr/0014-forgotten-version-supersedes.md) settled both halves of
 that (the writer now names the prior version it replaces; the forgotten branch
 stopped requiring a field the writer had no valid value for).
 

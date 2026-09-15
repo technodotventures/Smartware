@@ -36,7 +36,7 @@ Specification v1.6.16 conformance.
 ## Verified baseline
 
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's `supersedes` and the forgotten
-branch that required it** (`wip/smarty/l1-forgotten-supersedes`, kanban `t_3ba3ee39`, ADR-0012 — one
+branch that required it** (`wip/smarty/l1-forgotten-supersedes`, kanban `t_3ba3ee39`, ADR-0014 — one
 `src/` line plus a published-schema relaxation, no wire change): **541 tests across 74 files**, 31
 schema files, `claim.schema.json` the only schema file changed (`SHA256SUMS` regenerated;
 `supersedes` removed from one `required` array, every other property and branch unchanged). The delta
@@ -49,7 +49,7 @@ whenever `version > 1` (it had derived the number and dropped it — measured in
 v2 demoted shapes too, not only the forgotten one the card named), and a version-1 forgotten record no
 longer has to name a prior version that does not exist. LC-04 reconstruction from a backfilled
 tombstone was measured: `valid=false` before, `valid=true` after. Three same-class divergences were
-measured while deciding and stay open (ADR-0012 → *Explicitly not decided here*): `replay.ts`'s
+measured while deciding and stay open (ADR-0014 → *Explicitly not decided here*): `replay.ts`'s
 correction path writes `state: 'active'` for a retracted claim (`t_ef77c695`), replay mints ids the
 published `ClaimId`/`TombstoneId` patterns reject (`t_0b079fbf`), and `insertClaim` drops a
 caller-supplied demotion pointer on the forgotten path (`t_8098b097`). No other suite changed.

@@ -1,9 +1,12 @@
-# ADR 0012 — The L1 record writer names the version it replaces; the forgotten branch stops requiring it
+# ADR 0014 — The L1 record writer names the version it replaces; the forgotten branch stops requiring it
 
 - **Date:** 2026-09-15
 - **Status:** Proposed
 - **Deciders:** @smarty-pants (measurement + draft), operator (merge gate — a published schema moves)
 - **Supersedes:** —
+- **Numbering:** 0014 — drafted as `0012` branch-locally; refiled before merge under the board
+  arbitration `t_201cdca8` (`0012` is the grant-granularity decision, `wt/t_f2b584dc`). Every lane
+  reference moved in the same commit; ADRs are never renumbered once merged.
 
 ## Context
 

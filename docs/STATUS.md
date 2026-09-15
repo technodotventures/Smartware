@@ -24,24 +24,27 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-15-t_3ba3ee39.md`](journal/2026-09-15-t_3ba3ee39.md) — The L1 record writer names the version it replaces; the forgotten branch stops requiring it (ADR-0012) (2026-09-15)
-- **Journal entries:** 37 · tasks completed on board `smartware`: 63
+- **Journal:** [`2026-09-15-t_3ba3ee39.md`](journal/2026-09-15-t_3ba3ee39.md) — The L1 record writer names the version it replaces; the forgotten branch stops requiring it (ADR-0014) (2026-09-15)
+- **Journal entries:** 37 · tasks completed on board `smartware`: 68
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/neo/host-lane-identity` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0015 before merge (t_201cdca8) |
+| `fix/l1-replay-correction-state` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
+| `wip/smarty/canonical-schema-boundary` | 59 | 2026-09-15 | docs: state the ADR-0012 delta — verified baseline, remaining limits, journal entry |
+| `wip/tech-head/l1-replay-crockford-claim-id` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
 | `fix/status-projection-adr-bullet` | 58 | 2026-09-15 | fix(status): the ADR reader accepts the template's `- **Status:**` bullet |
-| `wip/neo/host-lane-identity` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
 | `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
+| `wip/smarty/retention-payload-identity` | 56 | 2026-09-15 | fix(protocol): the retention sweep matches the OperationId payload, not just the id |
+| `wt/t_f2b584dc` | 56 | 2026-09-15 | docs(adr-0012): tighten the context paragraph (scope spelling, amended-binding pointer) |
+| `wip/neo/optype-derivation-guard` | 55 | 2026-09-15 | docs: state delta for t_9f0f314c (gate evidence, STATUS projection) |
 | `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
-| `wip/smarty/retention-payload-identity` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
 | `wt/t_9740ae98` | 54 | 2026-09-15 | docs: regenerate STATUS projection (board counters and branch tips moved while this lane ran; no content lines differ) |
-| `wt/t_f2b584dc` | 54 | 2026-09-15 | docs: regenerate STATUS projection (board counters and branch tips moved while this lane ran; no content lines differ) |
 | `wip/neo/ops-enum-symmetry` | 53 | 2026-09-15 | docs: state delta for t_0e3989eb (gate evidence, conformance counts, STATUS projection) |
-| `wip/neo/optype-derivation-guard` | 53 | 2026-09-15 | docs: state delta for t_0e3989eb (gate evidence, conformance counts, STATUS projection) |
 | `wip/neo/tombstone-backfill-writer` | 53 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_9e124fe6) |
 | `wt/t_ba868906` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
 | `wip/neo/legal-hold-findings` | 51 | 2026-09-15 | docs: state delta for t_7a64ded2 (gate evidence, conformance counts, STATUS projection) |
@@ -50,12 +53,12 @@
 | `wip/neo/storage-fencing` | 50 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_695656d8) |
 | `wip/neo/legal-hold-marker` | 49 | 2026-09-15 | docs: state delta for t_463c1ff9 (legal-hold marker) + journal/STATUS projections |
 | `wip/neo/f1b-demoted-fingerprint` | 48 | 2026-09-15 | fix: a fingerprint hit on a demoted duplicate routes corroboration to the fact's survivor (ADR-0005 F1b) |
+| `wip/tech-head/retention-sweep-audit` | 48 | 2026-09-15 | docs: regenerate STATUS projection (board counters and other branch tips moved) |
 | `falsifier/t_e8bd6747` | 47 | 2026-09-15 | test-tree: compose F1 + F2 onto one tree for the ADR-0005 steady-state falsifier |
 | `wt/t_c5c999ba` | 47 | 2026-09-14 | docs: decide legal hold — v1 composition stands, marker not built (ADR-0008) |
 | `feat/deepseek-provider` | 46 | 2026-09-15 | feat(extraction): add deepseek provider (OpenAI-compatible, api.deepseek.com) |
 | `wip/neo/fencing-token` | 46 | 2026-09-15 | docs: fencing evidence — before/after gauntlet pair, measured cost, guard-list fix |
 | `wip/smarty/demotion-handbuilt-records` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
-| `wip/tech-head/retention-sweep-audit` | 46 | 2026-09-15 | docs: fencing evidence — before/after gauntlet pair, measured cost, guard-list fix |
 | `wt/t_65569b9e` | 46 | 2026-09-15 | health: host-facing health/metrics contract, lane-explicit counts, Coffee-trial SLOs (ADR-0008) |
 | `wt/t_ad51d0e2` | 46 | 2026-09-14 | docs: regenerate STATUS projection (lifecycle composition lane) |
 | `wip/neo/f1-reflect-auto-identity` | 44 | 2026-09-15 | docs(journal): record the pilot cross-check and gate evidence for t_2996a3ab |
@@ -83,14 +86,18 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
 - `t_864a5900` [todo] IMPL (ADR-0012): one grant row per (actor, client) + degraded-precheck union — close the FORGET.SCOPE multi-client access-loss finding (created 2026-09-15, assignee neo)
-- `t_ef77c695` [todo] L1 replay: a `wrong`/`extraction_error` correction writes `state: 'active'`, so the retraction never reaches the canonical JSONL (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
-- `t_0b079fbf` [todo] L1 replay mints `claim_<lowercase hex>` / `tomb_<lowercase hex>`, which the published ClaimId/TombstoneId patterns reject (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
-- `t_8098b097` [todo] L1 writer: `insertClaim` drops a caller-supplied `superseded_by` on the forgotten path (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_8098b097` [ready] L1 writer: `insertClaim` drops a caller-supplied `superseded_by` on the forgotten path (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_102f3dfa` [todo] REVIEW (independent): ADR-0012 — is option (a) the right call, and is the §10b amendment + re-grant requirement correctly recorded? (created 2026-09-15, assignee smarty-pants)
+- `t_8d6f4a5c` [todo] FIX: compiled L2 page frontmatter must validate against page-frontmatter.schema.json (19 Ajv errors; ADR-0013 D2) (created 2026-09-15, assignee tech-head)
+- `t_f1157ed4` [todo] FIX: publish a schema for the L0 evidence record shape, and stop labelling the EXPORT.SCOPE package schemas:v0.5.0 (ADR-0013 D1) (created 2026-09-15, assignee tech-head)
+- `t_73ea9510` [todo] DECIDE: ADR number allocation — 0008/0010/0011 are double-allocated and 0012 is triple-allocated across four in-flight branches (created 2026-09-15, assignee neo)
+- `t_598278eb` [ready] Retention sweep: an OperationId already consumed by another op is not matched, so the sweep reuses the id and the ops log ends up with two ops under one id (measured) (created 2026-09-15, assignee smarty-pants)
 
 ## Blockers and stale work
 
 - `t_66f1dd7d` GATE review: independent Coffee company-brain release verdict
 - `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
+- `t_804449f1` DECIDE (owner): host-registered lanes in the next protocol revision, or hosts migrate onto the Scope vocabulary (ADR-0012 fork)
 
 ## Decisions
 
@@ -100,7 +107,7 @@ Unmerged work — read the branch before assuming this tree is current.
 | [0002](adr/0002-consolidation.md) | ADR-0002 — Consolidation of claim clusters | Approved (owner sign-off 2026-09-10 — Tier-1 invariant §2.2 frozen) | 2026-09-10 |
 | [0003](adr/0003-claim-fact-identity.md) | ADR-0003 — Fact identity on the claim write path: the library resolves the fact, not the key | (no status line) |  |
 | [0011](adr/0011-claim-record-materialization-block.md) | ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it | Proposed — owner approval is the gate before merge (an additive, optional property; the | 2026-09-15 |
-| [0012](adr/0012-forgotten-version-supersedes.md) | The L1 record writer names the version it replaces; the forgotten branch stops requiring it | (no status line) |  |
+| [0014](adr/0014-forgotten-version-supersedes.md) | The L1 record writer names the version it replaces; the forgotten branch stops requiring it | (no status line) |  |
 
 **Pending decision:** 0011 (ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it)
 
@@ -114,9 +121,9 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (77 tasks, 3135 events)
-- ⚠️ 27 completed task(s) have no journal entry — run: npm run journal:sync
-- ⚠️ 2 blocked task(s)
+- ✅ kanban board readable (87 tasks, 3866 events)
+- ⚠️ 31 completed task(s) have no journal entry — run: npm run journal:sync
+- ⚠️ 3 blocked task(s)
 
 ## Canonical index
 

@@ -1,4 +1,4 @@
-// Tests: Layer 1 — the L1 record `ClaimStore.insertClaim` appends, per state it can write (ADR-0012)
+// Tests: Layer 1 — the L1 record `ClaimStore.insertClaim` appends, per state it can write (ADR-0014)
 //
 // Why these exist: `schemas/v0.5.0/claim.schema.json` is the contract for one canonical L1 line, and
 // `insertClaim` is the writer that puts a line there — for legacy/migration inserts, for the host
@@ -17,7 +17,7 @@
 //
 // These tests read the RAW line off disk (no library reader in the path) and assert the COMPLETE Ajv
 // error list is empty, so a new divergence cannot hide behind a known one. The probe that produced the
-// measurements is `probe/t_3ba3ee39.probe.test.ts`; the decision is `docs/adr/0012-*.md`.
+// measurements is `probe/t_3ba3ee39.probe.test.ts`; the decision is `docs/adr/0014-*.md`.
 
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
@@ -228,7 +228,7 @@ describe('the record insertClaim appends is accepted by the contract it publishe
 
   test('the born-forgotten shape writes one line, and the tombstone backfill still reads it', () => {
     // The alternative reading of the divergence — have the writer synthesise an active v1 line first
-    // so the forgotten version is always version 2 — was rejected in ADR-0012: it would put content
+    // so the forgotten version is always version 2 — was rejected in ADR-0014: it would put content
     // on the canonical surface for a claim that never had an active version, and change the legacy
     // shape the migration/backfill path (kanban t_9e124fe6) reads. Pin that.
     store.insertClaim(legacyClaim({ status: 'retracted', state: 'forgotten' }));
@@ -341,7 +341,7 @@ describe('the record insertClaim appends is accepted by the contract it publishe
 });
 
 describe('claim.schema.json: supersedes follows the version, not the state', () => {
-  // The schema-level half of ADR-0012 lives where the other v0.5.0 fixtures live:
+  // The schema-level half of ADR-0014 lives where the other v0.5.0 fixtures live:
   // `test/schemas-v0.5.0.test.ts` → "claim.schema.json: a forgotten version names the version it
   // replaces only when there is one". These are the writer-level consequences.
   test('a version-1 forgotten record is conformant with and without supersedes (writer side)', () => {
