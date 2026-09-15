@@ -35,6 +35,23 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the **substrate ActorId and the host-lane scope disclosure**
+(`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0012 — a writer-identity fix plus a stated
+conformance boundary; no schema byte moves, `SHA256SUMS` unchanged): **537 tests across 74 files**, 31
+schema files. The delta over the entry below is 5 tests — a new `test/layer1/pod-profile-conformance.test.ts`
+(4: the pod-profile record's complete Ajv error list is exactly `["/scope:pattern"]` with a conformant
+actor id equal across claims and operations-log entries, the protocol-native control record's list is
+empty, reflect.auto and dream carry the same `substrateActorId`, and the slug rule for named/ULID
+instances) and one fixture in `test/schemas-v0.5.0.test.ts` (host-lane spellings are not `Scope`
+values) — while `test/semantic-materialization.test.ts` substitutes only the scope now, because the
+actor id it used to substitute is written conformant. One instance now mints exactly one substrate
+identity (`substrate:<slug>`; `smartware_coffee` → `substrate:coffee`), where reflect.auto / the
+compile queue previously wrote `substrate:<ULID>` (uppercase, rejected by the published pattern) and
+`dream` a second spelling. `pod/<pod>/<lane>` scopes are disclosed as **host-registered lanes** outside
+the v0.5.0 `Scope` vocabulary and the schema-conformance claim (see *Remaining limits*). Mutation
+checks: reverting the writer mint fails 4 tests; widening the Scope pattern to admit host lanes fails
+the new closed-vocabulary fixture. No other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the **claim record's extraction materialization block**
 (`wip/tech-head/claim-record-semantic`, kanban `t_229601e4`, ADR-0011 — schema/contract accuracy, not a
 protocol change): **532 tests across 73 files**, 31 schema files, `claim.schema.json` the only schema
