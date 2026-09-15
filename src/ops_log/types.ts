@@ -60,6 +60,32 @@ export type OpType = (typeof OP_TYPES)[number];
  */
 const _opTypesIsExhaustive: OpType extends (typeof OP_TYPES)[number] ? true : never = true;
 
+/**
+ * The proof above is vacuous if either side of its conditional loses its
+ * literal type, so the two assertions below guard the guard (findings F-A and
+ * F-B of t_037255f6, closed by t_0e732b96).
+ *
+ * F-A — the list's `as const` is load-bearing: without it, or with the list
+ * annotated `readonly string[]`, `(typeof OP_TYPES)[number]` widens to
+ * `string` and the conditional becomes `string extends string ? true : never`
+ * = `true`. This assertion fails whenever the list's element type admits
+ * `string` at all.
+ */
+type _OpTypesIsLiteral = string extends (typeof OP_TYPES)[number] ? never : true;
+const _opTypesIsLiteral: _OpTypesIsLiteral = true;
+
+/**
+ * F-B — conditional types over `any` resolve to `true | never` = `true`, so
+ * `OpType = (typeof OP_TYPES)[number] | any` (or any other erasure of the
+ * derivation to `any`) would satisfy the proof above while admitting every
+ * op. This detector fails on that erasure. (`| unknown` and `| string` are
+ * already caught by `_opTypesIsExhaustive` directly — measured in
+ * t_037255f6.)
+ */
+type _IsAny<T> = 0 extends 1 & T ? true : false;
+type _OpTypeIsNotAny = _IsAny<OpType> extends true ? never : true;
+const _opTypeIsNotAny: _OpTypeIsNotAny = true;
+
 /** One canonical entry in `pod_data/operations/YYYY-MM-DD.jsonl`. */
 export interface OpLogEntry {
   /** ULID-shaped, `^op_[0-9A-HJKMNP-TV-Z]{26}$` */
