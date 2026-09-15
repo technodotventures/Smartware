@@ -188,6 +188,32 @@ describe('Smartware v0.5.0 schemas', () => {
     assert.equal(observe({ ...validObs, scope: 'client:acme#0' }), false);
   });
 
+  test('Scope vocabulary is closed at v0.5.0: host-registered lanes are not Scope values (ADR-0012)', () => {
+    const ajv = createAjv();
+    const claim = validator(ajv, 'claim.schema.json');
+    const common = ajv.getSchema('https://smartware.dev/schemas/v0.5.0/common.schema.json#/$defs/Scope');
+    assert.ok(common, 'Scope $def registered');
+
+    // The reference implementation's pod-profile helper (`createPodProfile`) registers
+    // `pod/<pod>/<lane>` ids as HOST-REGISTERED lanes: legitimate scope-registry ids and live
+    // product scope ids, but not v0.5.0 `Scope` values. The published vocabulary admits no
+    // host-lane form, so a record whose scope is one of them is outside the schema's Scope
+    // vocabulary and outside the v0.5.0 schema-conformance claim. Decided in ADR-0012 (with the
+    // substrate ActorId aligned to the published pattern); the record-level pin is
+    // test/layer1/pod-profile-conformance.test.ts. If a later revision admits host lanes, this
+    // fixture and the README qualification change in that revision's own change.
+    const hostLanes = [
+      'pod/founder/workspace',
+      'pod/founder/personal',
+      'pod/founder/apps/coffee',
+      'pod/founder/workspaces/team-a',
+    ];
+    for (const scope of hostLanes) {
+      assert.equal(common(scope), false, `Scope should reject host lane ${scope}`);
+      assert.equal(claim(activeClaim(scope)), false, `claim with scope ${scope} should fail`);
+    }
+  });
+
   test('operation-log-entry op enum gains forget.scope', () => {
     const ajv = createAjv();
     const opsEntry = validator(ajv, 'operation-log-entry.schema.json');

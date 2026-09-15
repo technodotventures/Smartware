@@ -50,7 +50,9 @@ is optional, not a wire field, and no conformance claim depends on it. Two same-
 measured while deciding this and stay open, carded with their evidence (ADR-0011 → *Known
 divergences*): `insertClaim`'s forgotten path omits `supersedes` that the schema's forgotten branch
 requires (`t_3ba3ee39`), and pod-profile records carry `pod/<pod>/<lane>` scopes and
-`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed`). No other
+`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed` — both halves
+settled in the entry above: the ActorId defect fixed in the writers, the host-lane scope disclosed as
+outside the v0.5.0 `Scope` vocabulary, ADR-0012). No other
 suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
@@ -236,6 +238,17 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
+- **Host-registered lanes are outside the v0.5.0 `Scope` vocabulary.** The reference implementation's
+  pod-profile helper registers `pod/<pod>/<lane>` ids — a host's own lanes, and the live Pod product's
+  scope ids — and the published vocabulary admits no host-lane form. A canonical record written in a
+  host lane therefore does not meet this contract's conformance boundary ("schema validity on every
+  canonical write"); hosts that need v0.5.0 schema-conformant records write protocol-native lanes
+  (`self` / `workspace` / `project:<slug>` / `agent:<slug>` / `client:<id>[#n]`). Decided, with the
+  measured evidence and the recommendation to define a host-lane form in a later protocol revision:
+  [ADR-0012](adr/0012-host-registered-lanes-and-the-substrate-actor-id.md). Pinned by
+  `test/schemas-v0.5.0.test.ts` (the vocabulary rejects host lanes) and
+  `test/layer1/pod-profile-conformance.test.ts` (a pod-profile record's only Ajv error is
+  `/scope:pattern`; a protocol-native record's complete error list is empty).
 - Legacy direct calls without an operation ID are outside the recovery
   guarantee.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts

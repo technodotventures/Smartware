@@ -28,7 +28,27 @@ protocol request or response carries it, and nothing in it is required. It is
 enumerated so that a record the implementation writes is accepted by the contract
 it publishes; the alternative (declaring the L1 line a deliberately unvalidated
 superset of the spec §6 version) was rejected. The decision, its consequences and
-the measured divergences it does **not** cover: [ADR-0011](../adr/0011-claim-record-materialization-block.md).
+the measured divergences it does **not** cover: [ADR-0011](../../docs/adr/0011-claim-record-materialization-block.md).
+
+## Scope vocabulary (closed at v0.5.0; host-registered lanes are not `Scope` values)
+
+`common.schema.json` `$defs/Scope` enumerates the **protocol's** lane vocabulary:
+`self`, `workspace`, `project:<slug>`, `agent:<slug>`, `client:<id>`,
+`client:<id>#n`. It admits no host-lane form.
+
+A host may register further lane ids in its own scope registry
+(`SmartwareCore.ensureScopes`), and the reference implementation's pod-profile
+helper does exactly that with `pod/<pod>/<lane>` ids. Those are
+**host-registered lanes**: legitimate registry ids and live product scope ids,
+but not v0.5.0 `Scope` values. A canonical record whose `scope` is a
+host-registered lane is outside this vocabulary, and therefore outside the
+v0.5.0 schema-conformance claim — the contract's conformance boundary requires
+schema validity on every canonical write. A host that needs v0.5.0
+schema-conformant records writes protocol-native lanes. The decision (and the
+recommendation to define a host-lane form in a later protocol revision) is
+[ADR-0012](../../docs/adr/0012-host-registered-lanes-and-the-substrate-actor-id.md);
+`test/schemas-v0.5.0.test.ts` pins the closed vocabulary and
+`test/layer1/pod-profile-conformance.test.ts` pins what the writers emit.
 
 Changes vs v0.4.2 (schema-surface only):
 

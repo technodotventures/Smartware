@@ -124,6 +124,31 @@ export function createDefaultConfig(dataDir: string): SmartwareConfig {
   return config;
 }
 
+/**
+ * The one substrate ActorId for this instance.
+ *
+ * Spec §5 *Identifier Types*: every ActorId — including the substrate's own —
+ * is `<actor-kind>:<slug>`, and the substrate's slug is the pod/instance
+ * (`substrate:coffee`). Protocol v0.5.0 `common.schema.json` `$defs/ActorId`
+ * admits `^(user|agent|sidecar|substrate):[a-z0-9-]+$`, so the slug must be
+ * lowercase. Crockford base32 ULIDs are case-insensitive in their own right;
+ * the published pattern is not.
+ *
+ * Every autonomous writer (reflect.auto, the compile queue, dream) mints the
+ * id through this one function, so one instance carries exactly one substrate
+ * identity. The default `smartware_` instance-id prefix is not part of the
+ * slug: `smartware_coffee` becomes `substrate:coffee` (the spec's example),
+ * and an anonymous ULID instance becomes the lowercased ULID.
+ */
+export function substrateActorId(config: Pick<SmartwareConfig, 'instance_id'>): string {
+  const slug = config.instance_id
+    .replace(/^smartware_/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `substrate:${slug || 'instance'}`;
+}
+
 export function getDataDir(): string {
   return process.env['SMARTWARE_DATA_DIR'] ?? path.join(process.cwd(), 'data');
 }
