@@ -25,7 +25,7 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-15-t_fa18b2bf.md`](journal/2026-09-15-t_fa18b2bf.md) — VERIFY (independent, F1–F3 fix): hold-release keying + duty-scoped replay convergence + durable config writes + v0.5.0 ops enum completion (wip/neo/legal-hold-findings @ 29f5642, PR #12) (2026-09-15)
-- **Journal entries:** 69 · tasks completed on board `smartware`: 69
+- **Journal entries:** 69 · tasks completed on board `smartware`: 70
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -68,9 +68,9 @@
 | `docs/protocol-identity-adr` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
+| `docs/adr-numbering-registry` | 37 | 2026-09-15 | docs(adr): number registry on main + the claiming/renumbering rule (t_201cdca8) |
 | `docs/saas-retention-ops-entry` | 37 | 2026-09-15 | docs: the retention sweep's ops entry is caller-supplied only (measured) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
-| `docs/adr-numbering-registry` | 36 | 2026-09-12 | Merge pull request #6 from technodotventures/feat/corroboration-reachable |
 | `feat/corroboration-reachable` | 33 | 2026-09-12 | feat: make corroboration reachable, and demonstrate it in the reference example |
 | `fix/concurrent-schema-migration` | 32 | 2026-09-11 | fix: make column migrations idempotent when two processes open one brain |
 | `fix/public-surface-and-docs` | 31 | 2026-09-11 | fix: make the public surface sufficient for host-side claim persistence |
@@ -91,7 +91,6 @@ Unmerged work — read the branch before assuming this tree is current.
 - `t_102f3dfa` [todo] REVIEW (independent): ADR-0012 — is option (a) the right call, and is the §10b amendment + re-grant requirement correctly recorded? (created 2026-09-15, assignee smarty-pants)
 - `t_8d6f4a5c` [todo] FIX: compiled L2 page frontmatter must validate against page-frontmatter.schema.json (19 Ajv errors; ADR-0013 D2) (created 2026-09-15, assignee tech-head)
 - `t_f1157ed4` [todo] FIX: publish a schema for the L0 evidence record shape, and stop labelling the EXPORT.SCOPE package schemas:v0.5.0 (ADR-0013 D1) (created 2026-09-15, assignee tech-head)
-- `t_73ea9510` [todo] DECIDE: ADR number allocation — 0008/0010/0011 are double-allocated and 0012 is triple-allocated across four in-flight branches (created 2026-09-15, assignee neo)
 - `t_598278eb` [ready] Retention sweep: an OperationId already consumed by another op is not matched, so the sweep reuses the id and the ops log ends up with two ops under one id (measured) (created 2026-09-15, assignee smarty-pants)
 - `t_ad84d246` [ready] FIX (record): journal t_9a700aed cites t_3a4c0f0a — a card id that does not exist (measured at 9114fb7 and still at bc23ed1) (created 2026-09-15, assignee neo)
 
@@ -126,8 +125,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (88 tasks, 4181 events)
-- ⚠️ 1 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (88 tasks, 4276 events)
+- ⚠️ 2 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index
