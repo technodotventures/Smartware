@@ -42,7 +42,8 @@ Coffee replica (1..N)                         Smartware brain (single writer)
 - **One business = one brain** (one `data_dir`, one `config.json`). The brain is
   a *resource* per business, not per request and not per replica.
 - **A client is a scope** (`client:<id>#<n>`, non-reusable). Staff and agents
-  are **grants** on exact scope ids.
+  are **grants** on exact scope ids — one grant row per (actor, client)
+  (ADR-0012; §7 *Provisioning grants*).
 - **Redis stays authoritative** for application data. The brain is additive: if
   it is unavailable, Coffee still works (degraded) and says so.
 - **Single writer.** A replica writes the brain only while it holds the lease;
@@ -236,7 +237,7 @@ surface the substrate's codes verbatim on the holder.
 | Method | Who may call | What it runs |
 |---|---|---|
 | `exportClientScope({ actor, client \| scope, operation_id? })` | owner | Scope-exclusive EXPORT.SCOPE package (ADR-0006); idempotent per `operation_id` |
-| `forgetClientScope({ actor, client \| scope, reason, export_id?, owner_pointer?, operation_id? })` | owner | `offboarding` tombstones, revokes grants and keeps the scope entry so a future `#n` can be minted; `erasure` purges every claimed lane and retires the id. Grant revocation is **row-scoped**: a grant that lists several clients is revoked whole (spec §10b.3) — a staff member serving other clients loses those too until re-granted |
+| `forgetClientScope({ actor, client \| scope, reason, export_id?, owner_pointer?, operation_id? })` | owner | `offboarding` tombstones, revokes grants and keeps the scope entry so a future `#n` can be minted; `erasure` purges every claimed lane and retires the id. Grant revocation is **row-scoped** (spec §10b.3): the row is revoked whole, so a row must carry exactly one client — see *Provisioning grants* below |
 | `expireRetention({ actor, client \| scope, as_of?, operation_id? })` | owner, or a `forget` grant on the scope | ADR-0001 sweep: tombstones elapsed `duration`-policy observations and retracts claims whose only evidence they were; idempotent by nature and per `operation_id` |
 | `restoreScope({ actor, package_dir, operation_id? })` | owner | ADR-0006 return path: verifies manifest checksums and refuses a non-empty target scope, a tampered package or a package crossing its scope boundary **before writing anything** |
 | `correctClaim({ actor, target_claim_id, corrected_predicate?, corrected_object?, corrected_validity?, change_time?, reason })` | a `correct` grant on the claim's scope | Spec verb CORRECT/REVISE: appends a correction observation and spawns a new claim version. **One-shot** — the verb carries no `operation_id`, so a blind retry after a timeout creates a second correction version; settle ambiguity by reading the brain, not by retrying the write |
@@ -247,6 +248,58 @@ Each is an exact-scope list (`forget` used to be hard-wired empty, which made th
 retention sweep unreachable for anyone but the owner). A capability granted with
 no adapter method — and a method callable by nobody — are both contract holes;
 the acceptance gate exercises each path with a granted and an ungranted actor.
+
+### Provisioning grants — one row per (staff member, client) (ADR-0012)
+
+Provision **one grant row per (actor, client scope)**: a row carrying that actor's
+capability cluster for that one client (`observe`/`query`/`read` for it,
+`correct`/`forget` only where the business grants them). This is what makes the
+revocation boundary equal the intended access boundary — spec §10b.2 grant
+granularity, decision in ADR-0012. Measured (ADR-0012 evidence, S2): with one row
+per client, `forgetClientScope` on one client reports exactly that row in
+`grants_revoked`, the actor's other rows stay `active`, and recall on the other
+client answers unchanged with **no re-provisioning**.
+
+**The re-grant requirement (binding on the host).** If your provisioning lists
+several clients in one row (§10b.2 permits the shape; the §10b.4 worked example
+shows it), offboarding or erasing **any one** of those clients revokes the row and
+the staff member loses **every** client in it. Measured (ADR-0012 evidence, S1, and
+gate check `6n`): a `meridian` recall that answered `ok` before an `erasure` of
+`arcadia` answered `403 insufficient_permission` after it. The host MUST
+re-provision that actor's remaining scopes as part of the same
+offboarding/erasure step. Re-granting is a **config provision**: write
+`config.json` (mode 0600); the adapter reads it on the next operation. There is no
+re-grant protocol call and no adapter method for it.
+
+**Degraded reads union the actor's rows.** The config-derived precheck on the
+standby/fallback path (see §5) must allow a scope covered by **any** active row of
+that actor, not the first row it finds. VERIFIED (ADR-0012 evidence, S3) that the
+shipped `.find()` precheck denies a scope the actor holds a second row for; the fix
+lands with card `t_864a5900`.
+
+**Sessions union the actor's rows too — and until they do, do not read an empty
+`capabilities_granted` as a denial.** `smartware_session_start`
+(`SmartwareCore.sessionStart`) resolves `capabilities_granted` and the
+trust/quarantine caps from the **first** active row of the actor. VERIFIED
+(ADR-0012 evidence, S4): with one row per client, a session requesting the **second**
+row's client returns `capabilities_granted: []` while `checkGrant` authorizes the
+actor on that scope and a recall on it answers `ok` (`n:1`) — measured in the same
+run. Two host obligations follow. (1) Keep `trusted` and `quarantine` **uniform**
+across an actor's per-client rows: the resolver reads the first row, so a mixed pair
+gives a row-order-dependent trust level (S4D/S4D2 measured `user_facing` vs
+`verified` for the same two rows swapped). (2) Treat the session surface's
+capability list as advisory for multi-row actors until the union lands with card
+`t_864a5900` (test C6 in ADR-0012 §6). The Coffee adapter itself never calls this
+surface — its reads and writes go through the substrate's own operation
+authorization (`checkGrant`, which unions) — but the tenant's MCP server exposes the
+tool, so a host that provisions the per-client shape **and** uses sessions is
+affected.
+
+**Status of this shape in the reference adapter.** One row per (actor, client) is
+the decision; the shipped `coffeeTenantConfig` still emits one row per actor
+listing every scope it was handed (`row_count: 1`, measured S1), and its `#precheck`
+is first-match. Both change with card `t_864a5900` **before the release candidate is
+packed**; until then the re-grant requirement above is the operative rule.
 
 ## 8. Migration (adding the brain to a running Coffee)
 

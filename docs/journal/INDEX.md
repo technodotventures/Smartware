@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **59** entries.
+Total: **69** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -49,10 +49,16 @@ Total: **59** entries.
 | 2026-09-14 | [`2026-09-14-t_ad51d0e2.md`](2026-09-14-t_ad51d0e2.md) | P1 verify/fix: retention, forget, offboarding, export/import and legal-hold composition |
 | 2026-09-14 | [`2026-09-14-t_ec159c21.md`](2026-09-14-t_ec159c21.md) | P0 fix: deterministic corroboration proof in Coffee-shaped pilot |
 | 2026-09-15 | [`2026-09-15-t_0177d9c3.md`](2026-09-15-t_0177d9c3.md) | Retention sweep writer: handleExpireRetention's OperationId fallback is op_+sha256 hex (67 chars), which the published OperationId pattern rejects |
+| 2026-09-15 | [`2026-09-15-t_06db00ce.md`](2026-09-15-t_06db00ce.md) | Retention sweep: a reused `operation_id` with a different payload replays the old counts instead of `conflict` (spec v1.6.16:126 / protocol v0.5.0:84, measured) |
+| 2026-09-15 | [`2026-09-15-t_0e3989eb.md`](2026-09-15-t_0e3989eb.md) | Advisory (from t_fa18b2bf verification): writer-side OpType admits 4 ops the published v0.5.0 enum rejects, and the "refused invalid_parameter (core and MCP)" wording is loose for a missing MCP field |
 | 2026-09-15 | [`2026-09-15-t_15bb0cd0.md`](2026-09-15-t_15bb0cd0.md) | Decide protocol identity: does claim fact identity include claim_type, or is the spec fingerprint the autonomous-path truth? (ADR-0003 vs spec §193) |
 | 2026-09-15 | [`2026-09-15-t_1db21462.md`](2026-09-15-t_1db21462.md) | DECIDE: a user-only way to re-pick which duplicate survives (release a mechanical demotion) — protocol surface + owner sign-off |
+| 2026-09-15 | [`2026-09-15-t_229601e4.md`](2026-09-15-t_229601e4.md) | DECIDE: is claim.schema.json the L1 record or the spec §6 claim version? An active record's internal `semantic` block fails the published schema |
 | 2026-09-15 | [`2026-09-15-t_2996a3ab.md`](2026-09-15-t_2996a3ab.md) | Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) |
+| 2026-09-15 | [`2026-09-15-t_2b8776f7.md`](2026-09-15-t_2b8776f7.md) | VERIFY (independent): writer-surface OpType pinned to the published v0.5.0 op enum + MCP refusal wording (wip/neo/ops-enum-symmetry @ 265b00a, PR #15) |
 | 2026-09-15 | [`2026-09-15-t_2bba749f.md`](2026-09-15-t_2bba749f.md) | Schema accuracy: tombstone-frontmatter snapshot block does not enumerate the demotion/release record fields |
+| 2026-09-15 | [`2026-09-15-t_3ba3ee39.md`](2026-09-15-t_3ba3ee39.md) | L1 record writer: `insertClaim`'s forgotten path omits `supersedes`, so the record fails claim.schema.json's forgotten branch (measured, carded out of t_229601e4) |
+| 2026-09-15 | [`2026-09-15-t_432be9c9.md`](2026-09-15-t_432be9c9.md) | STATUS projection: the ADR README template's `- **Status:**` bullet is not read by scripts/substrate-status.mjs (every template-shaped ADR shows "(no status line)" and is invisible as a pending decision) |
 | 2026-09-15 | [`2026-09-15-t_463c1ff9.md`](2026-09-15-t_463c1ff9.md) | P1 pre-production gate: explicit legal-hold marker — refuse erasure under hold + sweep skip + audited release |
 | 2026-09-15 | [`2026-09-15-t_55fdccdd.md`](2026-09-15-t_55fdccdd.md) | VERIFY (independent, ADR-0009): legal-hold marker — erasure refusal, sweep skip, audited release (branch wip/neo/legal-hold-marker @ 2ef69c1) |
 | 2026-09-15 | [`2026-09-15-t_65569b9e.md`](2026-09-15-t_65569b9e.md) | P1-3: host-facing health contract, lane-explicit counts, Coffee-trial SLOs |
@@ -62,9 +68,13 @@ Total: **59** entries.
 | 2026-09-15 | [`2026-09-15-t_7a64ded2.md`](2026-09-15-t_7a64ded2.md) | legal-hold findings (advisory): release replay must converge config (F2) · require operation_id on smartware_hold_release (F1) · ops-log enum drift covers the new skip receipt (F3) |
 | 2026-09-15 | [`2026-09-15-t_85817375.md`](2026-09-15-t_85817375.md) | L1 record writer: insertClaim stamps op_LEGACY00000000000000000000, which the published OperationId pattern rejects |
 | 2026-09-15 | [`2026-09-15-t_9740ae98.md`](2026-09-15-t_9740ae98.md) | GATE run: the Coffee company-brain acceptance contract, against the packaged artifact — 79/79 |
+| 2026-09-15 | [`2026-09-15-t_9a700aed.md`](2026-09-15-t_9a700aed.md) | Library-written L1 records: pod-profile scopes (`pod/<pod>/<lane>`) and `substrate:<ULID>` actor ids are rejected by the v0.5.0 Scope/ActorId patterns (measured, carded out of t_229601e4) |
 | 2026-09-15 | [`2026-09-15-t_9e124fe6.md`](2026-09-15-t_9e124fe6.md) | Tombstone writer: tombstone-backfill.ts emits snapshots the published schema rejects (4 required fields missing, confidence not bucketed) |
 | 2026-09-15 | [`2026-09-15-t_9ee8bd54.md`](2026-09-15-t_9ee8bd54.md) | P1 design+impl: fencing token at the brain mutation boundary (close the residual lease window) |
+| 2026-09-15 | [`2026-09-15-t_9f0f314c.md`](2026-09-15-t_9f0f314c.md) | HARDENING (low): the writer-surface pin does not cover the OpType derivation — re-inlining the union admits an enum-foreign op with tsc + the pin green (findings F-1 of t_2b8776f7, re: t_0e3989eb @ 265b00a) |
+| 2026-09-15 | [`2026-09-15-t_b739c9ec.md`](2026-09-15-t_b739c9ec.md) | Docs: saas-integration.md says the retention sweep writes \"one `retention.expire` ops entry\" — a bare sweep writes none (measured) |
 | 2026-09-15 | [`2026-09-15-t_ba868906.md`](2026-09-15-t_ba868906.md) | P1 build: Coffee reference adapter — drop-in contract, drop-in code, deterministic local proof |
 | 2026-09-15 | [`2026-09-15-t_c5c999ba.md`](2026-09-15-t_c5c999ba.md) | DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition) |
 | 2026-09-15 | [`2026-09-15-t_e8bd6747.md`](2026-09-15-t_e8bd6747.md) | Identity falsifier (ADR-0005 #1): steady-state both-surfaces run — recall must answer once in every round, F1+F2 on one tree |
+| 2026-09-15 | [`2026-09-15-t_f2b584dc.md`](2026-09-15-t_f2b584dc.md) | DECIDE: the revocation boundary is the grant row — one row per (actor, client), and the re-grant requirement (ADR-0012) |
 | 2026-09-15 | [`2026-09-15-t_fa18b2bf.md`](2026-09-15-t_fa18b2bf.md) | VERIFY (independent, F1–F3 fix): hold-release keying + duty-scoped replay convergence + durable config writes + v0.5.0 ops enum completion (wip/neo/legal-hold-findings @ 29f5642, PR #12) |
