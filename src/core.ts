@@ -67,7 +67,7 @@ import { runRecovery } from './ops_log/recovery.js';
 import { ensurePrivateDirectory } from './storage/private-fs.js';
 import { FenceStore } from './storage/fence.js';
 
-import { handleObserve, type ObserveParams, type ObserveResult } from './protocol/observe.js';
+import { handleObserve, type ObserveParams, type ObserveResult, type ObserveCommitHooks } from './protocol/observe.js';
 import {
   handleQuery,
   recallMinimumConfidence,
@@ -136,6 +136,12 @@ export interface SmartwareCoreOptions {
    * higher epoch. Omit for legacy, unfenced operation.
    */
   fencingToken?: number;
+  /**
+   * Crash-boundary test seam (not for production use): hooks fired inside OBSERVE's commit
+   * sequence (after the intent, after the L0 artifact, after the commit signal). The resilience
+   * gauntlet uses them to pause a process deterministically mid-mutation. No effect when omitted.
+   */
+  commitHooks?: ObserveCommitHooks;
 }
 
 /** Public fencing state of a core writer (ADR-0007). */
@@ -370,6 +376,8 @@ export class SmartwareCore {
   /** Fencing epoch state (ADR-0007); null token = legacy unfenced writer. */
   private readonly fence: FenceStore;
   private fenceToken: number | null = null;
+  /** Crash-boundary test seam forwarded into OBSERVE (see SmartwareCoreOptions.commitHooks). */
+  private observeHooks: ObserveCommitHooks | null = null;
 
   private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore) {
     this.dataDir = dataDir;
@@ -401,6 +409,8 @@ export class SmartwareCore {
     const fence = FenceStore.open(dbPath);
 
     const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence);
+    // Crash-boundary test seam: forward the host's commit hooks into OBSERVE (no effect when omitted).
+    core.observeHooks = options.commitHooks ?? null;
     // ADR-0007: a fenced writer claims its epoch before any recovery or derived-index
     // work. A stale owner fails fast here — it must not run recovery or write anything.
     if (options.fencingToken !== undefined) {
@@ -639,6 +649,7 @@ export class SmartwareCore {
 
   async observe(params: ObserveParams): Promise<ObserveResult> {
     this.fenceGuard('observe');
+    const hostHooks = this.observeHooks;
     return handleObserve(
       params,
       this.evidenceDir,
@@ -647,8 +658,13 @@ export class SmartwareCore {
       this.sessionStore,
       this.opsDir,
       {
-        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1).
-        afterObservation: obs => this.afterObservationCommitted(obs),
+        ...(hostHooks ?? {}),
+        afterObservation: obs => {
+          // Sync-raw freshness (spec §10a) + async-compile (spec §9.1), then the host hook
+          // (crash-boundary test seam; may be async — awaited inside handleObserve).
+          this.afterObservationCommitted(obs);
+          return hostHooks?.afterObservation?.(obs);
+        },
       },
     );
   }

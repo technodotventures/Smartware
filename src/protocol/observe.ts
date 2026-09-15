@@ -71,11 +71,11 @@ export interface ObserveResult {
   sequence: number;
 }
 
-/** Synchronous fault hooks used by crash-boundary conformance tests. */
+/** Synchronous or async fault hooks used by crash-boundary conformance tests. */
 export interface ObserveCommitHooks {
-  afterIntent?: (intent: ObservationOperationIntent) => void;
-  afterObservation?: (observation: Observation) => void;
-  afterCommit?: () => void;
+  afterIntent?: (intent: ObservationOperationIntent) => void | Promise<void>;
+  afterObservation?: (observation: Observation) => void | Promise<void>;
+  afterCommit?: () => void | Promise<void>;
 }
 
 function observePayload(
@@ -361,11 +361,11 @@ export async function handleObserve(
     : null;
   if (intent && opsDir) {
     persistOperationIntent(opsDir, intent, true);
-    commitHooks?.afterIntent?.(intent);
+    await commitHooks?.afterIntent?.(intent);
   }
   appendObservation(evidenceDir, withIntegrity);
   layer0.insertOrSkip(withIntegrity);
-  commitHooks?.afterObservation?.(withIntegrity);
+  await commitHooks?.afterObservation?.(withIntegrity);
 
   // The ops-log entry is the durable commit signal. A process interruption
   // after L0 can be finalized only when the persisted intent matches the
@@ -385,7 +385,7 @@ export async function handleObserve(
         sequence: withIntegrity.integrity.sequence,
       },
     });
-    commitHooks?.afterCommit?.();
+    await commitHooks?.afterCommit?.();
     removeOperationIntent(opsDir, operationId);
   }
 
