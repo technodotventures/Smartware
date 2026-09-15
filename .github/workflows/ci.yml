@@ -44,6 +44,9 @@ jobs:
       - name: Verify frozen schema checksums
         run: npm run verify:schemas
 
+      - name: Verify ADR numbering registry
+        run: npm run verify:adrs
+
       - name: Run protocol tests
         run: npm test
 
