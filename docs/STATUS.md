@@ -35,10 +35,10 @@
 | `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
 | `wip/neo/tombstone-backfill-writer` | 53 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_9e124fe6) |
+| `wip/neo/ops-enum-symmetry` | 52 | 2026-09-15 | ops-log: pin the writer OpType to the published enum; precise MCP refusal wording (t_0e3989eb) |
 | `wt/t_9740ae98` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
 | `wt/t_ba868906` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
 | `wip/neo/legal-hold-findings` | 51 | 2026-09-15 | docs: state delta for t_7a64ded2 (gate evidence, conformance counts, STATUS projection) |
-| `wip/neo/ops-enum-symmetry` | 51 | 2026-09-15 | docs: state delta for t_7a64ded2 (gate evidence, conformance counts, STATUS projection) |
 | `wip/smarty/tombstone-snapshot-envelope` | 51 | 2026-09-15 | fix(schemas): tombstone snapshot block enumerates the claim record envelope |
 | `wip/neo/repick-survivor` | 50 | 2026-09-15 | docs: regenerate STATUS (board counters; drift is projection-only) |
 | `wip/neo/storage-fencing` | 50 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_695656d8) |
@@ -78,6 +78,7 @@ Unmerged work — read the branch before assuming this tree is current.
 - `t_3ba3ee39` [todo] L1 record writer: `insertClaim`'s forgotten path omits `supersedes`, so the record fails claim.schema.json's forgotten branch (measured, carded out of t_229601e4) (created 2026-09-15, assignee smarty-pants)
 - `t_9a700aed` [todo] Library-written L1 records: pod-profile scopes (`pod/<pod>/<lane>`) and `substrate:<ULID>` actor ids are rejected by the v0.5.0 Scope/ActorId patterns (measured, carded out of t_229601e4) (created 2026-09-15, assignee neo)
 - `t_dc609143` [todo] VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482) (created 2026-09-15, assignee tech-head)
+- `t_432be9c9` [todo] STATUS projection: the ADR README template's `- **Status:**` bullet is not read by scripts/substrate-status.mjs (every template-shaped ADR shows "(no status line)" and is invisible as a pending decision) (created 2026-09-15, assignee smarty-pants)
 
 ## Blockers and stale work
 
@@ -104,7 +105,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (66 tasks, 2837 events)
+- ✅ kanban board readable (67 tasks, 2853 events)
 - ⚠️ 22 completed task(s) have no journal entry — run: npm run journal:sync
 
 ## Canonical index
