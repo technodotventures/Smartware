@@ -370,6 +370,26 @@ it needs a **fencing token validated at the brain's commit boundary** — not im
 it as a substrate-surface decision before promising strict no-split-brain under arbitrary
 pauses.
 
+### 1i. Operate it: health, metrics and trial SLOs
+
+Poll `core.health({ actor, backup_dir? })` (or MCP `smartware_health`) instead of scraping
+logs. One report carries the lease state (`ownership.role` / holder epoch + age — the TTL
+stays yours, the brain enforces epochs, not expiry), brain-open state, compile queue
+depth/oldest-pending age/failures, ingestion cursor lag per `(source, scope)` stream,
+lane-explicit counts, drift records, denied-access counts, retention/forget receipts, storage
+bytes by area, backup freshness, recall/write latency histograms and recovery events.
+
+Read the SLO verdict first: `slo.status ∈ ok | breach | unknown`. **`unknown` is not `ok`** —
+it means an objective has no evidence yet (fewer than 20 latency samples, nothing synced, no
+backup directory configured). Alert on `breach`, on any `drift` record, and on
+`ownership.role === 'observer'` for a process that believes it is the writer.
+
+Authority fails closed: the owner sees the whole brain; a read-granted actor sees its readable
+scopes' counts and nothing else. The report is counts, states, ids and time — it cannot carry
+tenant content. Field definitions, the threshold table and the cost per block:
+[docs/integration/observability.md](observability.md); the decision record is
+[ADR-0008](../adr/0008-host-facing-health-contract.md).
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by

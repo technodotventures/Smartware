@@ -4,6 +4,7 @@ import type { Actor } from '../layer0/types.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SearchIndex } from '../layer3/search.js';
+import type { FreshnessCounts } from '../layer2/types.js';
 import type { SmartwareConfig } from '../config.js';
 import { countWikiPages, writeManifest } from '../layer2/manifest.js';
 import { requireOwner } from '../auth/middleware.js';
@@ -29,7 +30,14 @@ export interface StatusResult {
     pages: number;
   };
   layer3: {
-    indexed: number;
+    /** Rows in the entity/topic FTS lane. See `Layer3IndexCounts` for the rule. */
+    entity_index_rows: number;
+    /** Rows in the claim-granular FTS lane. */
+    claim_index_rows: number;
+    /** Rows in the raw-observation FTS lane. */
+    observation_index_rows: number;
+    /** State-based freshness labels over the raw-observation lane. */
+    observations_by_freshness: FreshnessCounts;
   };
   grants: number;
 }
@@ -76,7 +84,12 @@ export async function handleStatus(
       last_replayed_sequence: store.getLastReplayedSequence(),
     },
     layer2: { pages },
-    layer3: { indexed: searchIndex.count() },
+    layer3: {
+      entity_index_rows: searchIndex.count(),
+      claim_index_rows: searchIndex.countClaims(),
+      observation_index_rows: searchIndex.countObservations(),
+      observations_by_freshness: searchIndex.countObservationsByFreshness(),
+    },
     grants: config.grants.filter(g => g.status === 'active').length,
   };
 }

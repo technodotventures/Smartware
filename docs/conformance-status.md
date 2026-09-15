@@ -49,7 +49,9 @@ sources/ingestion/federated-read suite landed: **515 tests across 71 files**,
 build clean (`tsc`), same schema and kernel results. Re-measured a fourth time
 2026-09-14 after the export-restore return path landed (ADR-0006):
 **520 tests across 72 files**, build clean (`tsc`), same schema and kernel
-results.
+results. Re-measured a fifth time 2026-09-15 after the host health contract and
+Coffee-trial SLOs landed (ADR-0008): **550 tests across 77 files**, build clean
+(`tsc`), same schema and kernel results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
@@ -275,6 +277,30 @@ evidence: the evidence JSONL a batch wrote is the record, and losing the ledger
 costs a resume hint, not writes (item dedup is content-safe). Hosts keep their
 own checkpoint too; a missing cursor means "resume from your side", never "the
 brain lost writes".
+
+## Consumer-visible change — host health contract and Coffee-trial SLOs (2026-09-15, unreleased)
+
+A host can now operate a brain from machine-readable status instead of logs, and
+the misleading single `layer3.indexed` number is gone. **No protocol or schema
+surface changed** (the five verbs, the RECALL family and FORGET.SCOPE are
+untouched); this is a new embedded `SmartwareCore` method (`health`), one new
+MCP tool (`smartware_health`) and a shape change to the generated `STATUS`
+projection. Decision record:
+[ADR-0008](adr/0008-host-facing-health-contract.md); field-by-field definitions
+in [integration/observability.md](integration/observability.md).
+
+| surface | before | now |
+|---|---|---|
+| `STATUS.layer3` | one `indexed` number counting only the entity/topic FTS lane, reading as "everything is indexed" | four named lanes: `entity_index_rows`, `claim_index_rows`, `observation_index_rows`, `observations_by_freshness` |
+| `core.health({ actor, backup_dir? })` / MCP `smartware_health` | — | lease `role`/holder/epoch-age with `ttl_owner: 'host'`, brain-open state, compile queue depth/oldest-pending age/failures, ingestion cursor lag per `(source, scope)` stream, lane-explicit counts, drift records (`wiki_manifest`, `observation_fts`), denied-access counts by code and entry point, retention/forget receipts (numeric details only), storage bytes by area, backup freshness, recall/write latency histograms with upper-bound p50/p95/p99, recovery events, and the Coffee-trial SLO verdict |
+| authority | owner-only everything | owner sees the whole brain; a read-granted actor sees its readable scopes' counts; an actor with no `read` anywhere is `insufficient_permission`; unregistered is `actor_unregistered` |
+| content | n/a | the report is counts, states, ids and time — no field can carry tenant content (asserted on the serialized report) |
+| SLOs | — | `COFFEE_TRIAL_SLO` with three-state verdicts: `pass` / `breach` / `unknown`; overall `breach` > `unknown` > `ok`, so an unmeasured trial is never reported as `ok` |
+
+The metrics store (`<dataDir>/indices/metrics.db`: denials, latency histograms,
+recovery events) is **operational state**, not canonical memory: deleting it
+loses history and nothing else, and a report after such a wipe says so by
+absence rather than rendering an absent measurement as a pass.
 
 ## Accurate release claim
 

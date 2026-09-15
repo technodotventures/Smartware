@@ -112,6 +112,10 @@ import {
   type SessionDescribeResult, type SessionEndResult,
 } from './protocol/session.js';
 import { handleStatus, type StatusResult } from './protocol/status.js';
+import { handleHealth, type HealthParams, type HealthReport } from './protocol/health.js';
+import { MetricsStore, defaultMetricsPath } from './observability/metrics.js';
+import { LatencyRecorder } from './observability/latency.js';
+import { installObservability } from './observability/instrument.js';
 import { handleContext, type ContextParams, type ContextBundle } from './protocol/context.js';
 import { SessionStore } from './session/store.js';
 import { createGrant, getGrantForActor, isOwner, checkGrant } from './auth/grants.js';
@@ -146,6 +150,8 @@ export interface FencingState {
   token: number | null;
   /** The highest epoch this brain has seen. */
   high_water: number;
+  /** When the current epoch was claimed (null when no epoch has been seen). */
+  claimed_at: string | null;
   /** Canonical mutations refused by the guard so far. */
   refusals: number;
   /** The most recent refusal, or null. */
@@ -370,8 +376,14 @@ export class SmartwareCore {
   /** Fencing epoch state (ADR-0007); null token = legacy unfenced writer. */
   private readonly fence: FenceStore;
   private fenceToken: number | null = null;
+  /** Durable operational metrics (refusals, latency, recovery summaries). */
+  private readonly metrics: MetricsStore;
+  /** In-process latency buffer; flushed to `metrics` on report / close. */
+  private readonly latency: LatencyRecorder;
+  /** When this process opened the brain (health: restart detection / uptime). */
+  private readonly openedAt: string = new Date().toISOString();
 
-  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore) {
+  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore, metrics: MetricsStore, latency: LatencyRecorder) {
     this.dataDir = dataDir;
     this.evidenceDir = path.join(dataDir, 'evidence');
     this.wikiDir = path.join(dataDir, 'wiki');
@@ -381,6 +393,8 @@ export class SmartwareCore {
     this.searchIndex = searchIndex;
     this.sessionStore = sessionStore;
     this.fence = fence;
+    this.metrics = metrics;
+    this.latency = latency;
     this.previewStore = new CascadePreviewStore(path.join(dataDir, 'indices', 'previews.db'));
     // Ingestion ledger (batch receipts + stream cursors). Operational state:
     // see the honesty note in src/ingestion/store.ts.
@@ -399,8 +413,10 @@ export class SmartwareCore {
     const searchIndex = new SearchIndex(dbPath);
     const sessionStore = new SessionStore(dbPath);
     const fence = FenceStore.open(dbPath);
+    const metrics = MetricsStore.open(defaultMetricsPath(options.dataDir));
+    const latency = new LatencyRecorder(metrics);
 
-    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence);
+    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence, metrics, latency);
     // ADR-0007: a fenced writer claims its epoch before any recovery or derived-index
     // work. A stale owner fails fast here — it must not run recovery or write anything.
     if (options.fencingToken !== undefined) {
@@ -423,6 +439,21 @@ export class SmartwareCore {
       claimsDir: core.dataDir,
       wikiDir: core.wikiDir,
       quarantineDir: path.join(core.dataDir, 'quarantine', 'operations'),
+    });
+    // The recovery scan is an operational event: record what it found at open so
+    // a host can alert on "this brain has been recovering" without reading logs.
+    // Counts only — no locators, no content (see docs/integration/observability.md).
+    metrics.recordRecovery({
+      at: new Date().toISOString(),
+      opened_at: core.openedAt,
+      committed_operations: recovery.committedOperations,
+      orphans: recovery.orphans.length,
+      pending_operations: recovery.pendingOperations.length,
+      intent_errors: recovery.intentErrors.length,
+      requires_manual_review: recovery.requiresManualReview.length,
+      completed: recovery.completed.length,
+      quarantined: recovery.quarantined.length,
+      aborted: recovery.aborted.length,
     });
     layer0.catchUp(core.evidenceDir);
     if (recovery.pendingOperations.length === 0) {
@@ -474,7 +505,8 @@ export class SmartwareCore {
     // GC once on open so a long-stopped Pod doesn't accumulate stale rows.
     core.previewStore.gc();
 
-    return core;
+    // Host-facing accounting (refusals + latency) is installed at the boundary.
+    return installObservability(core, metrics, latency);
   }
 
   /**
@@ -497,6 +529,7 @@ export class SmartwareCore {
       enabled: state.high_water > 0,
       token: this.fenceToken,
       high_water: state.high_water,
+      claimed_at: state.high_water > 0 ? state.updated_at : null,
       refusals: state.refusals,
       last_refusal: state.last_refusal,
     };
@@ -1641,6 +1674,40 @@ export class SmartwareCore {
     );
   }
 
+  /**
+   * Host-facing health/metrics report (P1-3). Owner or read-granted actor;
+   * counts, states and ids only — never tenant content. See
+   * `src/protocol/health.ts` and docs/integration/observability.md for the
+   * field definitions.
+   */
+  async health(params: HealthParams): Promise<HealthReport> {
+    const state = this.fencingState();
+    return handleHealth(params, {
+      config: this.getConfig(),
+      layer0: this.layer0,
+      store: this.store,
+      searchIndex: this.searchIndex,
+      wikiDir: this.wikiDir,
+      compileQueue: this.compileQueue,
+      metrics: this.metrics,
+      latency: this.latency,
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      ingestionStatus: () => computeSourceSyncStatus(this.getConfig(), this.ingestionStore),
+      openedAt: this.openedAt,
+      ownership: {
+        arbitration: 'external',
+        enforcement: state.enabled ? 'fencing' : 'none',
+        role: state.token !== null ? 'writer' : (state.enabled ? 'observer' : 'unfenced_writer'),
+        epoch_high_water: state.high_water,
+        epoch_claimed_at: state.claimed_at,
+        presented_token: state.token,
+        refusals: state.refusals,
+        last_refusal: state.last_refusal,
+      },
+    });
+  }
+
   findObservationBySource(app: string, sourceId: string, scope: string): string | null {
     return this.layer0.checkDedup(app, sourceId, scope);
   }
@@ -1653,6 +1720,8 @@ export class SmartwareCore {
     this.compileQueue?.close();
     this.fingerprintIndex?.close();
     this.fence.close();
+    this.latency.close();
+    this.metrics.close();
     this.layer0.close();
     this.store.close();
     this.searchIndex.close();
@@ -1807,5 +1876,6 @@ export * from './protocol/retention.js';
 export * from './protocol/consolidate.js';
 export * from './protocol/session.js';
 export * from './protocol/status.js';
+export * from './protocol/health.js';
 export * from './session/types.js';
 export * from './session/checkpoint.js';

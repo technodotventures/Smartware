@@ -621,6 +621,20 @@ export function createSmartwareMcpServer(
     async args => wrap(() => core.status(args.actor_id), 'status'),
   );
 
+  server.tool(
+    'smartware_health',
+    'Host-facing health/metrics contract: lease role/epoch and holder, brain open state, compile queue depth/age/failures, ingestion cursor lag, lane counts (claim/observation/index), drift records, denied-access counts, retention/forget receipts, storage size, backup freshness, latency histograms, recovery events and the Coffee-trial SLO evaluation. Counts, states and ids only — never tenant content. Owner sees the whole brain; a read-granted actor sees its scopes.',
+    {
+      actor_id: z.string(),
+      backup_dir: z.string().optional()
+        .describe('Host-owned backup directory to measure freshness against (the brain never creates backups)'),
+    },
+    async args => wrap(
+      () => core.health({ actor: actor(args.actor_id, 'person'), backup_dir: args.backup_dir }),
+      'health',
+    ),
+  );
+
   // ── Source registry, ingestion and federation (P0 shared-workspace contract) ──
 
   server.tool(

@@ -320,9 +320,23 @@ export class SearchIndex {
     }
   }
 
-  /** Count indexed pages */
+  /**
+   * Count entity/topic FTS rows.
+   *
+   * One row per entity indexed as a topic (with its active claims' text), plus
+   * one row per active claim whose entity was not indexed as a topic. This is
+   * NOT a page count (pages are Layer 2 — `countWikiPages`), NOT the
+   * claim-granular lane (`countClaims`), and NOT the raw-observation lane
+   * (`countObservations`). Written down because the old STATUS field labelled
+   * this number `indexed` and read as "everything is indexed".
+   */
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) as c FROM search_index').get() as { c: number }).c;
+  }
+
+  /** Count rows in the claim-granular FTS lane (`claim_search_index`). */
+  countClaims(): number {
+    return (this.db.prepare('SELECT COUNT(*) as c FROM claim_search_index').get() as { c: number }).c;
   }
 
   // ── Observation raw-search index (v0.5.0, spec §10a) ──────────────────────
