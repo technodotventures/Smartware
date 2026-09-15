@@ -1,17 +1,16 @@
 # ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it
 
-- **Date:** 2026-09-15
-- **Status:** Proposed — **owner approval is the gate before merge.** This moves bytes in the published
-  `schemas/v0.5.0` set (an additive, optional property; the required set is unchanged), which makes it
-  a schema/contract change, not a wire-protocol change. Numbers `0004`–`0010` are held by other
-  in-flight branches (contradiction/bi-temporal, sources, export-restore, fencing, health, legal-hold,
-  adapter, storage-fencing) and two of them are already double-allocated; `0011` was taken to avoid
-  adding a third collision. Branch: `wip/tech-head/claim-record-semantic` (forked from `wip/smarty/l1-legacy-op-id`
-  @ `0a68482`), kanban `t_229601e4`.
-- **Deciders:** @tech-head (decision prepared and implemented on kanban `t_229601e4`). Owner sign-off
-  is the merge gate — the repo publishes this schema set to integrators, so the owner decides whether
-  an implementation-carried block becomes part of the published record surface.
-- **Supersedes:** —
+**Status:** Proposed — owner approval is the gate before merge (an additive, optional property; the
+required set is unchanged; `schemas/v0.5.0` bytes move and `SHA256SUMS` is regenerated)
+**Date:** 2026-09-15
+**Deciders:** @tech-head (decision prepared and implemented on kanban `t_229601e4`). Owner sign-off is
+the merge gate — the repo publishes this schema set to integrators, so the owner decides whether an
+implementation-carried block becomes part of the published record surface.
+**Supersedes:** none
+**Numbering note:** `0004`–`0010` are held by other in-flight branches (contradiction/bi-temporal,
+sources, export-restore, fencing, health, legal-hold, adapter, storage-fencing) and two of them are
+already double-allocated; `0011` was taken to avoid adding a third collision. Branch:
+`wip/tech-head/claim-record-semantic` (forked from `wip/smarty/l1-legacy-op-id` @ `0a68482`).
 
 ## Context
 
