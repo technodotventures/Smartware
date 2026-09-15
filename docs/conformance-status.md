@@ -35,6 +35,17 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the **tombstone backfill writer**
+(`wip/neo/tombstone-backfill-writer`, kanban `t_9e124fe6`): **524 tests across 72 files**, 31 schema
+files. The delta over the baseline below is 3 tests in one new file
+(`test/layer1/tombstone-backfill.test.ts`), which drives the only in-tree writer of
+`wiki/tombstones/*.md` over legacy-shaped rows (`status: 'retracted'`, no `operation_id`/`actor_id`)
+and validates the written frontmatter against
+`schemas/v0.5.0/tombstone-frontmatter.schema.json`; the writer now emits the snapshot envelope fields
+the schema requires (`claim_id`, `state`, `epistemic_owner`, `fingerprint`), buckets `confidence`
+through `confidenceToBucket`, stamps schema-valid `operation_id`/`actor_id` placeholders for a pre-A3
+row, and carries a mechanical demotion into the snapshot; no other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the tombstone schema's coverage of the claim record
 envelope (`wip/smarty/tombstone-snapshot-envelope`, kanban `t_2bba749f` — schema/contract accuracy,
 not a protocol change): **521 tests across 71 files**, 31 schema files. The delta over the baseline
@@ -73,7 +84,7 @@ run.)
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **521 tests across 71 files** with no skips.
+- The standalone suite passes **524 tests across 72 files** with no skips.
 - The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
   claim write-path identity contract documented in the integration guide §1e:
   `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
@@ -232,7 +243,12 @@ The exact ordering and recovery state table are documented in
   have merged, or a merge the compile path does not see. Recorded with the measured
   cases and a reversal trigger in
   [ADR-0003](adr/0003-claim-fact-identity.md) → *Known divergence*; reconciling the
-  two is protocol identity semantics and needs owner sign-off.
+  two is protocol identity semantics and needs owner sign-off. One legacy artifact
+  picks a side rather than inventing a third rule: a backfilled tombstone snapshot
+  (`wiki/tombstones/*.md` for a pre-A3 `status: retracted` row) recomputes the
+  **content form** — the snapshot block enumerates neither the structured assertion
+  nor `semantic`, so a structured value would not be re-derivable from the artifact
+  whose purpose is reconstruction (`t_9e124fe6`, ADR-0003 → *Known divergence*).
 - The suite does not prove concurrent multi-writer serialization or universal
   sudden-power-loss durability.
 - REFLECT page output and search databases are rerunnable projections rather

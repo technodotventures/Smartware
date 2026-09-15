@@ -11,6 +11,8 @@
   `repick_survivor` REVISE param recommendation, record in ADR, implement"): the demotion gains its
   release vocabulary — a user-only `REVISE` **re-pick** that releases the duplicate and demotes the
   current active copy, atomically (*Releasing a demotion*).
+  **Amended 2026-09-15** (`t_9e124fe6`): which fingerprint form a *backfilled legacy tombstone
+  snapshot* carries is recorded under *Known divergence* — the content form, not the structured one.
 - **Deciders:** @smarty-pants (protocol stewardship / research). No owner sign-off gate for the
   **additive SDK surface** itself — no protocol invariant, schema, cryptography, or authority-table
   change. The disposition in *Known divergence* (leaving the pre-existing fingerprint rule
@@ -390,6 +392,22 @@ host can get:
 Both rows stay in the store and recall de-duplicates neither. This is not silent corruption —
 `resolveFactMatches` reports what it merged — but do not build policy on the assumption that the two
 identity rules agree. The §1e sweep converges duplicates whichever path minted them.
+
+### Which rule a backfilled tombstone snapshot carries (added 2026-09-15 · kanban `t_9e124fe6`)
+
+The tombstone backfill (`src/layer1/tombstone-backfill.ts`) — the only in-tree writer of
+`wiki/tombstones/*.md`, which snapshots a legacy `status: retracted` row — **recomputes the content
+form** (`computeFingerprint(content, scope, claim_type)`) whenever the materialised row carries no
+stored fingerprint. It does not emit the structured claim fingerprint (Rule B) even though
+`insertClaim` stamps Rule B on every record it writes, for two reasons: the same legacy rule already
+exists for records missing a fingerprint (`src/layer1/migration.ts` → `backfillClaimVersion`, the Q8
+read-time backfill), and the snapshot block enumerates neither `subject_name`/`predicate`/`object`
+nor `semantic`, so a structured value could not be re-derived from the tombstone alone — in an
+artifact whose stated purpose is that a lost L1 version is reconstructible from it (Conformance Test
+LC-04; `schemas/v0.5.0/tombstone-frontmatter.schema.json` → `snapshot`). This picks a side for
+**legacy backfill snapshots only** and does not reconcile the two rules; no FORGET-path writer emits
+`wiki/tombstones/*.md` yet, and when one lands it must carry the claim's **stored** fingerprint
+forward, as §11 requires.
 
 ## Alternatives considered
 
