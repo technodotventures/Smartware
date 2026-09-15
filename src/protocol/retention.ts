@@ -21,7 +21,7 @@ import type { SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { readLatestVersion, appendClaimVersion, carryDemotion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
-import { appendOpLogEntry, OPERATION_ID_PATTERN, readAllOpLogEntries } from '../ops_log/index.js';
+import { appendOpLogEntry, OPERATION_ID_PATTERN, readAllOpLogEntries, type OpLogEntry } from '../ops_log/index.js';
 import { SMARTWARE_VERSION } from '../version.js';
 
 /** Parse the ISO 8601 "PnD" duration emitted by `toRetentionDurationString`. */
@@ -118,6 +118,45 @@ function buildTombstoneMutation(
   };
 }
 
+/**
+ * Canonical payload identity of a sweep call.
+ *
+ * Only caller-supplied fields participate. `as_of` enters as the *supplied* value (`null` when
+ * omitted): the defaulted instant is a resolution of "now", not part of the payload, so a host that
+ * retries the identical call without `as_of` replays instead of colliding with whatever instant its
+ * first call happened to resolve. `actor_id` enters as the same normalized value the ops entry
+ * records (`observe`/`forget` hash their raw actor; this surface already normalizes for the entry,
+ * so the hash and the entry agree).
+ */
+function sweepPayloadHash(params: ExpireRetentionParams, operationActorId: string): string {
+  return computePayloadHash({
+    actor_id: operationActorId,
+    scope: params.scope,
+    as_of: params.as_of ?? null,
+  });
+}
+
+/**
+ * Does a recorded `retention.expire` entry describe the same payload as this call?
+ *
+ * Entries written before payload identity was recorded carry no `payload_hash`; for those the
+ * identity falls back to what they do carry — the recorded `scope` (always written) and the
+ * recorded `as_of` instant when the caller supplies one. The supplied-versus-defaulted distinction
+ * is only decidable from `payload_hash`, so a legacy entry still replays for a call that omits
+ * `as_of` rather than turning a valid retry into a false `conflict`.
+ */
+function sweepPayloadMatches(
+  entry: OpLogEntry,
+  params: ExpireRetentionParams,
+  asOf: Date,
+  payloadHash: string,
+): boolean {
+  const recorded = entry.details?.['payload_hash'];
+  if (typeof recorded === 'string') return recorded === payloadHash;
+  if (entry.details?.['scope'] !== params.scope) return false;
+  return params.as_of === undefined || entry.details?.['as_of'] === asOf.toISOString();
+}
+
 /** Expire elapsed observations in one scope: tombstone + retract sole-evidence claims. */
 export async function handleExpireRetention(
   params: ExpireRetentionParams,
@@ -141,15 +180,25 @@ export async function handleExpireRetention(
     throw new ProtocolError('invalid_parameter', `Invalid as_of '${params.as_of}'`);
   }
 
-  // Idempotency: a prior sweep with this operation_id is already recorded.
+  // Idempotency (spec v1.6.16 §Integrity invariants; protocol v0.5.0 *Idempotency and commit
+  // identity*): the same OperationId with the same payload returns the prior result, the same
+  // OperationId with a different payload is a `conflict`. The payload — not the id alone — is the
+  // key: keyed on the id alone, a host reusing one id across scopes (or retrying with a corrected
+  // `as_of`) was handed the *other* sweep's counts under the requested scope's name while the
+  // requested scope was never swept, and nothing in the result said so.
+  const payloadHash = sweepPayloadHash(params, operationActorId);
   if (params.operation_id) {
-    const prior = [...readAllOpLogEntries(deps.opsDir)]
-      .find(entry => entry.operation_id === params.operation_id && entry.op === 'retention.expire');
-    if (prior) {
+    const priorEntries = [...readAllOpLogEntries(deps.opsDir)]
+      .filter(entry => entry.operation_id === params.operation_id && entry.op === 'retention.expire');
+    if (priorEntries.length > 0) {
+      const exact = priorEntries.find(entry => sweepPayloadMatches(entry, params, asOf, payloadHash));
+      if (!exact) {
+        throw new ProtocolError('conflict', `operation_id '${params.operation_id}' was already used with a different payload`);
+      }
       return {
         scope: params.scope,
-        observations_expired: Number(prior.details?.['observations_expired'] ?? 0),
-        claims_retracted: Number(prior.details?.['claims_retracted'] ?? 0),
+        observations_expired: Number(exact.details?.['observations_expired'] ?? 0),
+        claims_retracted: Number(exact.details?.['claims_retracted'] ?? 0),
         operation_id: params.operation_id,
       };
     }
@@ -250,6 +299,9 @@ export async function handleExpireRetention(
         observations_expired: expired.length,
         claims_retracted: claimsRetracted,
         as_of: asOf.toISOString(),
+        // The payload identity a retry is matched against (see `sweepPayloadMatches`). Additive:
+        // `details` is free-form in the published ops-entry schema, so no wire contract changes.
+        payload_hash: payloadHash,
       },
     });
   }
