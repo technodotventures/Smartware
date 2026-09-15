@@ -6,6 +6,8 @@ import Ajv2020, { type AnySchema, type ValidateFunction } from 'ajv/dist/2020.js
 import addFormats from 'ajv-formats';
 import { describe, test } from 'vitest';
 
+import { OP_TYPES } from '../src/ops_log/types.js';
+
 const schemaDir = path.join(process.cwd(), 'schemas', 'v0.5.0');
 const schemaFiles = readdirSync(schemaDir)
   .filter(file => file.endsWith('.schema.json'))
@@ -257,6 +259,31 @@ describe('Smartware v0.5.0 schemas', () => {
       op: 'consolidate.evil',
       details: {},
     }), false);
+  });
+
+  test('every writer-surface OpType validates against the published op enum (t_0e3989eb)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    // The writer surface may not admit an op the published v0.5.0 contract
+    // rejects: that would be a typed-in path to unvalidatable receipts
+    // (t_fa18b2bf F-2). The enum may be a superset — ops reserved for
+    // surfaces this implementation does not write yet — so this pins
+    // `OP_TYPES ⊆ enum`, not equality.
+    for (const op of OP_TYPES) {
+      const entry = {
+        operation_id: OPERATION_A,
+        actor_id: 'user:ava',
+        timestamp: NOW,
+        op,
+        details: {},
+      };
+      assert.equal(
+        opsEntry(entry),
+        true,
+        `writer op '${op}' must validate against the published op enum: ${JSON.stringify(opsEntry.errors)}`,
+      );
+    }
   });
 
   test('forget-scope-request: reason semantics and owner pointer rules', () => {

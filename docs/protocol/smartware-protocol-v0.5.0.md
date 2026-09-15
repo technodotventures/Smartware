@@ -447,12 +447,16 @@ hold.release:                      # substrate operation (MCP: smartware_hold_re
   The retention sweep on an open hold: expires 0, writes no bytes, records
   `details.skipped: 'legal_hold'` in its ops entry (result
   `skipped_reason: 'legal_hold'`); evidence written after the hold is preserved.
-- **Release.** Owner-only; `operation_id` is **required** — a release without one
-  is refused `invalid_parameter` before any mutation, because the audited act
-  *is* its receipt (a keyless release performed the act with no canonical
-  record). Idempotent: a replay returns the recorded receipt and, when a lost
-  config write left that same hold reading OPEN, re-publishes the recorded
-  release into `config.holds` (the ops entry is canonical; the receipt and the
+- **Release.** Owner-only; `operation_id` is **required** — a release without a
+  valid key is refused before any mutation, because the audited act *is* its
+  receipt (a keyless release performed the act with no canonical record). The
+  refusal mechanism differs by surface: the core returns `invalid_parameter`
+  for an absent or malformed key; at the MCP boundary an absent field is
+  refused by the transport's own input validation (`-32602`, before the
+  handler runs) and a malformed value reaches the core and returns
+  `invalid_parameter`. Idempotent: a replay returns the recorded receipt and,
+  when a lost config write left that same hold reading OPEN, re-publishes the
+  recorded release into `config.holds` (the ops entry is canonical; the receipt and the
   state can never disagree). Convergence is **duty-scoped**: the receipt names
   the hold it lifted (`hold_operation_id` — the offboarding operation), so a
   hold opened afterwards (a new duty, §2) is never lifted by a stale replay. A
@@ -628,7 +632,10 @@ the ADR-0009 decision, a FORGET.SCOPE shape, or a payload hash.
   boundary, and a keyless release performed the act while writing **no** ops
   entry — an unaudited claim about a preservation duty, contradicting "the
   audited owner act". A release without a valid `op_<ulid>` key is now refused
-  `invalid_parameter` before any mutation (core and MCP). Aligned with
+  before any mutation: the core returns `invalid_parameter` for an absent or
+  malformed key, while at the MCP boundary an absent field is refused by the
+  transport's input validation (`-32602`) before the handler runs and a
+  malformed value returns `invalid_parameter`. Aligned with
   `smartware_forget_scope`, which already required it.
 - **Release replay converges `config.holds`.** If a config write was lost while
   the ops receipt survived (a non-atomic config write could make that order
