@@ -278,6 +278,41 @@ costs a resume hint, not writes (item dedup is content-safe). Hosts keep their
 own checkpoint too; a missing cursor means "resume from your side", never "the
 brain lost writes".
 
+## Consumer-visible change — fencing token at the mutation boundary (2026-09-14, unreleased)
+
+A brain can now refuse a **stale writer**: an optional monotonic epoch is validated at the
+mutation boundary, before any canonical artifact is written. **No protocol or schema surface
+changed** (the five verbs, the RECALL family and FORGET.SCOPE are untouched); this is the
+embedded `SmartwareCore` seam plus one optional open parameter. Decision record:
+[ADR-0007](adr/0007-fencing-token-at-the-mutation-boundary.md).
+
+| surface | before | now |
+|---|---|---|
+| `SmartwareCore.open(options)` | `{ dataDir, ownerId? }` | **additive** optional `fencingToken` — claimed at open, before recovery runs (a stale owner fails fast) |
+| `core.claimFence(token)` | — | register a new ownership epoch on an open writer; refused `fencing_token_stale` below the brain's high-water mark |
+| `core.fencingState()` | — | `{ enabled, token, high_water, refusals, last_refusal }` — the auditable refusal surface |
+| canonical mutations on a fenced brain | any process holding the brain handle could write | refused before any artifact when the presented epoch is older than the high-water (`fencing_token_stale`) or absent (`fencing_token_missing`); each refusal increments a counter and records `{ op, token, high_water, at }` |
+| `ProtocolError` | `code`, `message` | **additive** optional `details` (structured, non-content); surfaced in the MCP/index error envelopes |
+
+The guard is the first step of every canonical mutation (`observe`, `ingest`, `compile`,
+`drainCompileQueue`, `correct`, `revise`, `forget`, `forgetScope`, `restoreScope`,
+`expireRetention`, `consolidate`, `revive`, `endorse`, `quarantineReview`, `grant`, `revoke`,
+`dream`, `registerSource`, `ensureScopes`, `createPodProfile`, `ensureTrustedClientGrant`).
+Session bookkeeping and derived-index writes are not gated. A brain that never saw a claim keeps
+legacy behaviour; once claimed, tokenless writes are refused (fail-closed).
+
+Measured boundary (gauntlet drill `lease-loss-steal` phase A, before/after with a deterministic
+post-guard stall; evidence `gauntlet-fencing-before-20260915T083255Z/` vs
+`gauntlet-fencing-after-20260915T083414Z/` under `/opt/data/workspaces/brain-pilot-evidence/`):
+with the unfenced build the owner, frozen 2.58 s across a lease handoff, **committed on resume**
+(`201`, evidence present) — the window is real; with the fenced build the same scenario is
+refused before any artifact (`503 fencing_token_stale`, evidence JSONL unchanged, refusal
+recorded in `fencingState()`, zero acknowledged writes after the handoff). Latency A/B
+(5 pairs × 40 writes/arm, `latency-ab-20260915T083526Z/`): p50 medians 15.96 vs 15.62 ms — no
+regression distinguishable from run-to-run variance. The remaining
+limit is explicit: a pause *inside* a mutation after its boundary check can still leave partial
+artifacts (never an ops-log commit); storage-level fencing is the follow-on (ADR-0007).
+
 ## Consumer-visible change — host health contract and Coffee-trial SLOs (2026-09-15, unreleased)
 
 A host can now operate a brain from machine-readable status instead of logs, and
@@ -314,3 +349,10 @@ The tested beta boundary is:
 Smartware must not be described as providing general ACID filesystem
 transactions, automatic repair of ambiguous memory, concurrent multi-writer
 safety, or full Specification v1.6.16 conformance.
+
+Fencing (ADR-0007) adds one **conditional** guarantee that must not be
+over-read: *a writer that presents an epoch older than the brain's high-water
+mark is refused before any artifact is written.* It holds when the host issues
+tokens from a monotonic arbiter and claims them (§1h of the integration guide);
+it is not concurrent multi-writer safety, and a pause inside a mutation after
+its boundary check remains outside the measured boundary.

@@ -39,7 +39,8 @@ Constraints that shaped the design:
 3. **Refusal must be precise and priced.** Code-carrying `ProtocolError`, before any canonical
    artifact (evidence JSONL, claim version, ops entry) is written, auditable afterwards.
 4. **The guard must be cheap on the known-good path.** The pilot's write p50 is 13.1 ms; the
-   fresh-token path may not measurably regress (re-verified by the gauntlet).
+   fresh-token path may not measurably regress (re-verified by a same-session alternated A/B —
+   see Evidence).
 
 ## Decision
 
@@ -63,11 +64,12 @@ Specifics:
   statements (claim runs in an IMMEDIATE transaction), so they serialise with every other process
   that has the brain open.
 - **Guard placement**: the first step of every canonical mutation on the core
-  (`observe`, `ingest`, `compile`, `reflect`, `drainCompileQueue`, `correct`, `revise`, `forget`,
+  (`observe`, `ingest`, `compile`, `drainCompileQueue`, `correct`, `revise`, `forget`,
   `forgetScope`, `restoreScope`, `expireRetention`, `consolidate`, `revive`, `endorse`,
-  `quarantineReview`, `grant`, `revoke`, `dream`, `markObservationFreshness`, `registerSource`,
-  `ensureScopes`, `ensureTrustedClientGrant`, `createPodProfile`). Session bookkeeping and
-  derived-index writes are not canonical mutations and are not gated.
+  `quarantineReview`, `grant`, `revoke`, `dream`, `registerSource`, `ensureScopes`,
+  `createPodProfile`, `ensureTrustedClientGrant`). Session bookkeeping, derived-index writes
+  (e.g. freshness labels, semantic sync) and reads are not canonical mutations and are not
+  gated.
 - **Fail-closed once fenced; unchanged until then.** A brain that has never seen a claim
   (`high_water = 0`) behaves exactly as before. After the first claim, any writer without a
   token is refused `fencing_token_missing` (fail-closed on the unknown epoch); a writer with an
@@ -103,13 +105,34 @@ Specifics:
   and can state why fail-closed is unacceptable.
 - The guard reads (usually) a single row; steady-state cost is one indexed SELECT per mutation,
   and a write only when a token *advances* the high-water mark (once per ownership term on the
-  happy path). The gauntlet re-measures the pilot's write latency after enabling fencing.
+  happy path). Measured on the pilot path (same-session alternated A/B, 5 pairs × 40 writes per
+  arm, fenced `c65b302` vs unfenced `9cbe1fb`): p50 median 15.96 ms vs 15.62 ms (+0.34 ms,
+  inside run-to-run spread), p95 noise-dominated — not a measurable regression.
 - **Not closed / not proven**: (1) an in-process pause between the boundary check and the last
   artifact write can still land orphaned artifacts (never a committed ops entry) — recovery
   reports them for manual review; (2) fencing validates writers, not readers — a stale process
   can still read; (3) token issuance quality is the host's responsibility — a lock service that
   re-issues a token breaks the guarantee without breaking the API; (4) the pilot's arbiter is
   single-node Redis, not a partition-tolerant consensus store.
+
+## Evidence (this change)
+
+- **TDD**: `test/fence/fencing-token.test.ts` (6 tests) fails 6/6 on the parent commit
+  `8d24717` and passes 6/6 on the implemented tree — red/green runs recorded under
+  `/opt/data/workspaces/brain-pilot-evidence/fencing-tdd-20260915T083124Z/` (test-file sha256
+  identical in both runs).
+- **Before/after drill** (`lease-loss-steal` phase A, deterministic post-guard stall + SIGSTOP
+  across a lease handoff): unfenced `9cbe1fb` — the stalled write **commits** on resume (the
+  residual window, demonstrated); fenced `c65b302` — the same write is refused before any
+  artifact with `fencing_token_stale`. Runs:
+  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-fencing-before-20260915T083255Z/` and
+  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-fencing-after-20260915T083414Z/`.
+- **Latency A/B**: `/opt/data/workspaces/brain-pilot-evidence/latency-ab-20260915T083526Z/`.
+- **Full-suite regression** on the fenced build (all 19 gauntlet drills, incl. this one):
+  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-fencing-20260914T182639Z/`.
+- **Repo gate** on the committed tree: `tsc` clean · 526/526 vitest across 73 files ·
+  `verify:schemas` 31 OK · `verify:saas` pass · `status:check` current (recorded with kanban
+  `t_9ee8bd54`; the repo journal entry is projected from the board by the substrate sync).
 
 ## Alternatives considered
 
