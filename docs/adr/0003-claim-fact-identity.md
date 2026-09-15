@@ -1,12 +1,13 @@
 # ADR-0003 — Fact identity on the claim write path: the library resolves the fact, not the key
 
 - **Date:** 2026-09-14
-**Status:** Accepted — **the *Known divergence* section below was superseded by [ADR-0005](0005-protocol-claim-identity.md) on 2026-09-14** (owner sign-off pending there). This ADR's Decision and its frozen write-path contract stand unchanged; the divergence is no longer "unreconciled by default" but *declared*, with the relationship between the two rules stated in ADR-0005.
+**Status:** Accepted — **the *Known divergence* section below was superseded by [ADR-0005](0005-protocol-claim-identity.md) on 2026-09-14; ADR-0005 was accepted 2026-09-15 under founder delegation (no owner gate; the ADR/PR is the review surface)**. This ADR's Decision and its frozen write-path contract stand unchanged; the divergence is no longer "unreconciled by default" but *declared*, with the relationship between the two rules stated in ADR-0005.
 - **Deciders:** @smarty-pants (protocol stewardship / research). No owner sign-off gate for the
   **additive SDK surface** itself — no protocol invariant, schema, cryptography, or authority-table
   change. The disposition in *Known divergence* (leaving the pre-existing fingerprint rule
   unreconciled) is a deliberate deferral: **reconciling the two rules is protocol identity semantics
-  and needs owner sign-off.** No published contract is widened here.
+  and needs owner sign-off** — completed 2026-09-15 (ADR-0005 accepted under founder delegation).
+  No published contract is widened here.
 - **Supersedes:** —
 
 ## Context
@@ -115,7 +116,7 @@ WRONG); using `canonicalKey` as the fact identity when `validity_from` is not de
 > **Superseded 2026-09-14 by [ADR-0005](0005-protocol-claim-identity.md)** — disposition only. The
 > divergence below is still real and the measurements still stand; what changed is that the
 > *relationship* between the two rules, the named consumers, and the interop consequence are now
-> stated normatively there, with owner sign-off pending. Read this section as the record of what was
+> stated normatively there (accepted 2026-09-15 under founder delegation). Read this section as the record of what was
 > found, and ADR-0005 as the disposition.
 
 Found by the round-1 reviewer of `t_29739781` (2026-09-14) and reproduced independently here. Both
@@ -176,9 +177,10 @@ Why not the alternatives *in this ADR*:
 - **Leave the divergence silent**: rejected outright — a silent divergence between two documented
   identity rules is the failure mode this ADR exists to prevent. Hence this section.
 
-**Owner decision:** `t_15bb0cd0` (assignee `@tech-head`) must produce an amendment to this section or
-a superseding ADR, with owner sign-off. This section is the placeholder until then, and it is
-deliberately the *only* statement of the relationship between the two rules.
+**Owner decision:** completed — `t_15bb0cd0` produced [ADR-0005](0005-protocol-claim-identity.md), a
+superseding ADR for this section, accepted 2026-09-15 by the Head of Technology under founder
+delegation (no owner gate; the ADR/PR is the review surface). This section stays as the record of
+what was found; the *relationship* between the two rules is stated only in ADR-0005.
 
 **Reversal trigger (explicit).** Supersede this section when any of the following holds:
 
