@@ -21,7 +21,7 @@
         "query": ["client:acme#1", "client:bcau#1"],
         "compile": [],
         "correct": ["client:acme#1"],
-        "forget": [],
+        "forget": ["client:acme#1"],
         "read": ["client:acme#1", "client:bcau#1"]
       },
       "trusted": false,

@@ -61,8 +61,8 @@ import { showAttributionByDefault, attributionLine, whySentence } from 'smartwar
 export const DEFAULT_NAMESPACE = 'coffee';
 export const DEFAULT_LEASE_TTL_MS = 8000;
 
-/** `client:<id>#<n>` — versioned, non-reusable. Wildcards are never a client scope. */
-export const SCOPE_PATTERN = /^client:[a-z0-9][a-z0-9._-]*#\d+$/;
+/** `client:<id>#<n>` — versioned, non-reusable. `#0` is never a valid incarnation; wildcards are never a client scope. */
+export const SCOPE_PATTERN = /^client:[a-z0-9][a-z0-9._-]*#[1-9]\d*$/;
 
 /** Codes the substrate uses to say "refused", as opposed to "unavailable". */
 export const DENIAL_CODES = new Set([
@@ -74,6 +74,7 @@ export const DENIAL_CODES = new Set([
 const ACTOR_TYPES = new Set(['person', 'agent', 'system', 'sidecar', 'substrate']);
 const ACTOR_ID_PATTERN = /^(user|agent|system|sidecar|substrate):\S+$/;
 const OPERATION_ID_PATTERN = /^op_[0-9A-HJKMNP-TV-Z]{26}$/;
+const CORRECTION_REASONS = new Set(['changed', 'wrong', 'extraction_error', 'duplicate']);
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -285,7 +286,7 @@ function grantFor(actorType, descriptor) {
       query: scopes,
       compile: (descriptor.compile ?? []).map(entry => assertScopeShape(entry)),
       correct: (descriptor.correct ?? []).map(entry => assertScopeShape(entry)),
-      forget: [],
+      forget: (descriptor.forget ?? []).map(entry => assertScopeShape(entry)),
       read: scopes,
     },
     trusted: descriptor.trusted ?? false,
@@ -918,6 +919,112 @@ export class CoffeeBrainAdapter {
       retryable: !DENIAL_CODES.has(code),
       hint: String(error?.message ?? error).slice(0, 300),
     };
+  }
+
+  // ── lifecycle and correction operations (lease-routed, owner/staff as granted) ──
+
+  /**
+   * Retention expiry sweep for one scope (ADR-0001): tombstones elapsed
+   * `duration`-policy observations and retracts claims whose only evidence they
+   * were. Idempotent by nature and per `operation_id`; requires a `forget`
+   * grant on the scope (or the owner). Refused on a standby.
+   */
+  async expireRetention({ actor, client, scope, incarnation = 1, as_of, operation_id }) {
+    let verifiedActor; let targetScope;
+    try {
+      verifiedActor = validateActor(actor);
+      targetScope = resolveScope({ client, scope, incarnation });
+    } catch (error) {
+      return this.#refusal(error);
+    }
+    if (this.role !== 'owner') return this.#notHolder(targetScope);
+    try {
+      const result = await this.brain.expireRetention({
+        actor: verifiedActor,
+        scope: targetScope,
+        ...(as_of ? { as_of } : {}),
+        ...(operation_id ? { operation_id } : {}),
+      });
+      return { ok: true, status: 200, scope: targetScope, result };
+    } catch (error) {
+      return this.#brainOpFailed(error);
+    }
+  }
+
+  /**
+   * Restore one EXPORT.SCOPE package into this brain — the return path after a
+   * disaster (ADR-0006). Verifies the manifest checksums and refuses a package
+   * that crosses its scope boundary, a non-empty target scope, or a tampered
+   * package before writing anything. Owner-only; refused on a standby.
+   */
+  async restoreScope({ actor, package_dir, operation_id }) {
+    let verifiedActor;
+    try {
+      verifiedActor = validateActor(actor);
+      if (typeof package_dir !== 'string' || package_dir.trim().length === 0) {
+        throw adapterError('invalid_package_dir', 'package_dir must be the directory of an EXPORT.SCOPE package');
+      }
+    } catch (error) {
+      return this.#refusal(error);
+    }
+    if (this.role !== 'owner') return this.#notHolder('workspace');
+    try {
+      const result = await this.brain.restoreScope({
+        actor: verifiedActor,
+        package_dir,
+        ...(operation_id ? { operation_id } : {}),
+      });
+      return { ok: true, status: 200, ...result };
+    } catch (error) {
+      return this.#brainOpFailed(error);
+    }
+  }
+
+  /**
+   * A warranted correction of one claim (spec verb CORRECT/REVISE). This is the
+   * path that settles a disagreement by explicit human action instead of by
+   * recency, and it is auditable: the brain appends a correction observation and
+   * spawns a new claim version. Requires the `correct` capability on the claim's
+   * scope (carried by the provisioning template) — the brain enforces it.
+   *
+   * One-shot by design: unlike `handleWrite` there is no `operation_id` on this
+   * verb, so a blind retry after a timeout creates another correction version.
+   * Settle ambiguity from the brain, not by retrying.
+   */
+  async correctClaim({
+    actor, target_claim_id, corrected_predicate, corrected_object, corrected_validity, change_time, reason = 'changed',
+  }) {
+    let verifiedActor;
+    try {
+      verifiedActor = validateActor(actor);
+      if (typeof target_claim_id !== 'string' || target_claim_id.length === 0) {
+        throw adapterError('invalid_claim', 'target_claim_id is required');
+      }
+      if (!CORRECTION_REASONS.has(reason)) {
+        throw adapterError('invalid_reason', `reason must be one of changed|wrong|extraction_error|duplicate (got '${String(reason)}')`);
+      }
+      if (corrected_object !== undefined
+        && (!corrected_object || typeof corrected_object !== 'object' || !('value' in corrected_object))) {
+        throw adapterError('invalid_claims', 'corrected_object must be a typed value ({ type, value })');
+      }
+    } catch (error) {
+      return this.#refusal(error);
+    }
+    if (this.role !== 'owner') return this.#notHolder('workspace');
+    try {
+      const result = await this.brain.correct({
+        actor: verifiedActor,
+        target_claim_id,
+        ...(corrected_predicate !== undefined ? { corrected_predicate } : {}),
+        ...(corrected_object !== undefined ? { corrected_object } : {}),
+        ...(corrected_validity !== undefined ? { corrected_validity } : {}),
+        ...(change_time ? { change_time } : {}),
+        reason,
+      });
+      return { ok: true, status: 200, ...result };
+    } catch (error) {
+      return this.#brainOpFailed(error);
+    }
   }
 
   // ── operations surface ────────────────────────────────────────────────────
