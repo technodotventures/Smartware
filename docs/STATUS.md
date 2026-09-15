@@ -101,7 +101,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (60 tasks, 2604 events)
+- ✅ kanban board readable (60 tasks, 2610 events)
 - ✅ every completed task has a journal entry
 
 ## Canonical index
