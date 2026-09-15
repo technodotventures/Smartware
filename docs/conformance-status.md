@@ -61,13 +61,19 @@ results. Re-measured a seventh time 2026-09-15 after the explicit legal-hold
 marker landed (ADR-0009, card t_463c1ff9; the legal-hold suite rewritten to
 R1–R4 and the ops-log schema op enum extended with `hold.release`):
 **534 tests across 74 files**, build clean (`tsc`), 31 schema files verified,
-`verify:saas` pass — same kernel and conformance results.
+`verify:saas` pass — same kernel and conformance results. Re-measured an eighth
+time 2026-09-15 after the legal-hold verification findings were fixed (card
+t_7a64ded2: release requires `operation_id`, a release replay converges the
+released *duty*, `saveConfig` writes atomically with fsync, and the v0.5.0
+ops-log enum completed with `consolidate` / `reflect.explicit` /
+`retention.expire`): **541 tests across 75 files**, build clean (`tsc`), 31
+schema files verified, `verify:saas` pass — same kernel and conformance results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **534 tests across 74 files** with no skips
+- The standalone suite passes **541 tests across 75 files** with no skips
   (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
@@ -93,25 +99,35 @@ R1–R4 and the ops-log schema op enum extended with `hold.release`):
   observation + ops entry, superseded claims never satisfy recall/get, and
   multi-version history is order-correct, including on rebuilt state.
 - The legal-hold marker suite
-  (`test/conformance/r_legal_hold_composition.test.ts`, 4 tests, rewritten
-  2026-09-15, t_463c1ff9 → [ADR-0009](adr/0009-explicit-legal-hold-marker.md);
+  (`test/conformance/r_legal_hold_composition.test.ts`, 7 tests, rewritten
+  2026-09-15, t_463c1ff9 → [ADR-0009](adr/0009-explicit-legal-hold-marker.md),
+  R5–R7 added by the verification follow-up t_7a64ded2;
   supersedes the ADR-0008 composition pins, whose R2/R3 were the assertions the
   marker had to change) is the executable half of the marker decision: with an
   **elapsed time-bound** observation in a scope that took the hold lane, (R1)
   the hold lane opens the hold in the same commit (`config.holds`, ops receipt
   `hold_opened: true`) and the sweep **skips** the held scope explicitly —
   nothing expires, no bytes are written, post-hold evidence stays `accepted`,
-  and the skip is receipted (`details.skipped: 'legal_hold'`); (R2) erasure on
+  and the skip is receipted (`details.skipped: 'legal_hold'`, and that receipt
+  validates against the published v0.5.0 ops-log schema); (R2) erasure on
   the held scope is **refused** (`legal_hold_open`, no mutation, the
   `operation_id` is not consumed) and release is the audited owner act —
-  receipt + config + one `hold.release` ops entry, idempotent per
-  `operation_id`, `conflict` on a different payload, `no_open_hold` when nothing
-  is open, owner-only; (R3) release lifts the gate (the sweep resumes; erasure
-  runs with its attestation/export receipts; the release record survives the
-  scope; a terminal erasure still replays by `operation_id`); (R4) backward
+  receipt + config + one `hold.release` ops entry (naming the duty it lifted,
+  `hold_operation_id`), idempotent per `operation_id`, `conflict` on a
+  different payload, `no_open_hold` when nothing is open, owner-only; (R3)
+  release lifts the gate (the sweep resumes; erasure runs with its
+  attestation/export receipts; the release record survives the scope; a
+  terminal erasure still replays by `operation_id`); (R4) backward
   compatibility and payload identity — a never-held scope erases as before,
   fresh configs carry no hold state, and the v0.5.0 payload-hash formula is
-  unchanged (replaying a committed hold lane does not re-open a released hold).
+  unchanged (replaying a committed hold lane does not re-open a released hold);
+  (R5) a release replay **converges** a lost config write (the ops entry is
+  canonical — a same-key retry re-publishes the recorded release rather than
+  answering "released" while the scope still reads OPEN); (R6) release
+  **requires** `operation_id` — a keyless or malformed key is refused
+  `invalid_parameter` before any mutation, so no unaudited release path exists;
+  (R7) convergence is **duty-scoped** — a stale replay of an old release never
+  lifts a hold opened afterwards (a new duty per §2).
   (C8 of the lifecycle-composition suite now runs the same dispute flow:
   offboarding + snapshot → refused erasure → `hold.release` → erasure.)
 - The Coffee company-brain e2e suite (`test/conformance/coffee-company-brain.test.ts`,
