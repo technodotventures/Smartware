@@ -31,6 +31,12 @@ no property, shape or pattern changes):
   listed, so their receipts failed schema validation. Every op the reference
   implementation writes now validates against this set (card t_7a64ded2).
 
+The enum is a **superset** of what the reference implementation writes — it may
+list ops before a surface emits them. The writer surface is pinned the other
+way: `test/schemas-v0.5.0.test.ts` asserts every op the writer can emit validates
+against this enum, so a writer op missing here fails the suite instead of
+shipping a receipt this set rejects (card t_0e3989eb).
+
 `integrity-manifest-entry.schema.json` describes an optional post-beta surface.
 Its presence does not make the integrity manifest a beta requirement.
 
