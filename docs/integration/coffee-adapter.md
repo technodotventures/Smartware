@@ -277,6 +277,24 @@ that actor, not the first row it finds. VERIFIED (ADR-0012 evidence, S3) that th
 shipped `.find()` precheck denies a scope the actor holds a second row for; the fix
 lands with card `t_864a5900`.
 
+**Sessions union the actor's rows too — and until they do, do not read an empty
+`capabilities_granted` as a denial.** `smartware_session_start`
+(`SmartwareCore.sessionStart`) resolves `capabilities_granted` and the
+trust/quarantine caps from the **first** active row of the actor. VERIFIED
+(ADR-0012 evidence, S4): with one row per client, a session requesting the **second**
+row's client returns `capabilities_granted: []` while `checkGrant` authorizes the
+actor on that scope and a recall on it answers `ok` (`n:1`) — measured in the same
+run. Two host obligations follow. (1) Keep `trusted` and `quarantine` **uniform**
+across an actor's per-client rows: the resolver reads the first row, so a mixed pair
+gives a row-order-dependent trust level (S4D/S4D2 measured `user_facing` vs
+`verified` for the same two rows swapped). (2) Treat the session surface's
+capability list as advisory for multi-row actors until the union lands with card
+`t_864a5900` (test C6 in ADR-0012 §6). The Coffee adapter itself never calls this
+surface — its reads and writes go through the substrate's own operation
+authorization (`checkGrant`, which unions) — but the tenant's MCP server exposes the
+tool, so a host that provisions the per-client shape **and** uses sessions is
+affected.
+
 **Status of this shape in the reference adapter.** One row per (actor, client) is
 the decision; the shipped `coffeeTenantConfig` still emits one row per actor
 listing every scope it was handed (`row_count: 1`, measured S1), and its `#precheck`
