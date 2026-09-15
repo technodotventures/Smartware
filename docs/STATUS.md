@@ -25,7 +25,7 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-15-t_fa18b2bf.md`](journal/2026-09-15-t_fa18b2bf.md) — VERIFY (independent, F1–F3 fix): hold-release keying + duty-scoped replay convergence + durable config writes + v0.5.0 ops enum completion (wip/neo/legal-hold-findings @ 29f5642, PR #12) (2026-09-15)
-- **Journal entries:** 59 · tasks completed on board `smartware`: 58
+- **Journal entries:** 59 · tasks completed on board `smartware`: 60
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -35,8 +35,8 @@
 | `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
 | `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
+| `wip/neo/ops-enum-symmetry` | 53 | 2026-09-15 | docs: state delta for t_0e3989eb (gate evidence, conformance counts, STATUS projection) |
 | `wip/neo/tombstone-backfill-writer` | 53 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_9e124fe6) |
-| `wip/neo/ops-enum-symmetry` | 52 | 2026-09-15 | ops-log: pin the writer OpType to the published enum; precise MCP refusal wording (t_0e3989eb) |
 | `wt/t_ba868906` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
 | `wip/neo/legal-hold-findings` | 51 | 2026-09-15 | docs: state delta for t_7a64ded2 (gate evidence, conformance counts, STATUS projection) |
 | `wip/smarty/tombstone-snapshot-envelope` | 51 | 2026-09-15 | fix(schemas): tombstone snapshot block enumerates the claim record envelope |
@@ -57,8 +57,8 @@
 | `docs/protocol-identity-adr` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
+| `docs/saas-retention-ops-entry` | 37 | 2026-09-15 | docs: the retention sweep's ops entry is caller-supplied only (measured) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
-| `docs/saas-retention-ops-entry` | 36 | 2026-09-12 | Merge pull request #6 from technodotventures/feat/corroboration-reachable |
 | `feat/corroboration-reachable` | 33 | 2026-09-12 | feat: make corroboration reachable, and demonstrate it in the reference example |
 | `fix/concurrent-schema-migration` | 32 | 2026-09-11 | fix: make column migrations idempotent when two processes open one brain |
 | `fix/public-surface-and-docs` | 31 | 2026-09-11 | fix: make the public surface sufficient for host-side claim persistence |
@@ -76,9 +76,8 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
-- `t_3ba3ee39` [todo] L1 record writer: `insertClaim`'s forgotten path omits `supersedes`, so the record fails claim.schema.json's forgotten branch (measured, carded out of t_229601e4) (created 2026-09-15, assignee smarty-pants)
-- `t_9a700aed` [todo] Library-written L1 records: pod-profile scopes (`pod/<pod>/<lane>`) and `substrate:<ULID>` actor ids are rejected by the v0.5.0 Scope/ActorId patterns (measured, carded out of t_229601e4) (created 2026-09-15, assignee neo)
-- `t_432be9c9` [todo] STATUS projection: the ADR README template's `- **Status:**` bullet is not read by scripts/substrate-status.mjs (every template-shaped ADR shows "(no status line)" and is invisible as a pending decision) (created 2026-09-15, assignee smarty-pants)
+- `t_f2b584dc` [todo] DECIDE: FORGET.SCOPE revokes whole grant rows — multi-client staff lose their other clients (Coffee gate finding, ADR-0011) (created 2026-09-15, assignee tech-head)
+- `t_543cb61a` [todo] Owner decision: ADR-0001 Tier-1 invariant 5 ("every expiry writes exactly one ops entry") does not hold on a bare sweep (measured) (created 2026-09-15, assignee tech-head)
 
 ## Blockers and stale work
 
@@ -108,8 +107,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (68 tasks, 2911 events)
-- ✅ every completed task has a journal entry
+- ✅ kanban board readable (71 tasks, 2948 events)
+- ⚠️ 2 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 1 blocked task(s)
 
 ## Canonical index
