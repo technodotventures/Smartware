@@ -235,9 +235,14 @@ do not read one as evidence about the other.
 (`reflect.auto`) consults fact identity: when the store already holds the fact as an active claim it
 attaches the observation as corroboration (extending `derived_from`) instead of creating a second
 one — same protection rule as above, and against a protected (`epistemic_owner: user`) claim it
-writes nothing at all. That closes the *creation* path: it does not retro-repair a store that
-already holds duplicates (the §1e sweep above converges those), and it does not make the two rules
-one rule.
+writes nothing at all. A **demoted** duplicate is not an exception: when the fingerprint key
+matches a duplicate §1e already resolved, the observation is still routed to the fact's surviving
+claim — the demoted claim is never extended with evidence the recall surface cannot show (the
+receipt names the matched demotion, `fact_identity_matches[].fingerprint_matched_demoted`; and if
+no active claim asserts the fact, the matched claim receives the observation so the evidence is
+preserved rather than dropped). That closes the *creation* path: it does not retro-repair a store
+that already holds duplicates (the §1e sweep above converges those), and it does not make the two
+rules one rule.
 
 So a host running both surfaces must not assume the two agree: a Rule-B consumer can report
 differently from the write path on the same rows, and duplicates that predate the creation-side fix
@@ -529,7 +534,7 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 511 tests / 71 files, no skips. The Coffee-specific suites:
+- `npm test` — 512 tests / 71 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
@@ -546,10 +551,11 @@ on the exact version you ship:
   recall-eligible set, including through every flow that hand-builds a version
   record — REVISE, FORGET → REVIVE, the endorsement cascade, consolidation's input
   tombstones, scope offboarding, retention expiry), and
-  `test/protocol/reflect-auto-fact-identity.test.ts` (4 tests: the autonomous path
+  `test/protocol/reflect-auto-fact-identity.test.ts` (5 tests: the autonomous path
   consults fact identity before creating — corroboration instead of a duplicate,
-  protection respected, the fingerprint control, and creation unchanged when no
-  claim holds the fact).
+  protection respected, the fingerprint control, creation unchanged when no
+  claim holds the fact, and a fingerprint match on a **demoted** duplicate routed
+  to the surviving claim rather than extended onto the hidden duplicate).
 - `npm run verify:saas` — public-API smoke on the packaged surface, including the
   §1e duplicate contract end to end: 2 recall results for one fact → 1 after
   resolution, duplicate superseded with its evidence unioned.
