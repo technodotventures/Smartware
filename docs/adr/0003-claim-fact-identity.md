@@ -265,7 +265,11 @@ two rejections, the two crash legs and the torn-set fail-closed case), the schem
 `superseded_by_origin?: 'user'` (the warrant on a demotion) and `reinstated_by?: 'user'` (audit-only
 marker on a release). `schemas/v0.5.0/claim.schema.json` now enumerates both, together with the two
 pre-existing demotion fields (`superseded_by`/`superseded_at`) it had been missing since they shipped —
-additive optional fields only, so no record written before this change stops validating.
+additive optional fields only, so no record written before this change stops validating. The tombstone
+snapshot block enumerates the same four fields
+(`schemas/v0.5.0/tombstone-frontmatter.schema.json` → `snapshot`, kanban `t_2bba749f`, 2026-09-15): its
+`additionalProperties: false` block has to cover every field a claim version can carry, or a forgotten
+demoted duplicate cannot be reconstructed from the tombstone's own snapshot.
 
 ## Consequences
 
