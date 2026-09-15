@@ -18,7 +18,8 @@ Two bindings compose into a silent production incident.
   (`src/protocol/forget_scope.ts` → `grantsReferencingScope()` → every capability
   array that literally lists the scope). A row is revoked **whole**.
 - **§10b.1/§10b.2 (Staff grants, binding):** *one* `Grant` per staff actor, with
-  exact scope-id lists ("the cluster IS the exact scope-id list") per capability.
+  exact scope-id lists ("the cluster IS the exact scope-id list") per capability
+  (amended by this ADR; see §5).
 
 Composed, the revocation boundary is the **row**, not the client the operation is
 about. Multi-client staff are the normal case in the Coffee tenant model — the
@@ -29,14 +30,14 @@ silently removes a colleague's access to a **different** client's memory.
 Measured by the ADR-0011 gate (the revocations themselves land in checks 6a
 offboarding and 6c erasure; the cost to a **second** client is measured in 6n; staff
 provisioned at `scripts/coffee-company-brain-fixture.mjs` line 151): ember-group
-staff `user:sam` held `[client:meridian#1,
-client:arcadia#1]` in one row; erasing `arcadia` flipped his `meridian` recall from
-`ok` to `403 insufficient_permission` until he was re-provisioned. Re-measured for
-this decision on the public adapter surface (evidence below, S1): the row is
-`status:'revoked'` with both scopes still in its arrays, `grants_revoked: 1`.
+staff `user:sam` held `[client:meridian#1, client:arcadia#1]` in one row; erasing
+`arcadia` flipped his `meridian` recall from `ok` to `403 insufficient_permission`
+until he was re-provisioned. Re-measured for this decision on the public adapter
+surface (evidence below, S1): the row is `status:'revoked'` with both scopes still
+in its arrays, `grants_revoked: 1`.
 
-Why this is a defect and not a choice: the operation is scoped (`FORGET.SCOPE{scope:
-client:arcadia#1}`) and its receipt counts what it revoked — but nothing tells the
+Why this is a defect and not a choice: the operation is scoped — `FORGET.SCOPE` for
+`client:arcadia#1` — and its receipt counts what it revoked, but nothing tells the
 operator that a *different* client's access died. The failure is silent, it lands
 on a client that was never the subject of the operation, and the adapter offers no
 re-grant call to undo it. The erasure is correct; the blast radius is not.
