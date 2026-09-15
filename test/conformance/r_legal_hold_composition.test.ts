@@ -9,7 +9,8 @@
 //
 //   R1  the hold lane (offboarding) OPENS the hold in the same commit, and the
 //       sweep SKIPS a held scope explicitly: nothing expires, nothing is
-//       written, post-hold evidence is preserved, and the skip is receipted.
+//       written, post-hold evidence is preserved, and the skip is receipted
+//       (the receipt validates against the published v0.5.0 ops-log schema).
 //   R2  erasure on a held scope is REFUSED (`legal_hold_open`, no mutation, the
 //       operation_id is not consumed); release is an audited owner act with a
 //       receipt, idempotent per operation_id, refusing `no_open_hold` otherwise.
@@ -20,6 +21,16 @@
 //       hold lane erases as before, fresh configs carry no hold state, the
 //       v0.5.0 payload hash formula is unchanged, and replaying a committed
 //       hold lane does not re-open a released hold.
+//   R5  a release replay CONVERGES config (card t_7a64ded2): when a lost config
+//       write leaves the scope reading OPEN while the ops receipt is durable,
+//       the same key re-publishes the recorded release — the replay can never
+//       answer "released" while `isScopeHeld()` stays true.
+//   R6  release REQUIRES operation_id (card t_7a64ded2): a keyless or malformed
+//       key is refused `invalid_parameter` before any mutation — the audited
+//       act is its receipt, so there is no unaudited release path at runtime.
+//   R7  convergence is DUTY-SCOPED (card t_7a64ded2): a stale replay of an old
+//       release never lifts a hold opened afterwards — the receipt names the
+//       offboarding operation it released, and a new duty needs a new key.
 //
 // ADR-0009 is the decision; this file is its executable half.
 
@@ -28,6 +39,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ulid } from 'ulid';
+import Ajv2020 from 'ajv/dist/2020.js';
+import addFormats from 'ajv-formats';
 
 import { SmartwareCore } from '../../src/core.js';
 import {
@@ -40,6 +53,7 @@ import {
 import { readAll } from '../../src/layer0/log.js';
 import { readAllOpLogEntries } from '../../src/ops_log/log.js';
 import { computePayloadHash } from '../../src/layer0/idempotency.js';
+import type { HoldReleaseParams } from '../../src/protocol/hold_release.js';
 import type { Actor } from '../../src/layer0/types.js';
 
 const OWNER: Actor = { type: 'person', id: 'user:owner', display_name: 'Owner' };
@@ -85,6 +99,23 @@ function evidenceBytes(dataDir: string): number {
 function opsEntries(dataDir: string, operationId: string) {
   return [...readAllOpLogEntries(path.join(dataDir, 'operations'))]
     .filter(entry => entry.operation_id === operationId);
+}
+
+/**
+ * Validate a written ops entry against the PUBLISHED v0.5.0 schema set — the
+ * receipt must satisfy the contract consumers verify against, not just the
+ * producer's own assumptions (finding F3, card t_7a64ded2).
+ */
+function validateOpsEntry(entry: unknown): boolean {
+  const dir = path.join(process.cwd(), 'schemas', 'v0.5.0');
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  addFormats(ajv);
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.schema.json'))) {
+    ajv.addSchema(JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')));
+  }
+  const validate = ajv.getSchema('https://smartware.dev/schemas/v0.5.0/operation-log-entry.schema.json');
+  if (!validate) throw new Error('ops-log schema not loaded');
+  return validate(entry) === true;
 }
 
 describe('legal-hold marker (ADR-0009)', () => {
@@ -167,12 +198,17 @@ describe('legal-hold marker (ADR-0009)', () => {
     expect(skipEntry[0]!.details?.['skipped']).toBe('legal_hold');
     expect(skipEntry[0]!.details?.['observations_expired']).toBe(0);
     expect(skipEntry[0]!.details?.['scope']).toBe(ACME);
+    // …and the receipt the marker's own gate writes validates against the
+    // published v0.5.0 ops-log schema (finding F3: `retention.expire` was
+    // written for months but missing from the enum).
+    expect(validateOpsEntry(skipEntry[0])).toBe(true);
   });
 
   it('R2 · erasure under the hold is refused; release is the audited owner act', async () => {
     const c = await open();
     const obsId = await observe(c, ACME, 'Acme dispute evidence — invoice 41');
-    await enterHoldLane(c, `op_${ulid()}`);
+    const offboardOp = `op_${ulid()}`;
+    await enterHoldLane(c, offboardOp);
 
     // The refusal: precise code, no mutation, and the operation_id is NOT consumed.
     const refusedOp = `op_${ulid()}`;
@@ -210,6 +246,8 @@ describe('legal-hold marker (ADR-0009)', () => {
     expect(entries[0]!.details?.['scope']).toBe(ACME);
     expect(entries[0]!.details?.['statement']).toBe(RELEASE_STATEMENT);
     expect(typeof entries[0]!.details?.['payload_hash']).toBe('string');
+    // The receipt names the duty it lifted — the replay-convergence identity.
+    expect(entries[0]!.details?.['hold_operation_id']).toBe(offboardOp);
 
     // Idempotent replay: same operation_id + payload ⇒ the identical receipt, one entry.
     const replay = await c.releaseHold({
@@ -312,6 +350,129 @@ describe('legal-hold marker (ADR-0009)', () => {
       actor: OWNER, scope: ACME, reason: 'offboarding', owner_pointer: pointer, operation_id: offboardOp,
     });
     expect(replayed).toEqual(offboard);
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(false);
+  });
+
+  it('R5 · a release replay converges a lost config write (the ops entry is canonical)', async () => {
+    const c = await open();
+    await observe(c, ACME, 'Acme dispute evidence — invoice 41');
+    await enterHoldLane(c, `op_${ulid()}`);
+
+    const releaseOp = `op_${ulid()}`;
+    const released = await c.releaseHold({
+      actor: OWNER, scope: ACME, statement: RELEASE_STATEMENT, operation_id: releaseOp,
+    });
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(false);
+
+    // Simulate the crash order finding F2 named (card t_7a64ded2): the ops
+    // receipt is durable, the config write is lost, so the scope reads OPEN.
+    // `saveConfig` is atomic + fsync since the fix, so a fresh pod cannot reach
+    // this state — convergence covers pods that already diverged, hand-edited
+    // configs, and any writer that is not durable.
+    const cfg = loadConfig(dataDir);
+    const hold = cfg.holds![ACME]!;
+    hold.released_at = null;
+    hold.released_by = null;
+    hold.release_operation_id = null;
+    hold.release_statement = null;
+    saveConfig(dataDir, cfg);
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(true);
+    // Fail-closed in the meantime: erasure is still refused.
+    await expect(
+      c.forgetScope({ actor: OWNER, scope: ACME, reason: 'erasure', operation_id: `op_${ulid()}` }),
+    ).rejects.toMatchObject({ code: 'legal_hold_open' });
+
+    // A same-key retry must BOTH answer from the log and converge the state.
+    const replay = await c.releaseHold({
+      actor: OWNER, scope: ACME, statement: RELEASE_STATEMENT, operation_id: releaseOp,
+    });
+    expect(replay).toEqual(released);
+    const converged = loadConfig(dataDir).holds?.[ACME];
+    expect(converged?.released_at).toBe(released.released_at);
+    expect(converged?.released_by).toBe(OWNER.id);
+    expect(converged?.release_operation_id).toBe(releaseOp);
+    expect(converged?.release_statement).toBe(RELEASE_STATEMENT);
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(false);
+
+    // Still exactly one canonical receipt: convergence re-publishes, it does
+    // not re-execute the act.
+    expect(opsEntries(dataDir, releaseOp)).toHaveLength(1);
+    expect(opsEntries(dataDir, releaseOp)[0]!.op).toBe('hold.release');
+
+    // The gate is genuinely lifted: the erasure the marker refused now runs.
+    const erased = await c.forgetScope({
+      actor: OWNER, scope: ACME, reason: 'erasure', operation_id: `op_${ulid()}`,
+    });
+    expect(erased.scope_entry_removed).toBe(true);
+  });
+
+  it('R6 · release requires operation_id: a keyless act is refused before any mutation', async () => {
+    const c = await open();
+    await observe(c, ACME, 'Acme dispute evidence — invoice 41');
+    await enterHoldLane(c, `op_${ulid()}`);
+
+    const opsBefore = [...readAllOpLogEntries(path.join(dataDir, 'operations'))].length;
+
+    // The runtime guard: TypeScript callers are typed out of this, but the MCP
+    // boundary and hand-built payloads reach it — an unaudited release must not
+    // exist. (Finding F1, card t_7a64ded2.)
+    await expect(
+      c.releaseHold({ actor: OWNER, scope: ACME, statement: RELEASE_STATEMENT } as unknown as HoldReleaseParams),
+    ).rejects.toMatchObject({ code: 'invalid_parameter' });
+    // A malformed key is refused the same way.
+    await expect(
+      c.releaseHold({ actor: OWNER, scope: ACME, statement: RELEASE_STATEMENT, operation_id: 'not-an-op' }),
+    ).rejects.toMatchObject({ code: 'invalid_parameter' });
+
+    // No mutation, no receipt, and the hold is still enforced.
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(true);
+    expect([...readAllOpLogEntries(path.join(dataDir, 'operations'))].length).toBe(opsBefore);
+    await expect(
+      c.forgetScope({ actor: OWNER, scope: ACME, reason: 'erasure', operation_id: `op_${ulid()}` }),
+    ).rejects.toMatchObject({ code: 'legal_hold_open' });
+  });
+
+  it('R7 · a stale release replay does NOT lift a NEW hold (duty identity, not open-state)', async () => {
+    const c = await open();
+    await observe(c, ACME, 'Acme dispute evidence — invoice 41');
+    const firstHoldOp = `op_${ulid()}`;
+    await enterHoldLane(c, firstHoldOp);
+
+    const releaseOp = `op_${ulid()}`;
+    await c.releaseHold({
+      actor: OWNER, scope: ACME, statement: RELEASE_STATEMENT, operation_id: releaseOp,
+    });
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(false);
+
+    // A new dispute: the lane re-runs, opening a NEW hold (ADR-0009 §2 — a new
+    // preservation duty, not a continuation of the released one).
+    const secondHoldOp = `op_${ulid()}`;
+    await enterHoldLane(c, secondHoldOp);
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(true);
+    expect(loadConfig(dataDir).holds?.[ACME]?.operation_id).toBe(secondHoldOp);
+
+    // A late redelivery of the OLD release replays its recorded receipt — and
+    // must NOT converge the new duty away. (With convergence keyed on "still
+    // open" alone this would silently lift a live legal hold.)
+    const replay = await c.releaseHold({
+      actor: OWNER, scope: ACME, statement: RELEASE_STATEMENT, operation_id: releaseOp,
+    });
+    expect(replay.status).toBe('released');
+    expect(replay.released_at).toBeTruthy();
+    expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(true);
+    expect(loadConfig(dataDir).holds?.[ACME]?.operation_id).toBe(secondHoldOp);
+    expect(loadConfig(dataDir).holds?.[ACME]?.released_at).toBeNull();
+    // Still one receipt for the old act; the replay did not write a new one.
+    expect(opsEntries(dataDir, releaseOp)).toHaveLength(1);
+    await expect(
+      c.forgetScope({ actor: OWNER, scope: ACME, reason: 'erasure', operation_id: `op_${ulid()}` }),
+    ).rejects.toMatchObject({ code: 'legal_hold_open' });
+
+    // The new duty is lifted by a new owner act with its own key.
+    const fresh = await c.releaseHold({
+      actor: OWNER, scope: ACME, statement: RELEASE_STATEMENT, operation_id: `op_${ulid()}`,
+    });
+    expect(fresh.status).toBe('released');
     expect(isScopeHeld(loadConfig(dataDir), ACME)).toBe(false);
   });
 });

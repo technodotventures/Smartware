@@ -5,7 +5,7 @@ import path from 'path';
 import { ulid } from 'ulid';
 import type { ActorType, RetentionPolicy } from './layer0/types.js';
 import { SMARTWARE_VERSION } from './version.js';
-import { ensurePrivateDirectory, writePrivateFile } from './storage/private-fs.js';
+import { ensurePrivateDirectory, writePrivateFileDurable } from './storage/private-fs.js';
 
 export interface ScopeEntry {
   id: string;
@@ -164,7 +164,11 @@ export function loadConfig(dataDir: string): SmartwareConfig {
 export function saveConfig(dataDir: string, config: SmartwareConfig): void {
   ensurePrivateDirectory(dataDir);
   const configPath = path.join(dataDir, 'config.json');
-  writePrivateFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  // Durable (tmp + fsync + rename): config is provisioning state read by every
+  // operation, and its writers pair with canonical ops entries (e.g. the
+  // ADR-0009 hold release). A torn or lost config write would be a divergence
+  // no replay could distinguish from a real state — so it must not happen.
+  writePrivateFileDurable(configPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
 export function createDefaultConfig(dataDir: string): SmartwareConfig {
