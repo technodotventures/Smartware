@@ -122,7 +122,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (87 tasks, 3908 events)
+- ✅ kanban board readable (87 tasks, 3924 events)
 - ⚠️ 31 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
