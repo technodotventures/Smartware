@@ -40,13 +40,25 @@ same gate via `npm ci` from `package-lock.json` on Node 22 and 24, so the two
 runtime lines are verified by CI rather than by this local run), superseding
 the 2026-09-07 baseline: the counts below are unchanged — **446 tests across
 64 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
-contract still fails closed.
+contract still fails closed. Re-measured 2026-09-14 after the isolation suite
+landed: **482 tests across 69 files**, build clean (`tsc`), same schema and
+kernel results. Re-measured again 2026-09-14 after the contradiction/temporal
+lifecycle suite landed: **488 tests across 70 files**, build clean (`tsc`),
+same schema and kernel results. Re-measured a third time 2026-09-14 after the
+sources/ingestion/federated-read suite landed: **515 tests across 71 files**,
+build clean (`tsc`), same schema and kernel results. Re-measured a fourth time
+2026-09-14 after the export-restore return path landed (ADR-0006):
+**520 tests across 72 files**, build clean (`tsc`), same schema and kernel
+results. Re-measured a fifth time 2026-09-15 after the host health contract and
+Coffee-trial SLOs landed (ADR-0008): **550 tests across 77 files**, build clean
+(`tsc`), same schema and kernel results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **446 tests across 64 files** with no skips.
+- The standalone suite passes **520 tests across 72 files** with no skips
+  (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
   "Learned from Maya, May 12; corrected by owner May 13.", badge set
@@ -79,6 +91,63 @@ contract still fails closed.
   never Bcau/Gate/`*`; owner bypasses grants); and EXPORT.SCOPE is exactly one
   client — `scope_exclusive: true`, zero cross-client ids in the package, per-client
   packages distinct, and idempotent by `operation_id`.
+- The isolation suite (`test/conformance/p0_isolation_conformance.test.ts`,
+  11 tests, added 2026-09-14) closes P0-5/P0-7: six businesses with IDENTICAL
+  client scope ids in one process, every read lane (recall, hybrid recall,
+  context, raw-observation window, activity feed, read/browse, conflicts,
+  knowledge graph, semantic documents) driven per actor (owner, human staff,
+  agent, revoked staff, unregistered stranger); a fuzz over
+  **1,350 (actor × scope × lane) combinations** — 972 denials, 378 allowed,
+  **zero cross-tenant or cross-scope results**; federated multi-scope reads
+  deny rather than partially answering an unauthorized scope; denied writes
+  leave no observation, claim, or index row behind. Every denial is an explicit
+  `ProtocolError` (`actor_unregistered` for an identity with no grant row,
+  `insufficient_permission` for a known actor outside its scope) — a lane never
+  answers an unauthorized actor with an empty result.
+- The contradiction/temporal lifecycle suite
+  (`test/conformance/p0_contradiction_temporal.test.ts`, 6 tests, added
+  2026-09-14) closes P0-2/P0-4 against the embedded `SmartwareCore` seam:
+  two actors' conflicting facts for the same canonical key are both retained
+  (claims, evidence lists, raw L0 episodes) and both marked contested, and
+  RECALL returns both with `status: contested` / `epistemic_tag: contested`
+  instead of a silent empty result (the pre-fix defect); a third voice joins
+  the same contest rather than becoming a lone active claim; supersession
+  closes the older claim's event-valid window at the replacement's start
+  (`t_valid_to`) while recording system time (`t_invalidated`); current recall
+  and the working index exclude superseded and stale facts
+  (`include_superseded` / `include_stale` history reaches them); as-of reads
+  reconstruct along **both** axes (event-valid March → the superseded fact;
+  system-recorded March → what the brain then knew); a warranted user REVISE
+  (`origin: user` supersedes edge) is the only path that retires one side of a
+  contest — no LLM adjudication anywhere (fixture configures
+  `llm.provider: 'none'`).
+- The sources/ingestion/federated-read suite
+  (`test/conformance/p0_sources_ingestion.test.ts`, 24 tests, added
+  2026-09-14) closes the shared-workspace contract (P1-2 shape): a source
+  registry inside one business brain (owner-only upsert; per-brain scope; a
+  second business never sees another's sources); fail-closed source context on
+  the write path (unknown → `source_unregistered`, paused → `source_inactive`,
+  actor outside the allow-list → `insufficient_permission`, and nothing
+  written); scope-aware item dedup (the same source item in two scopes is two
+  observations — a client's evidence is never shadowed by another's); ingest
+  receipts with per-item outcomes (a `secret_detected` item is rejected with
+  its code while the batch still commits); `operation_id` replay returning the
+  recorded receipt with zero new writes; crash-mid-batch convergence on retry
+  (fault-injected after the second item: written prefix dedups, the remainder
+  completes once); per-`(source, scope)` cursors; sync status counts and
+  cursors per source/scope, owner-only, with "connected, never synced" and an
+  explicit `source_unregistered` denial for a named unknown source; federated
+  reads across scopes — owner answers across named scopes with scope-tagged
+  results, a staff actor naming an unauthorized scope is denied as a whole
+  (never partially answered), omitted scopes federate over exactly the actor's
+  readable set, and no result carries another business's facts; and attribution
+  through every lane for a human and an agent writing one workspace (actor,
+  actor type and source preserved; quarantined ingestions counted and hidden
+  from the raw window; dedup never rewrites the original writer). The MCP
+  transport suite (`test/conformance/mcp_smoke.test.ts`) drives the same
+  contract over the real stdio server: the five new tools are registered with
+  their required inputs, and a register → ingest → sync-status → federated-read
+  round trip plus a fail-closed ingest denial run over the wire.
 - Tests exercise OBSERVE, RECALL, REFLECT, REVISE, FORGET, REVIVE, ENDORSE,
   FORGET.SCOPE (erasure and offboarding lanes, owner-only enforcement,
   same-commit grant revocation, exact retraction counts, idempotent retry,
@@ -141,6 +210,133 @@ The exact ordering and recovery state table are documented in
 - Passing schemas and behavioral invariants is not an exhaustive
   requirement-by-requirement proof of Specification v1.6.16.
 
+## Consumer-visible change — isolation enforcement (2026-09-14, unreleased)
+
+The embedded read lanes are now actor-bound end to end; a host that currently
+reaches them without an identity must pass one. **No protocol or schema surface
+changed** (the five verbs, RECALL family and FORGET.SCOPE are untouched); this
+is the embedded `SmartwareCore` seam.
+
+| surface | before | now |
+|---|---|---|
+| `core.searchObservations(query, scope, opts?)` | no actor, no grant check — anyone holding the core could read any scope's raw evidence | `core.searchObservations({ actor, query, scope, ... })`; requires a `read` grant on the scope, sensitive content requires owner + opt-in |
+| `core.listActivity(opts?)` | no actor, no grant check; `includeSensitive` widened any caller's view | `core.listActivity({ actor, ... })`; per-scope grants (scope-less calls return only readable scopes); `includeSensitive` requires the owner |
+| `core.recall(...)` / `core.context(...)` on an ungranted scope | empty result set (indistinguishable from "no memory") | `ProtocolError` — `insufficient_permission` / `actor_unregistered` |
+| any `requireGrant` denial | always `insufficient_permission` | `actor_unregistered` when the actor has no grant row at all; `insufficient_permission` when the Pod knows the actor (including revoked/expired grants) |
+
+Hosts must supply the same actor identity they already use for `observe`/`read`,
+and should surface the denial code to the user rather than treating it as "no
+data". Coffee/Pod adapters calling `listActivity` need the actor threaded
+through their activity routes.
+
+## Consumer-visible change — contradiction and temporal semantics (2026-09-14, unreleased)
+
+Conflicting facts now have defined, deterministic semantics on both write paths,
+and a disagreement is visible instead of silent. **No protocol or schema
+surface changed** (the five verbs and their schemas are untouched); this is the
+embedded `SmartwareCore` seam plus one new public subpath. Decision record:
+[ADR-0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md).
+
+| surface | before | now |
+|---|---|---|
+| conflicting writes | second claim became a parallel `active` claim — two "current" truths for one fact | one deterministic policy: same canonical key + different value → every side `contested` (retained, linked via `contested_by`); later event-valid start → older claim `superseded` |
+| contested claims in RECALL | dropped from the claim index → **empty result** for a disagreement | recallable, returned with `status: contested` and `epistemic_tag: contested`; `readConflicts` unchanged |
+| superseded claims | `t_invalidated` (system time) recorded, event-valid window (`t_valid_to`) left open | window closed at the replacement's `t_valid_from` (event-valid time); `validity.to` is now meaningful |
+| valid-time as-of / range reads | superseded claims excluded, so a past window could read empty | include claims that were true in the window (superseded history reconstructs); transaction-time reads unchanged |
+| recall result `claim` object | `id`, `predicate`, `object`, `epistemic`, `confidence`, `status`, `observation_ids`, `valid_at`, `invalid_at`, `recorded_at`, `invalidated_at` | **additive**: `epistemic_tag`, `superseded_by`, `contested_by` |
+| host write path | hosts hand-rolled corroboration and had no contradiction handling at all | `admitClaim(claim, store)` from the new public `smartware/layer1/conflicts` returns `inserted / corroborated / contested / superseded` |
+
+Hosts that render recall results should now handle `contested` (surface both
+sides with the marker) instead of assuming one current truth, and should prefer
+`admitClaim` over a bare `insertClaim` when persisting an extracted fact so the
+corroborate/contest/supersede policy is the library's, not a re-implementation.
+
+## Consumer-visible change — sources, ingestion and federated reads (2026-09-14, unreleased)
+
+Connectors now have a registered provenance origin and an idempotent ingestion
+contract, and a company brain can read across client scopes in one call. **No
+protocol or schema surface changed** (the five verbs, the RECALL family and
+FORGET.SCOPE are untouched); this is the embedded `SmartwareCore` seam plus one
+new public subpath (`smartware/ingestion`) and five MCP tools. Decision record:
+[ADR-0005](adr/0005-sources-ingestion-and-federation.md).
+
+| surface | before | now |
+|---|---|---|
+| observation source | `observation.source` carried only the free-form `source_id` dedup string — any string, no registered origin | **additive** optional `source_ref` = the registered source id; every lane that returns raw evidence carries it (`searchObservations`, `listActivity`, `readObservationEvidence`) |
+| source registry | none | `core.registerSource({ actor, id, kind, display_name, status?, actor_ids?, external_ref? })` (owner-only upsert in `config.json`, `created_at` preserved) and `core.listSources({ actor })`; `kind ∈ connector/meeting/note/agent/manual/system`; `status ∈ active/paused/revoked` |
+| writes under a source | a `source_id` string was accepted from anyone | fail-closed before any write: `source_required` (missing), `source_unregistered`, `source_inactive`, `insufficient_permission` (actor outside the entry's allow-list) |
+| dedup identity | `(app, source_id)` — **scope-blind**: the same item in a second scope was silently dropped as a duplicate of the first | `(app, source_id, scope)` — one item per scope; the same message that matters to two clients lands in both (index swap is in-place in the derived Layer 0 index) |
+| connector ingestion | none — hosts looped `observe` with no cursor, no batch replay, nothing to reconcile after an interrupted sync | `core.ingest({ actor, source_id, scope, cursor, operation_id, items })`: one polled page per batch; opaque cursor + `cursor_before` per `(source, scope)`; replaying a committed `operation_id` returns the recorded receipt and writes nothing; a crash mid-batch converges on retry (written prefix dedups); per-item outcomes with codes (`accepted/duplicate/quarantined/rejected`) and a rejected item never wedges the batch; ≤ 500 items per batch |
+| sync status | none | `core.sourceSyncStatus({ actor, source_id? })` (owner-only): per source and scope — cursor, `cursor_before`, `synced_at`, batch and outcome counts; a registered source with no batches reports "connected, never synced"; a named unknown source denies (`source_unregistered`) |
+| multi-scope reads | no lane answered across scopes (`recall` is single-scope) | `core.recallFederated({ actor, query, scopes? })`: named scopes must **all** be readable or the whole read denies; omitted scopes federate over exactly the actor's readable set (owner: all); results are scope-tagged, scope-major, ranked within each scope |
+| `core.findObservationBySource(app, sourceId)` | two args | now requires the `scope` (identities are scope-aware) |
+| MCP tools | — | `smartware_register_source`, `smartware_list_sources`, `smartware_ingest`, `smartware_sync_status`, `smartware_recall_federated`; `smartware_observe` gains optional `source_ref` |
+
+The ingestion receipt/cursor ledger is **operational state**, not canonical
+evidence: the evidence JSONL a batch wrote is the record, and losing the ledger
+costs a resume hint, not writes (item dedup is content-safe). Hosts keep their
+own checkpoint too; a missing cursor means "resume from your side", never "the
+brain lost writes".
+
+## Consumer-visible change — fencing token at the mutation boundary (2026-09-14, unreleased)
+
+A brain can now refuse a **stale writer**: an optional monotonic epoch is validated at the
+mutation boundary, before any canonical artifact is written. **No protocol or schema surface
+changed** (the five verbs, the RECALL family and FORGET.SCOPE are untouched); this is the
+embedded `SmartwareCore` seam plus one optional open parameter. Decision record:
+[ADR-0007](adr/0007-fencing-token-at-the-mutation-boundary.md).
+
+| surface | before | now |
+|---|---|---|
+| `SmartwareCore.open(options)` | `{ dataDir, ownerId? }` | **additive** optional `fencingToken` — claimed at open, before recovery runs (a stale owner fails fast) |
+| `core.claimFence(token)` | — | register a new ownership epoch on an open writer; refused `fencing_token_stale` below the brain's high-water mark |
+| `core.fencingState()` | — | `{ enabled, token, high_water, refusals, last_refusal }` — the auditable refusal surface |
+| canonical mutations on a fenced brain | any process holding the brain handle could write | refused before any artifact when the presented epoch is older than the high-water (`fencing_token_stale`) or absent (`fencing_token_missing`); each refusal increments a counter and records `{ op, token, high_water, at }` |
+| `ProtocolError` | `code`, `message` | **additive** optional `details` (structured, non-content); surfaced in the MCP/index error envelopes |
+
+The guard is the first step of every canonical mutation (`observe`, `ingest`, `compile`,
+`drainCompileQueue`, `correct`, `revise`, `forget`, `forgetScope`, `restoreScope`,
+`expireRetention`, `consolidate`, `revive`, `endorse`, `quarantineReview`, `grant`, `revoke`,
+`dream`, `registerSource`, `ensureScopes`, `createPodProfile`, `ensureTrustedClientGrant`).
+Session bookkeeping and derived-index writes are not gated. A brain that never saw a claim keeps
+legacy behaviour; once claimed, tokenless writes are refused (fail-closed).
+
+Measured boundary (gauntlet drill `lease-loss-steal` phase A, before/after with a deterministic
+post-guard stall; evidence `gauntlet-fencing-before-20260915T083255Z/` vs
+`gauntlet-fencing-after-20260915T083414Z/` under `/opt/data/workspaces/brain-pilot-evidence/`):
+with the unfenced build the owner, frozen 2.58 s across a lease handoff, **committed on resume**
+(`201`, evidence present) — the window is real; with the fenced build the same scenario is
+refused before any artifact (`503 fencing_token_stale`, evidence JSONL unchanged, refusal
+recorded in `fencingState()`, zero acknowledged writes after the handoff). Latency A/B
+(5 pairs × 40 writes/arm, `latency-ab-20260915T083526Z/`): p50 medians 15.96 vs 15.62 ms — no
+regression distinguishable from run-to-run variance. The remaining
+limit is explicit: a pause *inside* a mutation after its boundary check can still leave partial
+artifacts (never an ops-log commit); storage-level fencing is the follow-on (ADR-0007).
+
+## Consumer-visible change — host health contract and Coffee-trial SLOs (2026-09-15, unreleased)
+
+A host can now operate a brain from machine-readable status instead of logs, and
+the misleading single `layer3.indexed` number is gone. **No protocol or schema
+surface changed** (the five verbs, the RECALL family and FORGET.SCOPE are
+untouched); this is a new embedded `SmartwareCore` method (`health`), one new
+MCP tool (`smartware_health`) and a shape change to the generated `STATUS`
+projection. Decision record:
+[ADR-0008](adr/0008-host-facing-health-contract.md); field-by-field definitions
+in [integration/observability.md](integration/observability.md).
+
+| surface | before | now |
+|---|---|---|
+| `STATUS.layer3` | one `indexed` number counting only the entity/topic FTS lane, reading as "everything is indexed" | four named lanes: `entity_index_rows`, `claim_index_rows`, `observation_index_rows`, `observations_by_freshness` |
+| `core.health({ actor, backup_dir? })` / MCP `smartware_health` | — | lease `role`/holder/epoch-age with `ttl_owner: 'host'`, brain-open state, compile queue depth/oldest-pending age/failures, ingestion cursor lag per `(source, scope)` stream, lane-explicit counts, drift records (`wiki_manifest`, `observation_fts`), denied-access counts by code and entry point, retention/forget receipts (numeric details only), storage bytes by area, backup freshness, recall/write latency histograms with upper-bound p50/p95/p99, recovery events, and the Coffee-trial SLO verdict |
+| authority | owner-only everything | owner sees the whole brain; a read-granted actor sees its readable scopes' counts; an actor with no `read` anywhere is `insufficient_permission`; unregistered is `actor_unregistered` |
+| content | n/a | the report is counts, states, ids and time — no field can carry tenant content (asserted on the serialized report) |
+| SLOs | — | `COFFEE_TRIAL_SLO` with three-state verdicts: `pass` / `breach` / `unknown`; overall `breach` > `unknown` > `ok`, so an unmeasured trial is never reported as `ok` |
+
+The metrics store (`<dataDir>/indices/metrics.db`: denials, latency histograms,
+recovery events) is **operational state**, not canonical memory: deleting it
+loses history and nothing else, and a report after such a wipe says so by
+absence rather than rendering an absent measurement as a pass.
+
 ## Accurate release claim
 
 The tested beta boundary is:
@@ -153,3 +349,10 @@ The tested beta boundary is:
 Smartware must not be described as providing general ACID filesystem
 transactions, automatic repair of ambiguous memory, concurrent multi-writer
 safety, or full Specification v1.6.16 conformance.
+
+Fencing (ADR-0007) adds one **conditional** guarantee that must not be
+over-read: *a writer that presents an epoch older than the brain's high-water
+mark is refused before any artifact is written.* It holds when the host issues
+tokens from a monotonic arbiter and claims them (§1h of the integration guide);
+it is not concurrent multi-writer safety, and a pause inside a mutation after
+its boundary check remains outside the measured boundary.

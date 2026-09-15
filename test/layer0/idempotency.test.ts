@@ -46,13 +46,13 @@ function makeObs(sourceId: string | null): Observation {
 
 describe('checkLegacySourceDedup', () => {
   it('returns not duplicate when source_id is null', () => {
-    const result = checkLegacySourceDedup(index, 'test-app', null);
+    const result = checkLegacySourceDedup(index, 'test-app', null, 'personal');
     expect(result.isDuplicate).toBe(false);
     expect(result.existingId).toBeUndefined();
   });
 
   it('first submission is not a duplicate', () => {
-    const result = checkLegacySourceDedup(index, 'test-app', 'msg-001');
+    const result = checkLegacySourceDedup(index, 'test-app', 'msg-001', 'personal');
     expect(result.isDuplicate).toBe(false);
   });
 
@@ -60,7 +60,7 @@ describe('checkLegacySourceDedup', () => {
     const obs = makeObs('msg-001');
     index.insertOrSkip(obs);
 
-    const result = checkLegacySourceDedup(index, 'test-app', 'msg-001');
+    const result = checkLegacySourceDedup(index, 'test-app', 'msg-001', 'personal');
     expect(result.isDuplicate).toBe(true);
     expect(result.existingId).toBe(obs.id);
   });
@@ -69,7 +69,15 @@ describe('checkLegacySourceDedup', () => {
     const obs = makeObs('msg-001');
     index.insertOrSkip(obs);
 
-    const result = checkLegacySourceDedup(index, 'different-app', 'msg-001');
+    const result = checkLegacySourceDedup(index, 'different-app', 'msg-001', 'personal');
+    expect(result.isDuplicate).toBe(false);
+  });
+
+  it('the same source_id in a different scope is NOT a duplicate (no cross-scope shadow)', () => {
+    const obs = makeObs('msg-001');
+    index.insertOrSkip(obs);
+
+    const result = checkLegacySourceDedup(index, 'test-app', 'msg-001', 'project/other');
     expect(result.isDuplicate).toBe(false);
   });
 });

@@ -73,7 +73,11 @@ export function createSmartwareMcpServer(
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ error: error.code, message: error.message }),
+            text: JSON.stringify({
+              error: error.code,
+              message: error.message,
+              ...(error.details ? { details: error.details } : {}),
+            }),
           }],
           isError: true,
         };
@@ -140,6 +144,8 @@ export function createSmartwareMcpServer(
       scope: z.string(),
       visibility: z.enum(['private', 'scope', 'workspace', 'public']).default('scope'),
       source_id: z.string().optional(),
+      source_ref: z.string().optional()
+        .describe('Registered source id (provenance origin). Unknown/inactive sources are denied.'),
       observed_at: z.string().optional(),
       informed_by: z.array(z.string()).optional(),
       sensitive: z.boolean().default(false),
@@ -155,6 +161,7 @@ export function createSmartwareMcpServer(
         scope: args.scope,
         visibility: args.visibility,
         source_id: args.source_id,
+        source_ref: args.source_ref,
         observed_at: args.observed_at,
         informed_by: args.informed_by,
         sensitive: args.sensitive,
@@ -428,6 +435,21 @@ export function createSmartwareMcpServer(
   );
 
   server.tool(
+    'smartware_restore_scope',
+    'Restore an EXPORT.SCOPE package into this brain (owner only) — the return path for a package. Verifies the manifest checksums, refuses a non-empty target scope (restore, never merge) and refuses a package that crosses its scope boundary. Idempotent per package; derived indexes rebuild from the restored canonical records.',
+    {
+      actor_id: z.string(),
+      package_dir: z.string().describe('Directory of an EXPORT.SCOPE package (contains manifest.json)'),
+      operation_id: z.string().optional().describe('Idempotency key for this restore operation'),
+    },
+    async args => wrap(() => core.restoreScope({
+      actor: actor(args.actor_id, 'person'),
+      package_dir: args.package_dir,
+      operation_id: args.operation_id,
+    }), 'restore_scope'),
+  );
+
+  server.tool(
     'smartware_expire_retention',
     'Retention expiry sweep (ADR-0001). Tombstones elapsed duration-policy observations in one scope and retracts their sole-evidence claims. Idempotent; host-triggered like compile. Requires a forget grant on the scope (or owner).',
     {
@@ -597,6 +619,138 @@ export function createSmartwareMcpServer(
     'Get system status',
     { actor_id: z.string() },
     async args => wrap(() => core.status(args.actor_id), 'status'),
+  );
+
+  server.tool(
+    'smartware_health',
+    'Host-facing health/metrics contract: lease role/epoch and holder, brain open state, compile queue depth/age/failures, ingestion cursor lag, lane counts (claim/observation/index), drift records, denied-access counts, retention/forget receipts, storage size, backup freshness, latency histograms, recovery events and the Coffee-trial SLO evaluation. Counts, states and ids only — never tenant content. Owner sees the whole brain; a read-granted actor sees its scopes.',
+    {
+      actor_id: z.string(),
+      backup_dir: z.string().optional()
+        .describe('Host-owned backup directory to measure freshness against (the brain never creates backups)'),
+    },
+    async args => wrap(
+      () => core.health({ actor: actor(args.actor_id, 'person'), backup_dir: args.backup_dir }),
+      'health',
+    ),
+  );
+
+  // ── Source registry, ingestion and federation (P0 shared-workspace contract) ──
+
+  server.tool(
+    'smartware_register_source',
+    'Register or update a provenance source (owner only). Sources label where evidence came from: connector, meeting, note, agent, manual, system. Re-registering an id updates the entry; status=paused/revoked refuses new writes while keeping recorded history.',
+    {
+      actor_id: z.string().describe('Owner actor id'),
+      source_id: z.string().describe('Stable host-chosen id, e.g. src_gmail_ava'),
+      kind: z.enum(['connector', 'meeting', 'note', 'agent', 'manual', 'system']),
+      display_name: z.string(),
+      status: z.enum(['active', 'paused', 'revoked']).default('active'),
+      actor_ids: z.array(z.string()).optional()
+        .describe('Optional allow-list: only these actors may write under this source'),
+      external_ref: z.string().optional()
+        .describe('Opaque host-side handle (mailbox / account / calendar id)'),
+    },
+    async args => wrap(async () => core.registerSource({
+      actor: actor(args.actor_id, 'person'),
+      id: args.source_id,
+      kind: args.kind,
+      display_name: args.display_name,
+      status: args.status,
+      actor_ids: args.actor_ids,
+      external_ref: args.external_ref,
+    }), 'register_source'),
+  );
+
+  server.tool(
+    'smartware_list_sources',
+    'List the registered provenance sources of this brain (owner only)',
+    { actor_id: z.string() },
+    async args => wrap(async () => core.listSources({ actor: actor(args.actor_id, 'person') }), 'list_sources'),
+  );
+
+  server.tool(
+    'smartware_ingest',
+    'Ingest one batch of source-native items (connector polling loop). The actor must hold an observe grant on the scope and the source must be registered and active. Items dedup by (source, external_id, scope); replaying an operation_id returns the recorded receipt. Item-level failures are reported per item and never wedge the batch.',
+    {
+      actor_id: z.string(),
+      actor_type: z.enum(['person', 'agent', 'system']).default('agent'),
+      actor_display_name: z.string().default('Connector'),
+      source_id: z.string().describe('Registered source id'),
+      scope: z.string(),
+      cursor: z.string().describe('Opaque stream checkpoint AFTER this batch (stored verbatim)'),
+      operation_id: z.string().describe('ULID idempotency key for this batch'),
+      app: z.string().optional().describe('Observation app override (default: the source id)'),
+      items: z.array(z.object({
+        external_id: z.string().describe('Source-native item id (dedup key)'),
+        type: z.enum([
+          'message', 'file', 'meeting', 'preference', 'decision', 'tool_output', 'feedback', 'system',
+        ]).default('message'),
+        content_format: z.enum(['text/markdown', 'text/plain', 'application/json']).default('text/plain'),
+        content_body: z.string(),
+        observed_at: z.string().optional(),
+        visibility: z.enum(['private', 'scope', 'workspace', 'public']).optional(),
+        sensitive: z.boolean().default(false),
+      })).max(500),
+    },
+    async args => wrap(() => core.ingest({
+      actor: actor(args.actor_id, args.actor_type, args.actor_display_name),
+      source_id: args.source_id,
+      scope: args.scope,
+      cursor: args.cursor,
+      operation_id: args.operation_id,
+      app: args.app,
+      items: args.items.map(item => ({
+        external_id: item.external_id,
+        type: item.type,
+        content: { format: item.content_format, body: item.content_body },
+        observed_at: item.observed_at,
+        visibility: item.visibility,
+        sensitive: item.sensitive,
+      })),
+    }), 'ingest'),
+  );
+
+  server.tool(
+    'smartware_sync_status',
+    'Per-source, per-scope sync status: stream cursor, last sync, and batch outcome counts (owner only)',
+    {
+      actor_id: z.string(),
+      source_id: z.string().optional().describe('Limit to one registered source'),
+    },
+    async args => wrap(
+      async () => core.sourceSyncStatus({ actor: actor(args.actor_id, 'person'), source_id: args.source_id }),
+      'sync_status',
+    ),
+  );
+
+  server.tool(
+    'smartware_recall_federated',
+    'Recall across multiple scopes in one call. Named scopes must all be readable by the actor or the whole read denies; omitted scopes federate over exactly the actor\'s readable scopes. Results are scope-tagged.',
+    {
+      actor_id: z.string().optional(),
+      session_id: z.string().optional(),
+      query: z.string().min(1),
+      scopes: z.array(z.string()).optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      include_stale: z.boolean().default(false),
+      include_forgotten: z.boolean().default(false),
+      include_superseded: z.boolean().default(false),
+      include_sensitive: z.boolean().default(false),
+    },
+    async args => wrap(() => {
+      const actorId = requireIdentity(args.actor_id, args.session_id);
+      return core.recallFederated({
+        actor: actor(actorId),
+        query: args.query,
+        scopes: args.scopes,
+        limit: args.limit,
+        include_stale: args.include_stale,
+        include_forgotten: args.include_forgotten,
+        include_superseded: args.include_superseded,
+        include_sensitive: args.include_sensitive,
+      });
+    }, 'recall_federated'),
   );
 
   return server;

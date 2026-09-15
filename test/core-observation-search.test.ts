@@ -48,7 +48,7 @@ describe('SmartwareCore observation raw-search window', () => {
       scope: 'personal',
     });
 
-    const hits = core.searchObservations('atlas', 'personal');
+    const hits = core.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal' });
     expect(hits).toHaveLength(1);
     expect(hits[0]!.id).toMatch(/^obs_/);
     // State-based freshness: never time-derived. A brand new observation is
@@ -70,8 +70,8 @@ describe('SmartwareCore observation raw-search window', () => {
       sensitive: true,
     });
 
-    expect(core.searchObservations('atlas', 'personal')).toHaveLength(0);
-    const hits = core.searchObservations('atlas', 'personal', { includeSensitive: true });
+    expect(core.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal' })).toHaveLength(0);
+    const hits = core.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal', includeSensitive: true });
     expect(hits).toHaveLength(1);
   });
 
@@ -92,14 +92,17 @@ describe('SmartwareCore observation raw-search window', () => {
       observed_at: '2026-09-01T10:00:00Z',
     });
 
-    const inRange = core.searchObservations('atlas', 'personal', {
+    const inRange = core.searchObservations({
+      actor: OWNER,
+      query: 'atlas',
+      scope: 'personal',
       temporalRange: { from: '2026-08-01T00:00:00Z', to: '2026-08-31T00:00:00Z' },
     });
     expect(inRange).toHaveLength(1);
     expect(inRange[0]!.snippet).toContain('briefing');
 
     // Blank query + no range → legacy contract: nothing.
-    expect(core.searchObservations('', 'personal')).toHaveLength(0);
+    expect(core.searchObservations({ actor: OWNER, query: '', scope: 'personal' })).toHaveLength(0);
   });
 
   it('drops a tombstoned observation from the raw window immediately', async () => {
@@ -111,7 +114,7 @@ describe('SmartwareCore observation raw-search window', () => {
       scope: 'personal',
     });
     expect(observed.status).toBe('accepted');
-    expect(core.searchObservations('atlas', 'personal')).toHaveLength(1);
+    expect(core.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal' })).toHaveLength(1);
 
     await core.forget({
       actor: OWNER,
@@ -119,7 +122,7 @@ describe('SmartwareCore observation raw-search window', () => {
       mode: 'tombstone',
       reason: 'client dispute',
     });
-    expect(core.searchObservations('atlas', 'personal')).toHaveLength(0);
+    expect(core.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal' })).toHaveLength(0);
 
     // Rebuild-equivalence: re-open the same data dir → derived index rebuilt
     // from JSONL must agree (no ghost in the raw window).
@@ -128,7 +131,7 @@ describe('SmartwareCore observation raw-search window', () => {
     opened.pop();
     const reopened = await SmartwareCore.open({ dataDir, ownerId: 'user:owner' });
     opened.push(reopened);
-    expect(reopened.searchObservations('atlas', 'personal')).toHaveLength(0);
+    expect(reopened.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal' })).toHaveLength(0);
   });
 
   it('applies structure-body stringification to JSON content', async () => {
@@ -140,7 +143,7 @@ describe('SmartwareCore observation raw-search window', () => {
       scope: 'personal',
     });
 
-    const hits = core.searchObservations('blocked', 'personal');
+    const hits = core.searchObservations({ actor: OWNER, query: 'blocked', scope: 'personal' });
     expect(hits).toHaveLength(1);
     expect(hits[0]!.snippet).toContain('blocked');
   });

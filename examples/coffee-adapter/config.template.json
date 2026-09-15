@@ -1,0 +1,59 @@
+{
+  "instance_id": "smartware_ava_01",
+  "workspace_id": "ava-consulting",
+  "owner_id": "user:ava",
+  "writer_id": "writer_ava_01",
+  "version": "0.7.0",
+  "data_dir": "/var/lib/smartware/ava-consulting/smartware_ava_01",
+  "scopes": [
+    { "id": "self", "parent": null, "visibility_default": "private" },
+    { "id": "workspace", "parent": null, "visibility_default": "workspace" },
+    { "id": "client:acme#1", "parent": "workspace", "visibility_default": "scope" },
+    { "id": "client:bcau#1", "parent": "workspace", "visibility_default": "scope" }
+  ],
+  "grants": [
+    {
+      "id": "grant_gigi",
+      "actor_type": "person",
+      "actor_id": "user:gigi",
+      "capabilities": {
+        "observe": ["client:acme#1", "client:bcau#1"],
+        "query": ["client:acme#1", "client:bcau#1"],
+        "compile": [],
+        "correct": ["client:acme#1"],
+        "forget": [],
+        "read": ["client:acme#1", "client:bcau#1"]
+      },
+      "trusted": false,
+      "quarantine": false,
+      "created_at": "2026-09-15T00:00:00.000Z",
+      "expires_at": null,
+      "status": "active"
+    },
+    {
+      "id": "grant_assistant",
+      "actor_type": "agent",
+      "actor_id": "agent:coffee-assistant",
+      "capabilities": {
+        "observe": ["workspace", "client:acme#1", "client:bcau#1"],
+        "query": ["workspace", "client:acme#1", "client:bcau#1"],
+        "compile": ["workspace"],
+        "correct": [],
+        "forget": [],
+        "read": ["workspace"]
+      },
+      "trusted": true,
+      "quarantine": false,
+      "created_at": "2026-09-15T00:00:00.000Z",
+      "expires_at": null,
+      "status": "active"
+    }
+  ],
+  "sources": [],
+  "llm": { "provider": "none", "model": "" },
+  "staleness": {
+    "default_half_life_days": 90,
+    "scope_overrides": { "self": 365, "project:*": 30 },
+    "stale_threshold": 0.3
+  }
+}

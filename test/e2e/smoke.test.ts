@@ -346,17 +346,19 @@ describe('E2E smoke — full pipeline', () => {
       evidenceDir, layer0, freshConfig, tmpDir,
     );
 
-    // Agent can no longer query — should return zero results (not throw, but empty)
+    // Revoked agent can no longer query. P0-7: the denial is explicit and
+    // code-carrying (a revoked grant is a KNOWN actor, so the code is
+    // `insufficient_permission`, not `actor_unregistered`) — an empty result
+    // would be indistinguishable from "no memory" for the host.
     const updatedConfig = reload();
-    const queryResult = await handleQuery(
+    await expect(handleQuery(
       {
         actor: { type: 'agent', id: AGENT_ID, display_name: 'Agent' },
         query: 'deadline',
         scope: 'project/smartware',
       },
       store, searchIndex, updatedConfig, new ScopeRegistry(updatedConfig),
-    );
-    expect(queryResult.results.length).toBe(0);
+    )).rejects.toMatchObject({ code: 'insufficient_permission' });
   });
 
   it('15. FORGET tombstones an observation', async () => {
@@ -387,7 +389,13 @@ describe('E2E smoke — full pipeline', () => {
     expect(result.layer0.total).toBeGreaterThan(0);
     expect(result.layer1.claims).toBeGreaterThan(0);
     expect(result.layer2.pages).toBeGreaterThanOrEqual(1);
-    expect(result.layer3.indexed).toBeGreaterThanOrEqual(1);
+    // Layer-3 lanes are counted separately (the old single `indexed` field read
+    // as "everything is indexed" while counting only the entity/topic lane).
+    expect(result.layer3.entity_index_rows).toBeGreaterThanOrEqual(1);
+    expect(result.layer3.claim_index_rows).toBeGreaterThanOrEqual(1);
+    // This suite wires the protocol handlers directly, so the raw-observation
+    // lane is only what a rebuild put there — assert it is a real count.
+    expect(Number.isInteger(result.layer3.observation_index_rows)).toBe(true);
   });
 
   it('17. STATUS rejects non-owner', async () => {

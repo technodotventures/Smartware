@@ -7,7 +7,12 @@ import fs from 'fs';
 import path from 'path';
 import { ulid } from 'ulid';
 
-import { loadConfig, saveConfig, type Grant, type ScopeEntry, type SmartwareConfig } from './config.js';
+import { loadConfig, saveConfig, type Grant, type ScopeEntry, type SmartwareConfig, type SourceEntry, type SourceKind, type SourceStatus } from './config.js';
+import { registerSourceEntry, listSourceEntries, type RegisterSourceParams } from './ingestion/sources.js';
+import { IngestionStore } from './ingestion/store.js';
+import { handleIngest, type IngestDeps } from './ingestion/ingest.js';
+import type { IngestHooks, IngestParams, IngestResult } from './ingestion/types.js';
+import { computeSourceSyncStatus, type SourceSyncStatus } from './ingestion/sync.js';
 import { SMARTWARE_VERSION } from './version.js';
 import { Layer0Index } from './layer0/index.js';
 import { ClaimStore } from './layer1/store.js';
@@ -54,12 +59,13 @@ import { ensureGitRepo } from './layer2/git.js';
 import { replayCatchUp } from './layer1/replay.js';
 import { iterAllClaimVersions, type ClaimVersionRecord } from './layer1/jsonl.js';
 import { readAll } from './layer0/log.js';
-import type { Actor } from './layer0/types.js';
+import type { Actor, Observation } from './layer0/types.js';
 import type { ClaimRelation, EpistemicTag } from './layer1/types.js';
 import { epistemicToTag } from './layer1/types.js';
 import { runDefaultDream, type DreamResult } from './dream/phases.js';
 import { runRecovery } from './ops_log/recovery.js';
 import { ensurePrivateDirectory } from './storage/private-fs.js';
+import { FenceStore } from './storage/fence.js';
 
 import { handleObserve, type ObserveParams, type ObserveResult } from './protocol/observe.js';
 import {
@@ -86,6 +92,11 @@ import {
   type ExportScopeParams,
   type ExportScopeResult,
 } from './protocol/export_scope.js';
+import {
+  handleRestoreScope,
+  type RestoreScopeParams,
+  type RestoreScopeResult,
+} from './protocol/restore_scope.js';
 import { handleEndorse, type EndorseParams, type EndorseResult } from './protocol/endorse.js';
 import {
   handleQuarantineReview,
@@ -101,10 +112,14 @@ import {
   type SessionDescribeResult, type SessionEndResult,
 } from './protocol/session.js';
 import { handleStatus, type StatusResult } from './protocol/status.js';
+import { handleHealth, type HealthParams, type HealthReport } from './protocol/health.js';
+import { MetricsStore, defaultMetricsPath } from './observability/metrics.js';
+import { LatencyRecorder } from './observability/latency.js';
+import { installObservability } from './observability/instrument.js';
 import { handleContext, type ContextParams, type ContextBundle } from './protocol/context.js';
 import { SessionStore } from './session/store.js';
-import { createGrant, getGrantForActor, isOwner } from './auth/grants.js';
-import { ProtocolError, requireGrant } from './auth/middleware.js';
+import { createGrant, getGrantForActor, isOwner, checkGrant } from './auth/grants.js';
+import { ProtocolError, requireGrant, requireOwner } from './auth/middleware.js';
 import {
   openCompileQueue,
   runCompileBatch,
@@ -118,7 +133,33 @@ import {
 export interface SmartwareCoreOptions {
   dataDir: string;
   ownerId?: string;
+  /**
+   * Fencing epoch for this writer (ADR-0007). When present, the writer is bound to this
+   * monotonic token: it is claimed at open (a stale owner fails fast), and every canonical
+   * mutation is refused before any artifact is written if the brain has already seen a
+   * higher epoch. Omit for legacy, unfenced operation.
+   */
+  fencingToken?: number;
 }
+
+/** Public fencing state of a core writer (ADR-0007). */
+export interface FencingState {
+  /** True once this brain has seen any claim (i.e. fencing was adopted). */
+  enabled: boolean;
+  /** The epoch this writer presented (null when it has none). */
+  token: number | null;
+  /** The highest epoch this brain has seen. */
+  high_water: number;
+  /** When the current epoch was claimed (null when no epoch has been seen). */
+  claimed_at: string | null;
+  /** Canonical mutations refused by the guard so far. */
+  refusals: number;
+  /** The most recent refusal, or null. */
+  last_refusal: { op: string; token: number | null; high_water: number; at: string } | null;
+}
+
+// Public type surface for the source registry (re-exported for hosts).
+export type { SourceEntry, SourceKind, SourceStatus };
 
 export interface SmartwareDreamParams {
   actor: Actor;
@@ -181,6 +222,29 @@ export interface SmartwareHybridRecallResult {
   semantic_index_error?: string;
 }
 
+export interface FederatedRecallParams {
+  actor: Actor;
+  query: string;
+  /** Named scopes: every one must be readable by the actor, or the read denies. */
+  scopes?: string[];
+  /** Per-scope result limit. */
+  limit?: number;
+  min_confidence?: QueryParams['min_confidence'];
+  include_stale?: boolean;
+  include_superseded?: boolean;
+  include_forgotten?: boolean;
+  include_sensitive?: boolean;
+}
+
+export interface FederatedRecallResult {
+  /** Scopes actually queried, in request (or registration) order. */
+  scopes: string[];
+  /** Per-scope ranked results, concatenated scope-major. Every row carries `scope`. */
+  results: QueryResult['results'];
+  per_scope: Array<{ scope: string; total_found: number; returned: number }>;
+  total_found: number;
+}
+
 export interface SmartwareActivityEvent {
   id: string;
   type: string;
@@ -192,6 +256,8 @@ export interface SmartwareActivityEvent {
   captured_at: string;
   content: string | object;
   source_id: string | null;
+  /** Registered source id this evidence came from (null on legacy records). */
+  source_ref: string | null;
   sensitive: boolean;
 }
 
@@ -205,6 +271,8 @@ export interface SmartwareObservationSearchResult {
   snippet: string;
   source_app: string;
   source_id: string | null;
+  /** Registered source id this evidence came from (null on legacy records). */
+  source_ref: string | null;
   /** Effective status (accepted / quarantined / tombstoned / redacted / rejected). */
   status: string;
   /** State-based raw-freshness label: unverified | EXTRACTED | FAILED (spec §10a). */
@@ -300,12 +368,22 @@ export class SmartwareCore {
   private store: ClaimStore;
   private searchIndex: SearchIndex;
   private sessionStore: SessionStore;
+  private ingestionStore: IngestionStore;
   private previewGcInterval: NodeJS.Timeout | null = null;
   /** Durable compile queue + fingerprint index (async-compile path, §9.1). */
   private compileQueue: CompileQueue | null = null;
   private fingerprintIndex: FingerprintIndex | null = null;
+  /** Fencing epoch state (ADR-0007); null token = legacy unfenced writer. */
+  private readonly fence: FenceStore;
+  private fenceToken: number | null = null;
+  /** Durable operational metrics (refusals, latency, recovery summaries). */
+  private readonly metrics: MetricsStore;
+  /** In-process latency buffer; flushed to `metrics` on report / close. */
+  private readonly latency: LatencyRecorder;
+  /** When this process opened the brain (health: restart detection / uptime). */
+  private readonly openedAt: string = new Date().toISOString();
 
-  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore) {
+  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore, metrics: MetricsStore, latency: LatencyRecorder) {
     this.dataDir = dataDir;
     this.evidenceDir = path.join(dataDir, 'evidence');
     this.wikiDir = path.join(dataDir, 'wiki');
@@ -314,7 +392,13 @@ export class SmartwareCore {
     this.store = store;
     this.searchIndex = searchIndex;
     this.sessionStore = sessionStore;
+    this.fence = fence;
+    this.metrics = metrics;
+    this.latency = latency;
     this.previewStore = new CascadePreviewStore(path.join(dataDir, 'indices', 'previews.db'));
+    // Ingestion ledger (batch receipts + stream cursors). Operational state:
+    // see the honesty note in src/ingestion/store.ts.
+    this.ingestionStore = new IngestionStore(path.join(dataDir, 'smartware.db'));
   }
 
   static async open(options: SmartwareCoreOptions): Promise<SmartwareCore> {
@@ -328,8 +412,21 @@ export class SmartwareCore {
     const store = new ClaimStore(dbPath);
     const searchIndex = new SearchIndex(dbPath);
     const sessionStore = new SessionStore(dbPath);
+    const fence = FenceStore.open(dbPath);
+    const metrics = MetricsStore.open(defaultMetricsPath(options.dataDir));
+    const latency = new LatencyRecorder(metrics);
 
-    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore);
+    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence, metrics, latency);
+    // ADR-0007: a fenced writer claims its epoch before any recovery or derived-index
+    // work. A stale owner fails fast here — it must not run recovery or write anything.
+    if (options.fencingToken !== undefined) {
+      try {
+        core.adoptFenceToken(options.fencingToken, 'open');
+      } catch (error) {
+        core.close();
+        throw error;
+      }
+    }
     // PR-14: tell the ClaimStore where the L1 JSONL canonical lives. Every
     // subsequent insertClaim will also append a versioned record.
     store.setDataDir(options.dataDir);
@@ -342,6 +439,21 @@ export class SmartwareCore {
       claimsDir: core.dataDir,
       wikiDir: core.wikiDir,
       quarantineDir: path.join(core.dataDir, 'quarantine', 'operations'),
+    });
+    // The recovery scan is an operational event: record what it found at open so
+    // a host can alert on "this brain has been recovering" without reading logs.
+    // Counts only — no locators, no content (see docs/integration/observability.md).
+    metrics.recordRecovery({
+      at: new Date().toISOString(),
+      opened_at: core.openedAt,
+      committed_operations: recovery.committedOperations,
+      orphans: recovery.orphans.length,
+      pending_operations: recovery.pendingOperations.length,
+      intent_errors: recovery.intentErrors.length,
+      requires_manual_review: recovery.requiresManualReview.length,
+      completed: recovery.completed.length,
+      quarantined: recovery.quarantined.length,
+      aborted: recovery.aborted.length,
     });
     layer0.catchUp(core.evidenceDir);
     if (recovery.pendingOperations.length === 0) {
@@ -393,7 +505,48 @@ export class SmartwareCore {
     // GC once on open so a long-stopped Pod doesn't accumulate stale rows.
     core.previewStore.gc();
 
-    return core;
+    // Host-facing accounting (refusals + latency) is installed at the boundary.
+    return installObservability(core, metrics, latency);
+  }
+
+  /**
+   * Fencing (ADR-0007). A host that arbitrates brain ownership outside the brain
+   * (a lease with a monotonic epoch) binds its writer to that epoch here. The brain
+   * persists the highest epoch it has seen and refuses any canonical mutation from a
+   * writer whose epoch is older — before any artifact is written.
+   */
+
+  /** Register a new ownership epoch on this writer (takeover without reopen). */
+  claimFence(token: number): FencingState {
+    this.adoptFenceToken(token, 'claim');
+    return this.fencingState();
+  }
+
+  /** The auditable fencing state of this brain (session token + persisted high-water). */
+  fencingState(): FencingState {
+    const state = this.fence.state();
+    return {
+      enabled: state.high_water > 0,
+      token: this.fenceToken,
+      high_water: state.high_water,
+      claimed_at: state.high_water > 0 ? state.updated_at : null,
+      refusals: state.refusals,
+      last_refusal: state.last_refusal,
+    };
+  }
+
+  private adoptFenceToken(token: number, op: string): void {
+    this.fence.claim(token, op);
+    this.fenceToken = token;
+  }
+
+  /**
+   * The mutation-boundary guard: every canonical mutation calls this first, so a
+   * stale writer is refused with a code-carrying ProtocolError BEFORE any artifact
+   * (evidence JSONL, claim version, ops entry) is touched.
+   */
+  private fenceGuard(op: string): void {
+    this.fence.guard(this.fenceToken, op);
   }
 
   getConfig(): SmartwareConfig {
@@ -412,6 +565,7 @@ export class SmartwareCore {
    * those concepts to Smartware's profile contract.
    */
   ensureScopes(entries: ScopeEntry[]): void {
+    this.fenceGuard('ensureScopes');
     const config = this.getConfig();
     const existing = new Set(config.scopes.map(scope => scope.id));
     const additions = entries.filter(entry => !existing.has(entry.id));
@@ -420,7 +574,38 @@ export class SmartwareCore {
     saveConfig(this.dataDir, config);
   }
 
+  /**
+   * Register (or update) a provenance origin for this business brain.
+   *
+   * Owner-only, like every other provisioning change. Coffee owns OAuth,
+   * scheduling and connector credentials; the brain owns the label that makes
+   * ingested evidence attributable. Re-registering an id updates the mutable
+   * fields and preserves `created_at` — never duplicates the entry.
+   */
+  registerSource(params: RegisterSourceParams): SourceEntry {
+    this.fenceGuard('registerSource');
+    return registerSourceEntry(this.dataDir, params);
+  }
+
+  /** Every registered source in this brain. Owner-only. */
+  listSources(params: { actor: Actor }): SourceEntry[] {
+    requireOwner(params.actor.id, this.getConfig());
+    return listSourceEntries(this.getConfig());
+  }
+
+  /**
+   * Sync status projection for the host's UI/scheduler: per registered source,
+   * per scope: cursor, last sync, and batch outcome counts. Owner-only; a
+   * named unknown source denies (`source_unregistered`) rather than answering
+   * empty.
+   */
+  sourceSyncStatus(params: { actor: Actor; source_id?: string }): SourceSyncStatus[] {
+    requireOwner(params.actor.id, this.getConfig());
+    return computeSourceSyncStatus(this.getConfig(), this.ingestionStore, params.source_id);
+  }
+
   createPodProfile(podId: string, name = 'Pod'): SmartwarePodProfile {
+    this.fenceGuard('createPodProfile');
     const config = this.getConfig();
     const scope = (suffix: string) => `pod/${podId}/${suffix}`;
     const scopes = {
@@ -448,6 +633,7 @@ export class SmartwareCore {
   }
 
   ensureTrustedClientGrant(actorId: string, actorType: 'agent' | 'person' | 'system', scopes: string[]): Grant {
+    this.fenceGuard('ensureTrustedClientGrant');
     const existing = getGrantForActor(actorId, this.getConfig());
     if (existing) {
       const config = this.getConfig();
@@ -485,6 +671,7 @@ export class SmartwareCore {
   }
 
   async observe(params: ObserveParams): Promise<ObserveResult> {
+    this.fenceGuard('observe');
     return handleObserve(
       params,
       this.evidenceDir,
@@ -493,21 +680,43 @@ export class SmartwareCore {
       this.sessionStore,
       this.opsDir,
       {
-        // Sync-raw freshness (spec §10a): index the raw observation at commit
-        // time so the raw window is searchable before any compile job runs.
-        // Status at this moment is the observation's own (accepted or
-        // quarantined); the search query filters status='accepted'.
-        afterObservation: (obs) => {
-          this.searchIndex.indexObservation(observationToIndexRow(obs));
-          // Async-compile (spec §9.1): enqueue accepted observations on the
-          // durable queue — the write path never runs the LLM, never blocks
-          // on extraction, and never silently omits the raw window.
-          if (obs.status === 'accepted') {
-            this.compileQueue?.enqueue(obs.id, obs.scope);
-          }
-        },
+        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1).
+        afterObservation: obs => this.afterObservationCommitted(obs),
       },
     );
+  }
+
+  /**
+   * Post-commit hook shared by OBSERVE and ingestion batches: index the raw
+   * observation into the always-searchable window and enqueue accepted
+   * evidence on the durable compile queue (the LLM never runs on the write
+   * path).
+   */
+  private afterObservationCommitted(obs: Observation): void {
+    this.searchIndex.indexObservation(observationToIndexRow(obs));
+    if (obs.status === 'accepted') {
+      this.compileQueue?.enqueue(obs.id, obs.scope);
+    }
+  }
+
+  /**
+   * Ingest one batch of source-native items (connector polling loop).
+   *
+   * See `src/ingestion/ingest.ts` for the guarantees. Hosts call this with an
+   * authenticated actor + registered source; context problems fail closed
+   * before anything is written.
+   */
+  async ingest(params: IngestParams, hooks?: IngestHooks): Promise<IngestResult> {
+    this.fenceGuard('ingest');
+    const deps: IngestDeps = {
+      evidenceDir: this.evidenceDir,
+      layer0: this.layer0,
+      config: this.getConfig(),
+      store: this.ingestionStore,
+      sessionStore: this.sessionStore,
+      afterObservation: obs => this.afterObservationCommitted(obs),
+    };
+    return handleIngest(params, deps, hooks);
   }
 
   async query(params: QueryParams): Promise<QueryResult> {
@@ -516,6 +725,77 @@ export class SmartwareCore {
 
   async recall(params: QueryParams): Promise<QueryResult> {
     return this.query(params);
+  }
+
+  /**
+   * Federated RECALL across multiple scopes in one call (the company-brain
+   * "read across my workspaces" lane). Constraints:
+   *
+   *   - named scopes: the actor must be able to read EVERY named scope —
+   *     otherwise the whole read denies (`insufficient_permission` /
+   *     `actor_unregistered`). A federated read never partially answers a
+   *     request that named an unauthorized scope;
+   *   - omitted scopes: exactly the actor's readable scopes (owner: all scopes
+   *     in the brain; a registered actor: the scopes its grants cover; an
+   *     unregistered actor: denial, not an empty result).
+   *
+   * Results are scope-tagged and ordered scope-major (each scope's own
+   * ranking); scores are comparable within a scope, not across scopes.
+   */
+  async recallFederated(params: FederatedRecallParams): Promise<FederatedRecallResult> {
+    const config = this.getConfig();
+    const owner = isOwner(params.actor.id, config);
+    const allScopes = config.scopes.map(entry => entry.id);
+
+    let scopes: string[];
+    if (params.scopes && params.scopes.length > 0) {
+      scopes = [...new Set(params.scopes)];
+      for (const scope of scopes) {
+        requireGrant(params.actor.id, 'query', scope, config);
+      }
+    } else if (owner) {
+      scopes = allScopes;
+    } else {
+      scopes = allScopes.filter(scope => checkGrant(params.actor.id, 'query', scope, config));
+      if (scopes.length === 0) {
+        const known = config.grants.some(grant => grant.actor_id === params.actor.id || grant.actor_id === '*');
+        throw new ProtocolError(
+          known ? 'insufficient_permission' : 'actor_unregistered',
+          known
+            ? `Actor '${params.actor.id}' has no readable scope`
+            : `Actor '${params.actor.id}' is not registered with this Pod.`,
+        );
+      }
+    }
+
+    const results: FederatedRecallResult['results'] = [];
+    const perScope: FederatedRecallResult['per_scope'] = [];
+    let totalFound = 0;
+    for (const scope of scopes) {
+      const scoped = await handleQuery(
+        {
+          actor: params.actor,
+          query: params.query,
+          scope,
+          limit: params.limit,
+          min_confidence: params.min_confidence,
+          include_stale: params.include_stale,
+          include_superseded: params.include_superseded,
+          include_forgotten: params.include_forgotten,
+          include_sensitive: params.include_sensitive,
+        },
+        this.store,
+        this.searchIndex,
+        config,
+        this.getRegistry(),
+        this.sessionStore,
+      );
+      results.push(...scoped.results);
+      totalFound += scoped.total_found;
+      perScope.push({ scope, total_found: scoped.total_found, returned: scoped.results.length });
+    }
+
+    return { scopes, results, per_scope: perScope, total_found: totalFound };
   }
 
   async context(params: ContextParams): Promise<ContextBundle> {
@@ -729,7 +1009,37 @@ export class SmartwareCore {
     };
   }
 
-  listActivity(options: { scope?: string; types?: string[]; actorId?: string; limit?: number; includeSensitive?: boolean } = {}): SmartwareActivityEvent[] {
+  /**
+   * Activity feed over accepted raw observations. Actor-bound: the caller's
+   * identity decides the scopes it may see, whether the request names one
+   * scope (`requireGrant`, so an ungranted scope is a denial rather than an
+   * empty feed) or asks across scopes (the feed is filtered to the scopes the
+   * actor may read). Sensitive observations additionally require the owner AND
+   * an explicit opt-in.
+   */
+  listActivity(options: {
+    actor: Actor;
+    scope?: string;
+    types?: string[];
+    actorId?: string;
+    limit?: number;
+    includeSensitive?: boolean;
+  }): SmartwareActivityEvent[] {
+    const config = this.getConfig();
+    const owner = isOwner(options.actor.id, config);
+    const includeSensitive = options.includeSensitive === true && owner;
+    if (options.scope) requireGrant(options.actor.id, 'read', options.scope, config);
+
+    // Per-scope decision memo: one config read per distinct scope, not per row.
+    const readableScopes = new Map<string, boolean>();
+    const mayRead = (scope: string): boolean => {
+      const cached = readableScopes.get(scope);
+      if (cached !== undefined) return cached;
+      const allowed = owner || checkGrant(options.actor.id, 'read', scope, config);
+      readableScopes.set(scope, allowed);
+      return allowed;
+    };
+
     const limit = options.limit ?? 50;
     const types = new Set(options.types ?? []);
     const events: SmartwareActivityEvent[] = [];
@@ -737,9 +1047,10 @@ export class SmartwareCore {
     for (const obs of readAll(this.evidenceDir)) {
       if (obs.status !== 'accepted') continue;
       if (options.scope && obs.scope !== options.scope) continue;
+      if (!options.scope && !mayRead(obs.scope)) continue;
       if (types.size > 0 && !types.has(obs.type)) continue;
       if (options.actorId && obs.source.actor.id !== options.actorId) continue;
-      if (obs.policy.sensitive && !options.includeSensitive) continue;
+      if (obs.policy.sensitive && !includeSensitive) continue;
       events.push({
         id: obs.id,
         type: obs.type,
@@ -751,6 +1062,7 @@ export class SmartwareCore {
         captured_at: obs.source.captured_at,
         content: obs.content.body,
         source_id: obs.source.source_id,
+        source_ref: obs.source.source_ref ?? null,
         sensitive: obs.policy.sensitive,
       });
     }
@@ -760,22 +1072,32 @@ export class SmartwareCore {
       .slice(0, limit);
   }
 
-  searchObservations(
-    query: string,
-    scope: string,
-    options: {
-      limit?: number;
-      includeSensitive?: boolean;
-      temporalRange?: { from: string; to: string };
-      /** Restrict to these state-based freshness labels (spec §10a). */
-      freshness?: ObservationFreshness[];
-    } = {},
-  ): SmartwareObservationSearchResult[] {
-    const terms = searchObservationQueryTerms(query);
+  /**
+   * Raw-observation window (spec §10a) — the lane where un-compiled evidence is
+   * searchable. Actor-bound like every other read lane: the caller's identity
+   * decides what it may see, and an actor with no `read` grant on the scope is
+   * denied rather than answered with an empty window. Sensitive observations
+   * additionally require the owner AND an explicit opt-in — a staff caller can
+   * never widen its own view by setting the flag.
+   */
+  searchObservations(params: {
+    actor: Actor;
+    query: string;
+    scope: string;
+    limit?: number;
+    includeSensitive?: boolean;
+    temporalRange?: { from: string; to: string };
+    /** Restrict to these state-based freshness labels (spec §10a). */
+    freshness?: ObservationFreshness[];
+  }): SmartwareObservationSearchResult[] {
+    const config = this.getConfig();
+    requireGrant(params.actor.id, 'read', params.scope, config);
+    const includeSensitive = params.includeSensitive === true && isOwner(params.actor.id, config);
+    const terms = searchObservationQueryTerms(params.query);
     // The legacy substring matcher returned [] for a blank query with no
     // temporal anchor; keep that contract (the FTS fallback would otherwise
     // scan the whole scope).
-    if (terms.length === 0 && !options.temporalRange) return [];
+    if (terms.length === 0 && !params.temporalRange) return [];
 
     // Time bound vs. state bound: the FTS window is state-based — the
     // freshness label, never a timestamp. Layer 0 is the authoritative
@@ -783,13 +1105,13 @@ export class SmartwareCore {
     // landed after indexing (tombstone/redaction/reject/approve) drops the
     // row immediately rather than after the next rebuild.
     const hits: IndexedObservationSearchResult[] = this.searchIndex.searchObservations(
-      query,
-      scope,
+      params.query,
+      params.scope,
       {
-        limit: options.limit,
-        includeSensitive: options.includeSensitive,
-        temporalRange: options.temporalRange,
-        freshness: options.freshness,
+        limit: params.limit,
+        includeSensitive,
+        temporalRange: params.temporalRange,
+        freshness: params.freshness,
       },
     );
 
@@ -807,6 +1129,7 @@ export class SmartwareCore {
         snippet: makeObservationSnippet(hit.content, terms),
         source_app: hit.source_app,
         source_id: hit.source_id,
+        source_ref: hit.source_ref,
         status: hit.status,
         freshness: hit.freshness,
       });
@@ -814,7 +1137,7 @@ export class SmartwareCore {
 
     return results
       .sort((a, b) => b.observed_at.localeCompare(a.observed_at))
-      .slice(0, options.limit ?? 10);
+      .slice(0, params.limit ?? 10);
   }
 
   /**
@@ -856,11 +1179,13 @@ export class SmartwareCore {
       content: observation.content.body,
       source_app: observation.source.app,
       source_id: observation.source.source_id,
+      source_ref: observation.source.source_ref ?? null,
       sensitive: observation.policy.sensitive,
     };
   }
 
   async compile(params: CompileParams): Promise<CompileHandlerResult> {
+    this.fenceGuard('compile');
     return handleCompile(
       params,
       this.evidenceDir,
@@ -887,6 +1212,7 @@ export class SmartwareCore {
   async drainCompileQueue(
     opts: { limit?: number; useLLM?: boolean } = {},
   ): Promise<CompileBatchResult | null> {
+    this.fenceGuard('drainCompileQueue');
     if (!this.compileQueue || !this.fingerprintIndex) return null;
     const ctx: CompileWorkerContext = {
       evidenceDir: this.evidenceDir,
@@ -923,6 +1249,7 @@ export class SmartwareCore {
    * scheduler and does not pass a canonical L2 recompile callback.
    */
   dream(params: SmartwareDreamParams): DreamResult {
+    this.fenceGuard('dream');
     const config = this.getConfig();
     if (!isOwner(params.actor.id, config)) {
       throw new ProtocolError('owner_required', 'Dream is an owner-only operator command');
@@ -1097,10 +1424,12 @@ export class SmartwareCore {
   }
 
   async correct(params: CorrectParams): Promise<CorrectResult> {
+    this.fenceGuard('correct');
     return handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
   }
 
   async revise(params: ReviseParams): Promise<ReviseResult> {
+    this.fenceGuard('revise');
     return handleReviseSpec(
       params,
       this.dataDir,
@@ -1111,6 +1440,7 @@ export class SmartwareCore {
   }
 
   async forget(params: ForgetParams): Promise<ForgetResult> {
+    this.fenceGuard('forget');
     const result = await handleForget(
       params,
       this.evidenceDir,
@@ -1139,6 +1469,7 @@ export class SmartwareCore {
     params: ForgetScopeParams,
     options: { semanticStore?: SemanticRecordStore | null } = {},
   ): Promise<ForgetScopeResult> {
+    this.fenceGuard('forgetScope');
     const config = this.getConfig();
     return handleForgetScope(params, {
       evidenceDir: this.evidenceDir,
@@ -1172,12 +1503,37 @@ export class SmartwareCore {
   }
 
   /**
+   * RESTORE.SCOPE — the return path for an EXPORT.SCOPE package: write one package's canonical
+   * records back into this brain (owner-only; target scope must be empty). Derived state
+   * catches up from the canonical records, exactly like a wipe-and-rebuild.
+   */
+  async restoreScope(params: RestoreScopeParams): Promise<RestoreScopeResult> {
+    this.fenceGuard('restoreScope');
+    const config = this.getConfig();
+    const result = await handleRestoreScope(params, {
+      evidenceDir: this.evidenceDir,
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      store: this.store,
+      config,
+    });
+    if (result.status === 'restored') {
+      this.layer0.catchUp(this.evidenceDir);
+      this.store.setDataDir(this.dataDir);
+      syncSearchFromClaims(this.store, this.searchIndex, result.scope);
+      syncObservationsFromEvidence(this.evidenceDir, this.layer0, this.searchIndex);
+    }
+    return result;
+  }
+
+  /**
    * Retention expiry sweep (ADR-0001). Tombstones elapsed `duration`-policy
    * observations in one scope and retracts their sole-evidence claims, with a
    * single `retention.expire` ops entry. Naturally idempotent: re-running finds
    * no new expired records. Host-triggered, like `drainCompileQueue`.
    */
   async expireRetention(params: ExpireRetentionParams): Promise<ExpireRetentionResult> {
+    this.fenceGuard('expireRetention');
     const config = this.getConfig();
     return handleExpireRetention(params, {
       evidenceDir: this.evidenceDir,
@@ -1195,6 +1551,7 @@ export class SmartwareCore {
    * tombstoning (not deleting) the inputs.
    */
   async consolidate(params: ConsolidateParams): Promise<ConsolidateResult> {
+    this.fenceGuard('consolidate');
     const result = await handleConsolidate(
       params,
       this.dataDir,
@@ -1223,6 +1580,7 @@ export class SmartwareCore {
   }
 
   async revive(params: ReviveParams): Promise<ReviveResult> {
+    this.fenceGuard('revive');
     return handleRevive(
       params,
       this.dataDir,
@@ -1234,6 +1592,7 @@ export class SmartwareCore {
   }
 
   async endorse(params: EndorseParams): Promise<EndorseResult> {
+    this.fenceGuard('endorse');
     return handleEndorse(
       params,
       this.dataDir,
@@ -1247,6 +1606,7 @@ export class SmartwareCore {
   async quarantineReview(
     params: QuarantineReviewParams,
   ): Promise<QuarantineReviewResult> {
+    this.fenceGuard('quarantineReview');
     const result = await handleQuarantineReview(
       params,
       this.evidenceDir,
@@ -1261,6 +1621,7 @@ export class SmartwareCore {
   }
 
   async grant(params: GrantParams): Promise<GrantResult> {
+    this.fenceGuard('grant');
     return handleGrant(
       params,
       this.evidenceDir,
@@ -1271,6 +1632,7 @@ export class SmartwareCore {
   }
 
   async revoke(params: RevokeParams): Promise<RevokeResult> {
+    this.fenceGuard('revoke');
     return handleRevoke(
       params,
       this.evidenceDir,
@@ -1312,8 +1674,42 @@ export class SmartwareCore {
     );
   }
 
-  findObservationBySource(app: string, sourceId: string): string | null {
-    return this.layer0.checkDedup(app, sourceId);
+  /**
+   * Host-facing health/metrics report (P1-3). Owner or read-granted actor;
+   * counts, states and ids only — never tenant content. See
+   * `src/protocol/health.ts` and docs/integration/observability.md for the
+   * field definitions.
+   */
+  async health(params: HealthParams): Promise<HealthReport> {
+    const state = this.fencingState();
+    return handleHealth(params, {
+      config: this.getConfig(),
+      layer0: this.layer0,
+      store: this.store,
+      searchIndex: this.searchIndex,
+      wikiDir: this.wikiDir,
+      compileQueue: this.compileQueue,
+      metrics: this.metrics,
+      latency: this.latency,
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      ingestionStatus: () => computeSourceSyncStatus(this.getConfig(), this.ingestionStore),
+      openedAt: this.openedAt,
+      ownership: {
+        arbitration: 'external',
+        enforcement: state.enabled ? 'fencing' : 'none',
+        role: state.token !== null ? 'writer' : (state.enabled ? 'observer' : 'unfenced_writer'),
+        epoch_high_water: state.high_water,
+        epoch_claimed_at: state.claimed_at,
+        presented_token: state.token,
+        refusals: state.refusals,
+        last_refusal: state.last_refusal,
+      },
+    });
+  }
+
+  findObservationBySource(app: string, sourceId: string, scope: string): string | null {
+    return this.layer0.checkDedup(app, sourceId, scope);
   }
 
   close(): void {
@@ -1323,11 +1719,15 @@ export class SmartwareCore {
     }
     this.compileQueue?.close();
     this.fingerprintIndex?.close();
+    this.fence.close();
+    this.latency.close();
+    this.metrics.close();
     this.layer0.close();
     this.store.close();
     this.searchIndex.close();
     this.sessionStore.close();
     this.previewStore.close();
+    this.ingestionStore.close();
   }
 
   /**
@@ -1476,5 +1876,6 @@ export * from './protocol/retention.js';
 export * from './protocol/consolidate.js';
 export * from './protocol/session.js';
 export * from './protocol/status.js';
+export * from './protocol/health.js';
 export * from './session/types.js';
 export * from './session/checkpoint.js';

@@ -24,6 +24,7 @@ import type { SearchIndex } from '../layer3/search.js';
 import type { ScopeRegistry } from '../scopes/registry.js';
 import { buildAuthorizedClaimSnapshot } from '../layer4/authorized-claims.js';
 import { assembleContext } from '../layer4/assembly.js';
+import { requireGrant } from '../auth/middleware.js';
 
 export interface ContextParams {
   query: string;
@@ -155,6 +156,11 @@ export async function handleContext(
   evidenceDir?: string,
   layer0?: Layer0Index,
 ): Promise<ContextBundle> {
+  // §7 ACCESS: CONTEXT is a RECALL-family read. An unauthorized scope is
+  // denied here rather than answered with an empty bundle (P0-7); the
+  // authorized snapshots below filter independently.
+  requireGrant(params.actor_id, 'query', params.scope, config);
+
   const assembled = assembleContext(
     params.query,
     params.scope,

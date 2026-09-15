@@ -813,7 +813,18 @@ export class ClaimStore {
     }
   }
 
-  updateClaimStatus(id: string, status: ClaimStatus, supersededBy?: string, invalidatedAt?: ClaimTimeValue): void {
+  updateClaimStatus(
+    id: string,
+    status: ClaimStatus,
+    supersededBy?: string,
+    invalidatedAt?: ClaimTimeValue,
+    /**
+     * Event-valid closure: when a claim is superseded by one whose validity
+     * starts later, its own valid window ends at that start (only applied when
+     * the window is still open — an already-closed window is history).
+     */
+    validTo?: ClaimTimeValue,
+  ): void {
     const claim = this.getClaim(id);
     if (!claim) return;
     claim.status = status;
@@ -823,6 +834,9 @@ export class ClaimStore {
     }
     if (invalidatedAt) {
       claim.t_invalidated = invalidatedAt;
+    }
+    if (validTo && claim.t_valid_to.state === 'null') {
+      claim.t_valid_to = validTo;
     }
     claim.validity = compatibilityValidity(claim.t_valid_from, claim.t_valid_to, claim.t_ingested);
     this.insertClaim(claim);

@@ -13,6 +13,31 @@ export interface ScopeEntry {
   visibility_default: 'private' | 'scope' | 'workspace' | 'public';
 }
 
+/** Provenance origin kind for a registered source (Coffee parity contract). */
+export type SourceKind = 'connector' | 'meeting' | 'note' | 'agent' | 'manual' | 'system';
+export type SourceStatus = 'active' | 'paused' | 'revoked';
+
+/**
+ * A registered provenance origin within one business brain: the connector,
+ * meeting, note stream, agent run or system pipeline evidence came from.
+ *
+ * The registry is provisioning state (like `scopes` and `grants`) and is
+ * owner-managed. Coffee owns OAuth, scheduling and connector credentials; the
+ * brain only accepts authenticated actor + source context and fails closed
+ * when it is missing, unknown, inactive, or claimed by a disallowed actor.
+ */
+export interface SourceEntry {
+  id: string;
+  kind: SourceKind;
+  display_name: string;
+  status: SourceStatus;
+  created_at: string;
+  /** Optional allow-list of actor ids permitted to write under this source. */
+  actor_ids?: string[];
+  /** Optional opaque host-side handle (mailbox / account / calendar id). */
+  external_ref?: string | null;
+}
+
 export interface Grant {
   id: string;
   actor_type: ActorType;
@@ -55,6 +80,8 @@ export interface SmartwareConfig {
   data_dir: string;
   scopes: ScopeEntry[];
   grants: Grant[];
+  /** Registered provenance origins (owner-managed; absent in pre-0.7.0 configs). */
+  sources?: SourceEntry[];
   llm: {
     provider: 'anthropic' | 'openai' | 'openrouter' | 'none';
     model: string;
@@ -85,6 +112,7 @@ const DEFAULT_CONFIG: Omit<SmartwareConfig, 'instance_id' | 'writer_id' | 'data_
     { id: 'project:default', parent: 'workspace', visibility_default: 'scope' },
   ],
   grants: [],
+  sources: [],
   llm: {
     provider: 'none',
     model: '',
