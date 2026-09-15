@@ -409,11 +409,39 @@ one indexed read per mutation; no measurable regression on this path. Evidence:
 
 What this closes: any mutation whose boundary check runs after a newer epoch is claimed —
 including a writer resumed from an arbitrarily long stall between the guard and the brain call.
-What is still **NOT proven**: a pause *inside* one mutation after the brain's own boundary check
-can still leave partial (uncommitted) artifacts — never an ops-log commit; recovery reports
-unmatched sets (storage-level fencing is the follow-on). Fencing is also only as strong as the
-token issuer: the arbiter must be monotonic per acquisition, and single-node Redis is not a
-consensus store.
+
+**The in-mutation window is closed at storage level (ADR-0010).** A process can also be paused
+*inside* a mutation — after the brain's boundary check and its first canonical artifact, before its
+commit signal. The commit signal is now epoch-gated: one immediate SQLite transaction validates the
+writer's epoch against the persisted high-water mark and records the authorization before the
+signal is appended, so a resumed stale writer is refused at the gate; and recovery **rejects —
+never finalizes, never merges** — an uncommitted artifact set from an epoch behind the mark,
+reporting it under `staleEpochRejected` (exposed on the pilot's `/health` as
+`recovery.stale_epoch_rejected`; zero committed mutations, zero manual-review escalations, no
+speculative repair).
+
+Measured on the same harness, drill `storage-fence-in-mutation` (pause inside OBSERVE after the L0
+artifact; process frozen ~2.2 s across a lease handoff; resumed):
+
+- **Before** (build `5d67409`, boundary-fenced but storage-blind — capability-probed
+  `storage_fence_supported: false`): on resume the stale write **committed** (`201`), and the new
+  owner's open-time recovery had already **finalized** the dead writer's set (`recovered: true`):
+  two commit signals for one operation — the merge this closes. Evidence:
+  `/opt/data/workspaces/brain-pilot-evidence/storage-fence-before-20260915T1018Z/`.
+- **After** (build `c852aae`, `storage_fence_supported: true`): the resumed write was refused at the
+  commit gate (`503 fencing_token_stale`, **zero** commit signals for the operation; the partial L0
+  artifact retained), and the new owner's recovery reported the set as
+  `stale_epoch_rejected: [{ reason: epoch_behind_high_water, epoch: 1, high_water: 2, artifacts: 1 }]`
+  — zero committed operations, zero pending, zero manual review. Evidence:
+  `/opt/data/workspaces/brain-pilot-evidence/storage-fence-after-20260915T1020Z/`.
+
+What is still **NOT proven**: artifact-level epoch stamps (attribution rides on the intent, which is
+written first and removed last — not on stamped artifact records); one narrow interleaving can leave
+a duplicate projection line (a pause between the gate and the append with recovery projecting first;
+consumers key on `operation_id` presence); writers without intents (session bookkeeping, `runCommit`
+without a fence) are not epoch-gated; fencing is only as strong as the token issuer: the arbiter
+must be monotonic per acquisition, and single-node Redis is not a consensus store. Full detail:
+ADR-0010.
 
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 

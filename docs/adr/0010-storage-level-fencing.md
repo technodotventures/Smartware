@@ -144,19 +144,31 @@ Specifics:
 
 ## Evidence (this change)
 
-- **TDD**: `test/fence/storage-fencing.test.ts` — RED on the drill-seam commit (no storage gate),
-  GREEN on the implemented tree; same test-file sha256 in both runs.
-  `/opt/data/workspaces/brain-pilot-evidence/storage-fencing-<stamp>/` (see the index README).
-- **Before/after drill** (`storage-fence-in-mutation`, gauntlet): a process is paused inside a
-  mutation (after its L0 artifact, before the commit signal), frozen across a lease handoff,
-  then resumed. The before arm (boundary fence only) commits the stale mutation after the
-  handoff — the defect, measured. The after arm refuses it at the commit gate with zero commit
-  signals, and the new owner's open-time recovery reports the partial set under
-  `staleEpochRejected` (never finalized, never pending).
-- **Repo gate** on the committed tree: `tsc` clean · vitest suite green · `verify:schemas` OK ·
-  `verify:saas` pass · `status:check` current.
-- **Not proven / not covered:** artifact-level stamps (see Alternatives 1); the duplicate
-  projection line in the post-gate interleaving (Consequences); non-intent writers' partial
-  artifacts (session bookkeeping, `runCommit` without a fence) still classify as generic
-  orphans; the arbiter remains single-node Redis in the pilot; fencing validates writers, not
-  readers.
+- **TDD**: `test/fence/storage-fencing.test.ts` (10 tests). RED on the drill-seam commit `5d67409`
+  (no storage fence): 9/10 fail — the one pass is the legacy-unfenced compatibility test, which is
+  designed to pass on both trees. GREEN on the implemented tree. Test-file sha256 identical in both
+  runs (`91de7311b09cb3ddb9abd8a288ee073f3f019d982292075ac1b6d84ab2f5c2ac`). Outputs:
+  `/opt/data/workspaces/brain-pilot-evidence/storage-fencing-20260915/red/` and `.../green/`.
+- **Before/after drill** (`storage-fence-in-mutation`, gauntlet; pause inside OBSERVE after the L0
+  artifact, frozen ~2.2 s across a lease handoff, then resumed):
+
+  - **Before** (`5d67409`, boundary-fenced, storage-blind — probe `storage_fence_supported: false`):
+    the resumed write **commits** (`201`) and the new owner's open-time recovery had already
+    **finalized** the dead writer's set (`recovered: true`) — two commit signals for one operation.
+    Verdict `residual-confirmed`.
+    `/opt/data/workspaces/brain-pilot-evidence/storage-fence-before-20260915T1018Z/`
+  - **After** (`c852aae`, `storage_fence_supported: true`): refused at the commit gate (`503
+    fencing_token_stale`, **zero** commit signals; the partial L0 artifact retained), and the new
+    owner's recovery reports `stale_epoch_rejected [{reason: epoch_behind_high_water, epoch: 1,
+    high_water: 2, artifacts: 1}]` with zero committed/pending/manual-review. Verdict `pass`.
+    `/opt/data/workspaces/brain-pilot-evidence/storage-fence-after-20260915T1020Z/`
+  - Index: `/opt/data/workspaces/brain-pilot-evidence/storage-fencing-20260915/README.md`.
+- **Full suite** on the committed tree: 536/536 vitest across 74 files (baseline 526 across 73).
+- **Full gauntlet regression** on the after build, all 19 entries pass (incl. `lease-loss-steal`):
+  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-storage-fence-20260915T1025Z/`.
+- **Repo gate** on the committed tree: `tsc` clean · `npm audit --omit=dev` 0 vulnerabilities ·
+  `verify:schemas` 31 OK · `verify:saas` pass · `status:check` current.
+- **Not proven / not covered:** artifact-level stamps (see Alternatives 1); the duplicate projection
+  line in the post-gate interleaving (Consequences); non-intent writers (session bookkeeping,
+  `runCommit` without a fence) are not epoch-gated; the arbiter remains single-node Redis in the
+  pilot; fencing validates writers, not readers.
