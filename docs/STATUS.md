@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wt/t_c5c999ba` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/legal-hold-marker` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,20 +24,28 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-14-t_ec159c21.md`](journal/2026-09-14-t_ec159c21.md) — P0 fix: deterministic corroboration proof in Coffee-shaped pilot (2026-09-14)
-- **Journal entries:** 36 · tasks completed on board `smartware`: 39
+- **Journal:** [`2026-09-15-t_c5c999ba.md`](journal/2026-09-15-t_c5c999ba.md) — DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition) (2026-09-15)
+- **Journal entries:** 45 · tasks completed on board `smartware`: 44
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/neo/tombstone-backfill-writer` | 53 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_9e124fe6) |
+| `wip/smarty/tombstone-snapshot-envelope` | 51 | 2026-09-15 | fix(schemas): tombstone snapshot block enumerates the claim record envelope |
+| `wip/neo/repick-survivor` | 50 | 2026-09-15 | docs: regenerate STATUS (board counters; drift is projection-only) |
+| `falsifier/t_e8bd6747` | 47 | 2026-09-15 | test-tree: compose F1 + F2 onto one tree for the ADR-0005 steady-state falsifier |
+| `wt/t_c5c999ba` | 47 | 2026-09-14 | docs: decide legal hold — v1 composition stands, marker not built (ADR-0008) |
+| `feat/deepseek-provider` | 46 | 2026-09-15 | feat(extraction): add deepseek provider (OpenAI-compatible, api.deepseek.com) |
+| `wip/neo/fencing-token` | 46 | 2026-09-15 | docs: fencing evidence — before/after gauntlet pair, measured cost, guard-list fix |
 | `wip/smarty/demotion-handbuilt-records` | 46 | 2026-09-14 | docs: regenerate STATUS (board counters after the t_742e31f9 evidence comment) |
 | `wt/t_ad51d0e2` | 46 | 2026-09-14 | docs: regenerate STATUS projection (lifecycle composition lane) |
-| `wip/neo/p0-sources-ingestion` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
 | `wt/t_65569b9e` | 45 | 2026-09-14 | fence: monotonic epoch validated at the brain mutation boundary (ADR-0007) |
+| `wip/neo/f1-reflect-auto-identity` | 44 | 2026-09-15 | docs(journal): record the pilot cross-check and gate evidence for t_2996a3ab |
+| `wip/neo/p0-sources-ingestion` | 44 | 2026-09-14 | docs: regenerate journal + STATUS projections after the resilience gauntlet |
 | `wip/neo/demotion-durability` | 43 | 2026-09-14 | docs(journal): state delta for t_01ef0ede (demotion durability) + STATUS regen |
-| `docs/protocol-identity-adr` | 40 | 2026-09-14 | docs: decide protocol claim identity — one fact-identity predicate, one creation key |
+| `docs/protocol-identity-adr` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
@@ -60,12 +68,11 @@ Unmerged work — read the branch before assuming this tree is current.
 - `t_9740ae98` [todo] GATE run: realistic Coffee company-brain acceptance and soak (created 2026-09-13, assignee neo)
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
-- `t_2996a3ab` [todo] Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) (created 2026-09-14, assignee neo)
+- `t_85817375` [todo] L1 record writer: insertClaim stamps op_LEGACY00000000000000000000, which the published OperationId pattern rejects (created 2026-09-15, assignee smarty-pants)
 
 ## Blockers and stale work
 
-- `t_15bb0cd0` Decide protocol identity: does claim fact identity include claim_type, or is the spec fingerprint the autonomous-path truth? (ADR-0003 vs spec §193)
-- `t_1db21462` DECIDE: a user-only way to re-pick which duplicate survives (release a mechanical demotion) — protocol surface + owner sign-off
+- No blocked tasks on the board.
 
 ## Decisions
 
@@ -76,7 +83,8 @@ Unmerged work — read the branch before assuming this tree is current.
 | [0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md) | ADR-0004 — Contradiction and bi-temporal lifecycle | (no status line) |  |
 | [0005](adr/0005-sources-ingestion-and-federation.md) | ADR-0005 — Sources, connector ingestion and federated reads | (no status line) |  |
 | [0006](adr/0006-export-restore-return-path.md) | ADR-0006 — An export must have a return path: RESTORE.SCOPE | (no status line) |  |
-| [0008](adr/0008-legal-hold-composition.md) | Legal hold is composition, not a substrate marker | Accepted | 2026-09-14 |
+| [0008](adr/0008-legal-hold-composition.md) | Legal hold is composition, not a substrate marker | Superseded by 0009 | 2026-09-14 |
+| [0009](adr/0009-explicit-legal-hold-marker.md) | Explicit legal-hold marker: erasure is refused, the sweep skips, release is audited | Accepted | 2026-09-15 |
 
 ## Verification state
 
@@ -87,10 +95,9 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Health
 
-- ✅ declared block fresh (3d old)
-- ✅ kanban board readable (49 tasks, 1426 events)
-- ⚠️ 3 completed task(s) have no journal entry — run: npm run journal:sync
-- ⚠️ 2 blocked task(s)
+- ✅ declared block fresh (4d old)
+- ✅ kanban board readable (54 tasks, 2091 events)
+- ✅ every completed task has a journal entry
 
 ## Canonical index
 
