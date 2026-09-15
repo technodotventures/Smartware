@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **49** entries.
+Total: **52** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -53,8 +53,11 @@ Total: **49** entries.
 | 2026-09-15 | [`2026-09-15-t_2996a3ab.md`](2026-09-15-t_2996a3ab.md) | Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) |
 | 2026-09-15 | [`2026-09-15-t_2bba749f.md`](2026-09-15-t_2bba749f.md) | Schema accuracy: tombstone-frontmatter snapshot block does not enumerate the demotion/release record fields |
 | 2026-09-15 | [`2026-09-15-t_463c1ff9.md`](2026-09-15-t_463c1ff9.md) | P1 pre-production gate: explicit legal-hold marker — refuse erasure under hold + sweep skip + audited release |
+| 2026-09-15 | [`2026-09-15-t_55fdccdd.md`](2026-09-15-t_55fdccdd.md) | VERIFY (independent, ADR-0009): legal-hold marker — erasure refusal, sweep skip, audited release (branch wip/neo/legal-hold-marker @ 2ef69c1) |
 | 2026-09-15 | [`2026-09-15-t_65569b9e.md`](2026-09-15-t_65569b9e.md) | P1-3: host-facing health contract, lane-explicit counts, Coffee-trial SLOs |
+| 2026-09-15 | [`2026-09-15-t_6c39a895.md`](2026-09-15-t_6c39a895.md) | Identity docs/creation path: guide §1e says reflect.auto consults fact identity before creating — measured, it does not when a DEMOTED duplicate's fingerprint matches (corroboration lands on the demoted claim) |
 | 2026-09-15 | [`2026-09-15-t_9e124fe6.md`](2026-09-15-t_9e124fe6.md) | Tombstone writer: tombstone-backfill.ts emits snapshots the published schema rejects (4 required fields missing, confidence not bucketed) |
 | 2026-09-15 | [`2026-09-15-t_9ee8bd54.md`](2026-09-15-t_9ee8bd54.md) | P1 design+impl: fencing token at the brain mutation boundary (close the residual lease window) |
+| 2026-09-15 | [`2026-09-15-t_ba868906.md`](2026-09-15-t_ba868906.md) | P1 build: Coffee reference adapter — drop-in contract, drop-in code, deterministic local proof |
 | 2026-09-15 | [`2026-09-15-t_c5c999ba.md`](2026-09-15-t_c5c999ba.md) | DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition) |
 | 2026-09-15 | [`2026-09-15-t_e8bd6747.md`](2026-09-15-t_e8bd6747.md) | Identity falsifier (ADR-0005 #1): steady-state both-surfaces run — recall must answer once in every round, F1+F2 on one tree |

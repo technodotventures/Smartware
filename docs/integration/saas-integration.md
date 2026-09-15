@@ -435,6 +435,18 @@ tenant content. Field definitions, the threshold table and the cost per block:
 [docs/integration/observability.md](observability.md); the decision record is
 [ADR-0008](../adr/0008-host-facing-health-contract.md).
 
+### 1i. Coffee reference adapter (a drop-in, executable contract)
+
+The deployment patterns above are assembled into a drop-in adapter with an
+executable local proof: `examples/coffee-adapter/adapter.mjs` (public package
+imports only, no Redis driver, no model credential), the tenant template
+`examples/coffee-adapter/config.template.json`, and
+`npm run verify:coffee-adapter` (53 deterministic checks, no network, no
+sleeps). Read [coffee-adapter.md](coffee-adapter.md) for the ports contract,
+the write/retry/degraded semantics, the migration and rollback staging, and the
+explicit not-yet-proven list. ADR:
+[ADR-0010](../adr/0010-coffee-reference-adapter.md).
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by
