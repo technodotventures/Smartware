@@ -83,7 +83,7 @@ export interface SmartwareConfig {
   /** Registered provenance origins (owner-managed; absent in pre-0.7.0 configs). */
   sources?: SourceEntry[];
   llm: {
-    provider: 'anthropic' | 'openai' | 'openrouter' | 'none';
+    provider: 'anthropic' | 'openai' | 'openrouter' | 'deepseek' | 'none';
     model: string;
   };
   staleness: {

@@ -172,6 +172,42 @@ async function requestOpenRouterText(config: SmartwareConfig, system: string | u
   return text;
 }
 
+// DeepSeek speaks the OpenAI chat-completions API — same request/response
+// shape, different base URL and key. Reuse the OpenAI parsing.
+async function requestDeepSeekText(config: SmartwareConfig, system: string | undefined, prompt: string, maxTokens: number): Promise<string> {
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer ' + requireEnv('DEEPSEEK_API_KEY', 'deepseek'),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: config.llm.model,
+      temperature: 0,
+      max_tokens: maxTokens,
+      messages: [
+        ...(system ? [{ role: 'system', content: system }] : []),
+        { role: 'user', content: prompt },
+      ],
+    }),
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error('DeepSeek request failed (' + response.status + ')');
+  }
+  const data = await response.json() as {
+    choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
+  };
+  const content = data.choices?.[0]?.message?.content;
+  const text = typeof content === 'string'
+    ? content.trim()
+    : Array.isArray(content)
+      ? content.map(part => typeof part.text === 'string' ? part.text : '').join('').trim()
+      : '';
+  if (!text) throw new Error('DeepSeek returned no text');
+  return text;
+}
+
 async function requestLLMText(config: SmartwareConfig, options: { system?: string; prompt: string; maxTokens: number }): Promise<string> {
   if (config.llm.provider === 'none') {
     return '';
@@ -184,6 +220,9 @@ async function requestLLMText(config: SmartwareConfig, options: { system?: strin
   }
   if (config.llm.provider === 'openrouter') {
     return requestOpenRouterText(config, options.system, options.prompt, options.maxTokens);
+  }
+  if (config.llm.provider === 'deepseek') {
+    return requestDeepSeekText(config, options.system, options.prompt, options.maxTokens);
   }
   throw new Error('Unsupported llm provider: ' + config.llm.provider);
 }
