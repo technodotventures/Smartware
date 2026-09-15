@@ -41,15 +41,17 @@ demotion-durability fixes on top of it (`wip/neo/demotion-durability` @ `e5f093e
 extended by the carry-forward through the flows that hand-build a version record on
 `wip/smarty/demotion-handbuilt-records` @ `3ae8a6b`), and the creation-side identity
 change (F1 of [ADR-0005](adr/0005-protocol-claim-identity.md): `reflect.auto`
-consults fact identity before creating) on one tree, `falsifier/t_e8bd6747` —
+consults fact identity before creating) on one tree, `falsifier/t_e8bd6747`, plus
+F1b (ADR-0005 amendment: a fingerprint match on a demoted duplicate routes
+corroboration to the surviving claim) on `wip/neo/f1b-demoted-fingerprint` —
 superseding the 2026-09-14 duplicate-claim-identity baseline (which recorded **493
 tests across 69 files**) and the 2026-09-10 0.7.0 release-cut baseline (**446 tests
-across 64 files**): **511 tests across 71 files**, 31 schema files, and the
+across 64 files**): **512 tests across 71 files**, 31 schema files, and the
 public-API smoke passing end to end (12/12 PASS lines, `SMOKE_OUTCOME=pass`). The
-deltas over `93a7cfd` are 18 tests: the demotion-durability fixes (8 in
+deltas over `93a7cfd` are 19 tests: the demotion-durability fixes (8 in
 `test/layer1/demotion-durability.test.ts` from the parent change — all still green —
 plus 4 more in that file, one in `test/protocol/forget-scope.test.ts` and one in
-`test/protocol/retention-expire.test.ts` from the carry-forward) and F1's 4
+`test/protocol/retention-expire.test.ts` from the carry-forward), F1's 4 and F1b's 1
 (`test/protocol/reflect-auto-fact-identity.test.ts`); no other suite changed. The
 retrieval-kernel contract (9/9 scenarios) and the activation
 contract (fails closed) were **not re-run** for this tree — it touches no retrieval
@@ -61,7 +63,7 @@ rather than by this local run.)
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **511 tests across 71 files** with no skips.
+- The standalone suite passes **512 tests across 71 files** with no skips.
 - The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
   claim write-path identity contract documented in the integration guide §1e:
   `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
@@ -93,15 +95,21 @@ rather than by this local run.)
   crossing silently fails the suite (measured: dropping `claim_type` from the
   fingerprint fails 1 test, case-folding a text value in `normaliseValue` fails 3,
   making fact identity depend on `claim_type` fails 1).
-- `test/protocol/reflect-auto-fact-identity.test.ts` (4 tests) pins F1 of ADR-0005
+- `test/protocol/reflect-auto-fact-identity.test.ts` (5 tests) pins F1 of ADR-0005
   on the in-repo protocol surface: a host-held fact restated by an autonomous
   observation **under another classification** gets corroboration (`derived_from`
   extended, one active claim, recall answers once, receipt records the decision)
   instead of a second claim; a protected (`epistemic_owner: user`) claim is neither
   corroborated nor duplicated; the matching-classification control still converges
-  through the fingerprint key; and creation is unchanged when no claim holds the
-  fact. RED-first evidence: against pre-fix `src/` the suite reports
-  `Tests 2 failed | 2 passed (4)`, after the change `4 passed`.
+  through the fingerprint key; creation is unchanged when no claim holds the
+  fact; and F1b (ADR-0005 amendment) pins the **demoted** duplicate case — a
+  fingerprint match on a resolved loser does not receive the restatement: the
+  observation extends the fact's surviving claim, the demoted duplicate gains no
+  version and keeps its demotion, and the receipt names the matched demotion
+  (`fact_identity_matches[].fingerprint_matched_demoted`). RED-first evidence: F1
+  against pre-fix `src/` reports `Tests 2 failed | 2 passed (4)` (after: `4
+  passed`); F1b against the pre-amendment source reports `Tests 1 failed | 4
+  passed (5)` (after: `5 passed`).
 - `npm run verify:saas` (public-API smoke) exercises the same contract end to end
   against the packaged surface: a store seeded with two active claims for one fact
   answers **2** recall results for that fact and **1** after
