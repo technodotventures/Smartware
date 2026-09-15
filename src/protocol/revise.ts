@@ -34,7 +34,7 @@ import type { SmartwareConfig } from '../config.js';
 import { requireRegisteredActor, ProtocolError } from '../auth/middleware.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   persistOperationIntent,
   readAllOpLogEntries,
@@ -172,6 +172,7 @@ export async function handleRevise(
         evidenceDir: '',
         claimsDir: dataDir,
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -289,6 +290,7 @@ export async function handleRevise(
 
   if (commitCtx) {
     const recordHash = computePayloadHash(record);
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     const intent: ReviseOperationIntent = {
       version: 1,
       operation_id: params.operation_id,
@@ -296,6 +298,7 @@ export async function handleRevise(
       op: 'revise.claim',
       payload_hash: payloadHash,
       prepared_at: preparedAt,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'l1',
         claim_id: record.claim_id,
@@ -319,7 +322,7 @@ export async function handleRevise(
     commitHooks?.afterIntent?.(intent);
     appendClaimVersion(dataDir, record);
     commitHooks?.afterClaimVersion?.(record);
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: preparedAt,
@@ -331,7 +334,7 @@ export async function handleRevise(
         epistemic_owner: record.epistemic_owner,
         record_hash: recordHash,
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   } else {

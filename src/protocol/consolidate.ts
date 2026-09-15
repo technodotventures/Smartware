@@ -27,7 +27,7 @@ import type { ClaimStore } from '../layer1/store.js';
 import type { SmartwareConfig } from '../config.js';
 import { requireRegisteredActor, ProtocolError } from '../auth/middleware.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   readAllOpLogEntries,
   type CommitContext,
@@ -187,7 +187,7 @@ export async function handleConsolidate(
   }
 
   if (commitCtx) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: now,
@@ -200,7 +200,7 @@ export async function handleConsolidate(
         scope: params.scope,
         reason: params.reason ?? '',
       },
-    });
+    }, commitCtx.fence);
   }
 
   return {

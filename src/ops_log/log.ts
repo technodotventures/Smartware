@@ -7,6 +7,19 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path';
 
 import { OPERATION_ID_PATTERN, type OpLogEntry } from './types.js';
+import type { CommitStamp } from '../storage/fence.js';
+
+/**
+ * The writer-path commit fence (ADR-0010). `stamp()` is the ownership epoch this writer's
+ * records carry (null when the writer holds no epoch); `guardCommit` is the atomic gate the
+ * commit signal passes — it validates the writer's epoch against the brain's high-water mark
+ * and records the authorization in the same SQLite transaction, so a writer that resumed from
+ * an in-mutation pause across a handoff is refused before its signal lands.
+ */
+export interface CommitFence {
+  stamp(): CommitStamp | null;
+  guardCommit(operationIds: string[], op: string): void;
+}
 
 function dateToPath(opsDir: string, date: string): string {
   return join(opsDir, `${date}.jsonl`);
@@ -71,7 +84,46 @@ export function appendOpLogEntries(opsDir: string, entries: OpLogEntry[]): void 
   }
 }
 
-/** Read every entry for a given UTC date. Returns [] if the file is missing. */
+/**
+ * Append operations-log entries through the storage-level commit gate (ADR-0010): the gate
+ * validates the writer's epoch atomically and records the authorization BEFORE the signal is
+ * written; a fenced writer's entries carry `details.fence = { epoch, writer_id }`. With no fence
+ * this is exactly `appendOpLogEntries` — unfenced brains stay byte-identical.
+ */
+export function appendCommittedOpLogEntries(
+  opsDir: string,
+  entries: OpLogEntry[],
+  fence?: CommitFence | null,
+): void {
+  if (entries.length === 0) return;
+  if (!fence) {
+    appendOpLogEntries(opsDir, entries);
+    return;
+  }
+  fence.guardCommit(entries.map((entry) => entry.operation_id), entries[0]!.op);
+  const stamp = fence.stamp();
+  appendOpLogEntries(
+    opsDir,
+    stamp
+      ? entries.map((entry) => ({
+          ...entry,
+          details: { ...(entry.details ?? {}), fence: stamp },
+        }))
+      : entries,
+  );
+}
+
+/** Single-entry form of `appendCommittedOpLogEntries` (ADR-0010). */
+export function appendCommittedOpLogEntry(
+  opsDir: string,
+  entry: OpLogEntry,
+  fence?: CommitFence | null,
+): void {
+  appendCommittedOpLogEntries(opsDir, [entry], fence);
+}
+
+/**
+ * Read every entry for a given UTC date. Returns [] if the file is missing. */
 export function readOpLogDay(opsDir: string, date: string): OpLogEntry[] {
   const path = dateToPath(opsDir, date);
   if (!existsSync(path)) return [];

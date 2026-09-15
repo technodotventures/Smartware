@@ -19,12 +19,20 @@ import { join } from 'node:path';
 
 import { OPERATION_ID_PATTERN } from './types.js';
 
+/** Ownership epoch that prepared an intent (ADR-0010); absent on unfenced writers. */
+export interface IntentFenceStamp {
+  epoch: number;
+  writer_id: string;
+}
+
 export interface ObservationOperationIntent {
   version: 1;
   operation_id: string;
   actor_id: string;
   op: 'observe';
   payload_hash: string;
+  /** Ownership epoch that prepared this intent (ADR-0010); absent on unfenced writers. */
+  fence?: IntentFenceStamp;
   prepared_at: string;
   expected: {
     surface: 'l0';
@@ -49,6 +57,8 @@ export interface ReviseOperationIntent {
   actor_id: string;
   op: 'revise.claim';
   payload_hash: string;
+  /** Ownership epoch that prepared this intent (ADR-0010); absent on unfenced writers. */
+  fence?: IntentFenceStamp;
   prepared_at: string;
   expected: {
     surface: 'l1';
@@ -76,6 +86,8 @@ export interface ForgetOperationIntent {
   actor_id: string;
   op: 'forget';
   payload_hash: string;
+  /** Ownership epoch that prepared this intent (ADR-0010); absent on unfenced writers. */
+  fence?: IntentFenceStamp;
   prepared_at: string;
   expected: {
     surface: 'forget';
@@ -120,6 +132,8 @@ export interface ForgetScopeOperationIntent {
   actor_id: string;
   op: 'forget.scope';
   payload_hash: string;
+  /** Ownership epoch that prepared this intent (ADR-0010); absent on unfenced writers. */
+  fence?: IntentFenceStamp;
   prepared_at: string;
   expected: {
     surface: 'forget.scope';
@@ -155,6 +169,8 @@ export interface ReviveOperationIntent {
   actor_id: string;
   op: 'revive';
   payload_hash: string;
+  /** Ownership epoch that prepared this intent (ADR-0010); absent on unfenced writers. */
+  fence?: IntentFenceStamp;
   prepared_at: string;
   expected: {
     surface: 'l1';
@@ -181,6 +197,8 @@ export interface EndorseOperationIntent {
   actor_id: string;
   op: 'endorse';
   payload_hash: string;
+  /** Ownership epoch that prepared this intent (ADR-0010); absent on unfenced writers. */
+  fence?: IntentFenceStamp;
   prepared_at: string;
   expected: {
     surface: 'endorse';
@@ -212,6 +230,8 @@ export interface ReflectClaimOperationIntent {
   actor_id: string;
   op: 'reflect.auto';
   payload_hash: string;
+  /** Ownership epoch that prepared this intent (ADR-0010); absent on unfenced writers. */
+  fence?: IntentFenceStamp;
   prepared_at: string;
   expected: {
     surface: 'l1';
@@ -246,13 +266,21 @@ export interface OperationIntentReadRecord {
 }
 
 function hasCommonIntentFields(intent: Partial<OperationIntent>): boolean {
+  const fence = (intent as { fence?: unknown }).fence;
+  const validFence = fence === undefined
+    || (typeof fence === 'object' && fence !== null
+      && Number.isSafeInteger((fence as IntentFenceStamp).epoch)
+      && (fence as IntentFenceStamp).epoch >= 1
+      && typeof (fence as IntentFenceStamp).writer_id === 'string'
+      && (fence as IntentFenceStamp).writer_id.length > 0);
   return intent.version === 1
     && typeof intent.operation_id === 'string'
     && OPERATION_ID_PATTERN.test(intent.operation_id)
     && typeof intent.actor_id === 'string'
     && typeof intent.payload_hash === 'string'
     && /^[a-f0-9]{64}$/.test(intent.payload_hash)
-    && typeof intent.prepared_at === 'string';
+    && typeof intent.prepared_at === 'string'
+    && validFence;
 }
 
 function intentsDir(opsDir: string): string {
