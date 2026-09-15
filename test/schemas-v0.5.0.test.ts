@@ -233,6 +233,32 @@ describe('Smartware v0.5.0 schemas', () => {
     assert.equal(opsEntry({ ...holdReleaseEntry, op: 'hold.release.evil' }), false);
   });
 
+  test('operation-log-entry op enum lists every op the substrate writes (t_7a64ded2)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    // These three have been written since before the v0.5.0 cut but were never
+    // listed, so their receipts failed validation against the published set —
+    // including the hold gate's own sweep-skip receipt (`retention.expire`).
+    for (const op of ['consolidate', 'reflect.explicit', 'retention.expire']) {
+      const entry = {
+        operation_id: OPERATION_A,
+        actor_id: 'user:ava',
+        timestamp: NOW,
+        op,
+        details: { scope: 'client:gate#1', payload_hash: 'abc123' },
+      };
+      assert.equal(opsEntry(entry), true, `${op}: ${JSON.stringify(opsEntry.errors)}`);
+    }
+    assert.equal(opsEntry({
+      operation_id: OPERATION_A,
+      actor_id: 'user:ava',
+      timestamp: NOW,
+      op: 'consolidate.evil',
+      details: {},
+    }), false);
+  });
+
   test('forget-scope-request: reason semantics and owner pointer rules', () => {
     const ajv = createAjv();
     const forgetScope = validator(ajv, 'forget-scope-request.schema.json');

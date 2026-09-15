@@ -594,10 +594,17 @@ await memory.releaseHold({
   actor: owner,                              // owner-only
   scope: 'client:acme#1',
   statement: 'no pending dispute / hold released',
-  operation_id: 'op_01J8ZP…',                // idempotency key
+  operation_id: 'op_01J8ZP…',                // required: audit + idempotency key
 });
 // → { status: 'released', scope, released_at, released_by, statement, operation_id }
 ```
+
+  The release is receipted: exactly one `hold.release` ops entry under that key
+  (a keyless release is refused `invalid_parameter` before any mutation). A retry
+  replays the recorded receipt and re-publishes the release into `config.holds`
+  if a lost config write left the hold reading open — for the hold that receipt
+  names (`hold_operation_id`); a hold opened afterwards is a new duty and is
+  never lifted by a stale replay.
 
   Then run F1 (snapshot) and erase — the optional erasure `attestation` string
   is still recorded for payload identity, but the release receipt is the

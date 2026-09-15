@@ -347,7 +347,8 @@ Semantics:
   **skips** the scope. The hold is opened by `reason=offboarding` in the same
   commit (the ops entry carries `hold_opened: true`), and closed only by the
   owner-only **`hold.release`** operation (MCP tool `smartware_hold_release`) —
-  idempotent per `operation_id`, one `hold.release` ops entry carrying
+  `operation_id` **required** (the act is audited by its receipt, and a replay
+  re-publishes a lost config release), one `hold.release` ops entry carrying
   `payload_hash` and the owner's non-PII `statement`. Release does not revive
   offboarded state: the scope stays tombstoned (recall-silent, grants revoked)
   until erasure or a `#N` return. A scope offboarded before the marker existed
@@ -435,7 +436,7 @@ holds:
 ```yaml
 hold.release:                      # substrate operation (MCP: smartware_hold_release)
   scope: client:<id>#n
-  operation_id: op_<ulid>          # optional; idempotency key
+  operation_id: op_<ulid>          # required; audit + idempotency key — exactly one receipt
   statement: <string>              # optional; owner statement (non-PII)
 ```
 
@@ -446,11 +447,19 @@ hold.release:                      # substrate operation (MCP: smartware_hold_re
   The retention sweep on an open hold: expires 0, writes no bytes, records
   `details.skipped: 'legal_hold'` in its ops entry (result
   `skipped_reason: 'legal_hold'`); evidence written after the hold is preserved.
-- **Release.** Owner-only; idempotent per `operation_id` (replay ⇒ recorded
-  receipt; different payload ⇒ `conflict`); a scope with no open hold ⇒
-  `no_open_hold`. The receipt: one `hold.release` ops entry
-  (`payload_hash`, `scope`, `released_at`, `released_by`, `statement`) plus the
-  config entry update. The release record persists after erasure.
+- **Release.** Owner-only; `operation_id` is **required** — a release without one
+  is refused `invalid_parameter` before any mutation, because the audited act
+  *is* its receipt (a keyless release performed the act with no canonical
+  record). Idempotent: a replay returns the recorded receipt and, when a lost
+  config write left that same hold reading OPEN, re-publishes the recorded
+  release into `config.holds` (the ops entry is canonical; the receipt and the
+  state can never disagree). Convergence is **duty-scoped**: the receipt names
+  the hold it lifted (`hold_operation_id` — the offboarding operation), so a
+  hold opened afterwards (a new duty, §2) is never lifted by a stale replay. A
+  different payload ⇒ `conflict`; a scope with no open hold ⇒ `no_open_hold`.
+  The receipt: one `hold.release` ops entry (`payload_hash`, `scope`,
+  `released_at`, `released_by`, `statement`, `hold_operation_id`) plus the config
+  entry update. The release record persists after erasure.
 - **Boundaries.** `self` / `workspace` are rejected (`invalid_parameter`), same
   as FORGET.SCOPE. Release never revives; it only lifts the preservation duty.
 - **Error codes (new, additive).** `legal_hold_open` (erasure on an open hold),
@@ -608,3 +617,39 @@ protocol/spec versions it has actually passed.
   audited act); a scope offboarded before this change has no hold entry and
   erases as before. v0.5.0 conformance still requires the v0.5.0 schema set —
   which now carries the extended op enum — alongside the contract.
+
+**2026-09-15 — legal-hold findings (card t_7a64ded2): release is keyed, replay converges, ops enum completed**
+
+Independent adversarial verification (t_55fdccdd) of the marker passed the gate
+and raised three hardening findings; all three are fixed. None of them changes
+the ADR-0009 decision, a FORGET.SCOPE shape, or a payload hash.
+
+- **`hold.release` requires `operation_id`.** It was optional at the MCP
+  boundary, and a keyless release performed the act while writing **no** ops
+  entry — an unaudited claim about a preservation duty, contradicting "the
+  audited owner act". A release without a valid `op_<ulid>` key is now refused
+  `invalid_parameter` before any mutation (core and MCP). Aligned with
+  `smartware_forget_scope`, which already required it.
+- **Release replay converges `config.holds`.** If a config write was lost while
+  the ops receipt survived (a non-atomic config write could make that order
+  possible), a replay returned the recorded receipt while the scope still read
+  OPEN — fail-closed (erasure stayed refused) but a same-key retry silently
+  reported success and only a new key converged. A replay now re-publishes the
+  recorded release when the scope still reads open, and `saveConfig` is
+  **atomic + fsync** (temp file → fsync → rename → directory fsync) so the
+  divergence window is closed at the root. The ops entry is canonical; the
+  config entry is state, and the two can no longer disagree after a replay.
+  The convergence is **duty-scoped**: the receipt records the offboarding
+  operation it released (`hold_operation_id`), so a hold opened after the
+  release — a new preservation duty — is never lifted by a stale redelivery.
+- **The v0.5.0 ops-log `op` enum now lists every op the substrate writes.**
+  `consolidate`, `reflect.explicit` and `retention.expire` — written since
+  before the v0.5.0 cut, never listed — join `hold.release` (additive only;
+  `schemas/v0.5.0/SHA256SUMS` regenerated). Previously those receipts failed
+  validation against the published set; the hold gate's own sweep-skip receipt
+  (`retention.expire`) was one of them, so the marker's audit surface is now
+  schema-clean end to end.
+- **Out of scope, unchanged:** the refusal path, the committed-erasure replay,
+  the sweep skip and its receipt, release validation/`conflict`/`no_open_hold`,
+  per-scope isolation, pre-marker grandfathering, and the payload-hash identities
+  all remain as verified.

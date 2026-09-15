@@ -69,6 +69,15 @@ describe('MCP Server Smoke', () => {
       'query',
       'scope',
     ]));
+
+    // The hold release is an audited act: operation_id is required at the MCP
+    // boundary so a keyless release cannot exist (finding F1, card t_7a64ded2).
+    const holdRelease = listed.tools.find(tool => tool.name === 'smartware_hold_release');
+    expect(holdRelease?.inputSchema.required).toEqual(expect.arrayContaining([
+      'actor_id',
+      'scope',
+      'operation_id',
+    ]));
   });
 
   it('all handler imports resolve without errors', async () => {

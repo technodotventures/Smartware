@@ -92,3 +92,13 @@ The FORGET.SCOPE section of `docs/protocol/smartware-protocol-v0.5.0.md` gains t
 2. **A separate `hold.open` act, or config-provisioned markers.** Rejected: re-creates ADR-0008's failure mode 1 — the hold must be set by the product at dispute time, and a forgotten open leaves erasure unrefused. The hold lane (offboarding) is already mandatory on every dispute/hold trigger (§10c.3), so opening there is free and unforgettable.
 3. **Derive the refusal from the log (ADR-0008 alternative 2).** Still cannot skip the sweep (AC6), and converts a recording seam into a gate without state; superseded by the marker.
 4. **Skip the sweep only while the scope's records are non-terminal (composition skip).** Rejected: "expiry never fires under a hold" is the owner-signed invariant; a post-hold write with elapsed retention must survive, and only explicit hold state can say so.
+
+## Amendment — 2026-09-15 (card t_7a64ded2; findings from independent verification t_55fdccdd)
+
+Independent adversarial verification of this decision passed the gate and raised three hardening findings. All three are fixed; the decision above is unchanged.
+
+1. **`operation_id` is required on `hold.release`** (core + MCP; `invalid_parameter` before any mutation otherwise). §5 called the act audited, but the key was optional at the MCP boundary, so a keyless release performed the act with **no** ops entry — an unaudited claim. The receipt is now unconditional, and the house convention matches `smartware_forget_scope`.
+2. **Replay converges state.** The §5 receipt replay returned the recorded result without re-publishing it, so a lost config write (the old `saveConfig` was a non-atomic, non-fsync `writeFileSync`) could leave the log saying "released" while the scope still read OPEN — fail-closed, but a same-`operation_id` retry reported success and never lifted the hold. Replay now re-applies the recorded release to `config.holds` when the scope still reads open, and `saveConfig` writes atomically with fsync (temp file → fsync → rename → directory fsync), closing the window that produced the divergence. Convergence is **duty-scoped**: the receipt records the offboarding operation it released (`hold_operation_id`), so a hold opened after the release — a new duty per §2 — is never lifted by a stale replay.
+3. **The v0.5.0 ops-log enum now lists every op the substrate writes.** `consolidate`, `reflect.explicit` and `retention.expire` join `hold.release` (additive only; `SHA256SUMS` regenerated). Those receipts previously failed validation against the published set — including this marker's own sweep-skip receipt, whose `op` is `retention.expire`.
+
+Pinned by `test/conformance/r_legal_hold_composition.test.ts` (R1–R7) and `test/schemas-v0.5.0.test.ts`.
