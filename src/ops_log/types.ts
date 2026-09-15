@@ -20,7 +20,8 @@
 /**
  * Every op the reference implementation's writer surface can emit, as a
  * runtime list — the schema-conformance test iterates it. `OpType` is derived
- * from this list, so the type cannot drift from it.
+ * from this list, and the compile-time proof below rejects any union member
+ * outside it, so neither the derivation line nor the list can drift silently.
  */
 export const OP_TYPES = [
   'observe',
@@ -48,6 +49,16 @@ export const OP_TYPES = [
 ] as const;
 
 export type OpType = (typeof OP_TYPES)[number];
+
+/**
+ * Compile-time proof that the writer union carries no member outside the list
+ * (finding F-1 of t_2b8776f7, closed by t_9f0f314c): widening `OpType` past
+ * `(typeof OP_TYPES)[number]` resolves the conditional to `never`, so the
+ * initialiser stops compiling. The schema pin cannot see this drift — it
+ * iterates the untouched list — and `test/` is outside tsc's include, so the
+ * proof has to live here in `src/`.
+ */
+const _opTypesIsExhaustive: OpType extends (typeof OP_TYPES)[number] ? true : never = true;
 
 /** One canonical entry in `pod_data/operations/YYYY-MM-DD.jsonl`. */
 export interface OpLogEntry {
