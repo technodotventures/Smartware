@@ -35,6 +35,13 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the tombstone schema's coverage of the claim record
+envelope (`wip/smarty/tombstone-snapshot-envelope`, kanban `t_2bba749f` — schema/contract accuracy,
+not a protocol change): **521 tests across 71 files**, 31 schema files. The delta over the baseline
+below is 2 tests, both in `test/schemas-v0.5.0.test.ts` (a tombstone-frontmatter fixture group for
+the demotion/release fields in the `snapshot` block, and a guard that the block mirrors
+`claim.schema.json` field-for-field); no other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the mechanical demotion's **release** vocabulary —
 `REVISE` with `repick_survivor` (`wip/neo/repick-survivor`, kanban `t_1db21462`, ADR-0003 →
 *Releasing a demotion*): **519 tests across 71 files**, 31 schema files. The delta over the
@@ -66,7 +73,7 @@ run.)
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **519 tests across 71 files** with no skips.
+- The standalone suite passes **521 tests across 71 files** with no skips.
 - The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
   claim write-path identity contract documented in the integration guide §1e:
   `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
