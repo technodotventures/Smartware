@@ -35,6 +35,17 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
+(`wip/smarty/l1-legacy-op-id`, kanban `t_85817375`): **530 tests across 73 files**, 31 schema files, no
+schema file changed (the `OperationId` pattern is unchanged). The delta over the baseline below is 6
+tests in one new file (`test/layer1/legacy-operation-id.test.ts`), which drives `insertClaim` with no
+caller operation id, validates the written L1 record against `schemas/v0.5.0/claim.schema.json`, and
+pins the marker to the one `src/layer1/tombstone-backfill.ts` stamps on a pre-A3 row's tombstone (the
+writer fixed in the entry below). The placeholder was `op_LEGACY00000000000000000000`, whose `L` the
+published Crockford-base32 pattern rejects; it is now `op_000000000000000000000000A3`. One Ajv error
+remains on such a record — the internal `semantic` block the published claim schema does not enumerate
+— measured, unchanged by this fix, and carded separately. No other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the **tombstone backfill writer**
 (`wip/neo/tombstone-backfill-writer`, kanban `t_9e124fe6`): **524 tests across 72 files**, 31 schema
 files. The delta over the baseline below is 3 tests in one new file

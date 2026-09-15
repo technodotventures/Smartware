@@ -33,6 +33,26 @@ import { resolveEntity } from './entities.js';
 import { dirname } from 'node:path';
 import { ensurePrivateDirectory, ensurePrivateFile } from '../storage/private-fs.js';
 
+/**
+ * OperationId stamped on an L1 record written by a legacy/migration path that carries no
+ * OperationId of its own — an `insertClaim` caller that omits `operation_id` (pre-A3 rows, hosts
+ * that mint none). Its ActorId counterpart is `substrate:legacy` (see the JSONL append below).
+ *
+ * The value MUST satisfy the contract the library publishes:
+ * `schemas/v0.5.0/common.schema.json#/$defs/OperationId` is `^op_[0-9A-HJKMNP-TV-Z]{26}$` —
+ * Crockford base32, which excludes I, L, O and U. This is an all-zero ULID body with the `A3` tail
+ * that marks the PR-4/A3 legacy-backfill convention: the same value `tombstone-backfill.ts` stamps
+ * on backfilled tombstones (`LEGACY_OPERATION_ID` there, alongside `substrate:legacy-migration`),
+ * so one value identifies every record the library had to write without a real OperationId, and it
+ * is distinguishable from any real one by construction.
+ *
+ * History: the placeholder used here was `op_LEGACY00000000000000000000`, whose `L` that pattern
+ * rejects (measured on kanban t_9e124fe6, fixed by t_85817375). Records written before the fix
+ * still carry it; readers should treat both values as "no real OperationId" rather than trusting
+ * the shape.
+ */
+export const LEGACY_OPERATION_ID = 'op_000000000000000000000000A3';
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS entities (
   id TEXT PRIMARY KEY,
@@ -483,7 +503,7 @@ export class ClaimStore {
         ? claim.object.value
         : JSON.stringify(claim.object.value);
       const version = this.nextVersionFor(claim.id);
-      const opId = operationId ?? 'op_LEGACY00000000000000000000';
+      const opId = operationId ?? LEGACY_OPERATION_ID;
       const actId = actorId ?? 'substrate:legacy';
       const fp = computeStructuredClaimFingerprint(
         claim.subject_name,
