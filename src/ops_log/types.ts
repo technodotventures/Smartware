@@ -20,7 +20,8 @@
 /**
  * Every op the reference implementation's writer surface can emit, as a
  * runtime list — the schema-conformance test iterates it. `OpType` is derived
- * from this list, so the type cannot drift from it.
+ * from this list, and the compile-time proof below rejects any union member
+ * outside it, so neither the derivation line nor the list can drift silently.
  */
 export const OP_TYPES = [
   'observe',
@@ -48,6 +49,42 @@ export const OP_TYPES = [
 ] as const;
 
 export type OpType = (typeof OP_TYPES)[number];
+
+/**
+ * Compile-time proof that the writer union carries no member outside the list
+ * (finding F-1 of t_2b8776f7, closed by t_9f0f314c): widening `OpType` past
+ * `(typeof OP_TYPES)[number]` resolves the conditional to `never`, so the
+ * initialiser stops compiling. The schema pin cannot see this drift — it
+ * iterates the untouched list — and `test/` is outside tsc's include, so the
+ * proof has to live here in `src/`.
+ */
+const _opTypesIsExhaustive: OpType extends (typeof OP_TYPES)[number] ? true : never = true;
+
+/**
+ * The proof above is vacuous if either side of its conditional loses its
+ * literal type, so the two assertions below guard the guard (findings F-A and
+ * F-B of t_037255f6, closed by t_0e732b96).
+ *
+ * F-A — the list's `as const` is load-bearing: without it, or with the list
+ * annotated `readonly string[]`, `(typeof OP_TYPES)[number]` widens to
+ * `string` and the conditional becomes `string extends string ? true : never`
+ * = `true`. This assertion fails whenever the list's element type admits
+ * `string` at all.
+ */
+type _OpTypesIsLiteral = string extends (typeof OP_TYPES)[number] ? never : true;
+const _opTypesIsLiteral: _OpTypesIsLiteral = true;
+
+/**
+ * F-B — conditional types over `any` resolve to `true | never` = `true`, so
+ * `OpType = (typeof OP_TYPES)[number] | any` (or any other erasure of the
+ * derivation to `any`) would satisfy the proof above while admitting every
+ * op. This detector fails on that erasure. (`| unknown` and `| string` are
+ * already caught by `_opTypesIsExhaustive` directly — measured in
+ * t_037255f6.)
+ */
+type _IsAny<T> = 0 extends 1 & T ? true : false;
+type _OpTypeIsNotAny = _IsAny<OpType> extends true ? never : true;
+const _opTypeIsNotAny: _OpTypeIsNotAny = true;
 
 /** One canonical entry in `pod_data/operations/YYYY-MM-DD.jsonl`. */
 export interface OpLogEntry {
