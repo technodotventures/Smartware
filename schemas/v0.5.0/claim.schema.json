@@ -2,7 +2,7 @@
   "$id": "https://smartware.dev/schemas/v0.5.0/claim.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Claim Version",
-  "description": "One L1 claim version. The required field set applies to all versions (active and forgotten). Forgotten versions inherit non-content metadata from the prior active version; the content field is only required when state is active. Forgotten versions add additional required fields per the if/then below.",
+  "description": "One L1 claim version — one record on the canonical L1 JSONL surface (spec §5 'L1 — Claim Store'): \"L1 is a canonical, append-only JSONL store. Each line is a claim version.\" The field set below is the spec §6 claim version plus the record-envelope fields the reference implementation carries: the forget-specific fields, the demotion/release warrants, and the optional extraction materialization block (`semantic`). The required field set applies to all versions (active and forgotten). Forgotten versions inherit non-content metadata from the prior active version; the content field is only required when state is active. Forgotten versions add additional required fields per the if/then below.",
   "type": "object",
   "required": [
     "claim_id",
@@ -150,6 +150,218 @@
         "user"
       ],
       "description": "Audit-only marker on a version that released a demotion: the user reinstated this claim as the recall-eligible copy (REVISE repick_survivor). Never a lifecycle input."
+    },
+    "semantic": {
+      "type": "object",
+      "description": "Optional extraction materialization the L1 record writer carries on an active version: the structured meaning the extractor produced (subject, predicate, typed object, valid time) plus the raw pre-reduction epistemic values. It is what makes a record re-materializable — the recall-eligible row (entity name/type, predicate, typed object, valid time, sensitivity, extraction provenance) is derived from this block (ClaimStore.claimVersionVals) — which is why the record envelope enumerates it. It carries no independent epistemic authority: `confidence`/`epistemic_tag` remain the canonical spec §6 values (spec §6 -> 'Implementation note'), nothing in it is required, and a version that omits the block is fully conformant (records written before v0.6 do). Bound types are the writers' declared input contract, not policy: the block is enumerated to the shape the reference writers emit, so that a record the implementation appends validates against the contract it publishes (kanban t_229601e4, ADR-0011). Not a wire field: no protocol request or response carries it.",
+      "required": [
+        "subject_name",
+        "subject_type",
+        "predicate",
+        "object",
+        "t_valid_from",
+        "t_valid_to",
+        "extracted_epistemic",
+        "extracted_confidence",
+        "sensitive",
+        "extraction"
+      ],
+      "properties": {
+        "subject_name": {
+          "type": "string",
+          "description": "Resolved subject entity name (the derived row's `subject_name`)."
+        },
+        "subject_type": {
+          "type": "string",
+          "description": "Subject entity type (`organization`, `person`, `tool`, `concept`, ...). The record writer defaults it to `concept` when the subject entity is unknown."
+        },
+        "predicate": {
+          "type": "string",
+          "description": "Typed predicate the extractor applied (e.g. `status_is`, `deadline_is`)."
+        },
+        "object": {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "text",
+                "date",
+                "datetime",
+                "number",
+                "enum",
+                "entity_ref",
+                "boolean",
+                "any"
+              ],
+              "description": "Typed-value discriminator (the substrate's ValueType)."
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object"
+                }
+              ],
+              "description": "The extracted value. A `date` carries the date as extracted (`2027-01-15`), not a normalised timestamp. Expressed as `anyOf` of single types (not a union `type` array) because the published schemas must compile under AJV strict mode, which rejects union types without `allowUnionTypes`."
+            }
+          },
+          "additionalProperties": false
+        },
+        "t_valid_from": {
+          "type": "object",
+          "description": "Valid-time start the extractor resolved. `state: known` = read from the source; `inferred` = derived, with `basis` naming the rule; `null` = open/unknown.",
+          "required": [
+            "value",
+            "state"
+          ],
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "common.schema.json#/$defs/Iso8601"
+                },
+                {
+                  "type": "string",
+                  "description": "A date-time string the extractor passed through without normalising (the LLM extraction path copies the model's `validity.from`, which can be a date without a time). ISO 8601 is the convention; the domain is stated in prose, not as a format requirement, because this value is pass-through extraction output and a format bound would reject a record the writer produced."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "known",
+                "inferred",
+                "null"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "description": "Why the value is `inferred` (e.g. `source_observed_at`, `reflection_time`)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "t_valid_to": {
+          "type": "object",
+          "description": "Valid-time end the extractor resolved; `state: null` with `value: null` means still open.",
+          "required": [
+            "value",
+            "state"
+          ],
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "common.schema.json#/$defs/Iso8601"
+                },
+                {
+                  "type": "string",
+                  "description": "Pass-through extraction output, as for `t_valid_from.value`: the LLM path copies the model's `validity.to`."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "known",
+                "inferred",
+                "null"
+              ]
+            },
+            "basis": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "extracted_epistemic": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "asserted",
+            "inferred",
+            "user_confirmed",
+            "system_generated"
+          ],
+          "description": "The extractor's epistemic label BEFORE the canonical reduction (`epistemicToTag`). The canonical value stays `epistemic_tag`; an autonomous claim is bounded to `inference`/`low` on the admitted fields even when the extraction was better (spec §6)."
+        },
+        "extracted_confidence": {
+          "type": "number",
+          "description": "The extractor's numeric confidence BEFORE bucketing (`confidenceToBucket`); the canonical value stays `confidence`. The declared domain is 0..1 and the `reflect.auto` path clamps to it, but the record writer copies the caller's number verbatim — so the domain is stated here as prose, not as a JSON Schema bound: a bound would reject a record the writer produced, which is the defect this block's enumeration closes."
+        },
+        "sensitive": {
+          "type": "boolean",
+          "description": "Sensitivity flag the extractor set; drives the derived row's `sensitive` column."
+        },
+        "extraction": {
+          "type": "object",
+          "required": [
+            "method",
+            "model",
+            "compiler_version",
+            "prompt_hash",
+            "extracted_at"
+          ],
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": [
+                "deterministic",
+                "llm",
+                "user_input"
+              ]
+            },
+            "model": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Null on the deterministic path."
+            },
+            "compiler_version": {
+              "type": "string"
+            },
+            "prompt_hash": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "extracted_at": {
+              "$ref": "common.schema.json#/$defs/Iso8601"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "allOf": [

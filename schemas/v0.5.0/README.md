@@ -12,6 +12,24 @@ retained under `schemas/v0.4.2` and remains valid for five-verb conformance
 claims (see the protocol contract's change history — a migration note, not a
 break).
 
+## What `claim.schema.json` describes
+
+`claim.schema.json` describes the **L1 claim version record** — one line on the
+canonical L1 JSONL surface (spec §5 "L1 — Claim Store", §6 "The Claim Model"),
+which is the record the reference implementation appends. Its required set is the
+spec §6 required set; beyond it the schema enumerates the record-envelope fields
+the implementation carries: the forget-specific fields, the demotion/release
+warrants, and the optional extraction materialization block (`semantic`).
+
+The block is optional (records written before v0.6 omit it), carries no
+independent epistemic authority — `confidence` / `epistemic_tag` remain the
+canonical values (spec §6 → *Implementation note*) — and is not a wire field: no
+protocol request or response carries it, and nothing in it is required. It is
+enumerated so that a record the implementation writes is accepted by the contract
+it publishes; the alternative (declaring the L1 line a deliberately unvalidated
+superset of the spec §6 version) was rejected. The decision, its consequences and
+the measured divergences it does **not** cover: [ADR-0011](../adr/0011-claim-record-materialization-block.md).
+
 Changes vs v0.4.2 (schema-surface only):
 
 - `common.schema.json` `$defs/Scope` widened to admit `client:<id>` and
@@ -33,7 +51,9 @@ invariants are unchanged in v0.5.0.
 
 The repository schema test compiles every file with AJV 2020 and exercises
 positive and negative fixtures for claim protection, relation admission,
-REVISE, context bundles, the widened Scope pattern, and FORGET.SCOPE requests.
+REVISE, context bundles, the widened Scope pattern, FORGET.SCOPE requests, and
+the claim record's extraction materialization block (optional, closed, and
+required-field-complete when present).
 
 ## Delivery-planning profile
 

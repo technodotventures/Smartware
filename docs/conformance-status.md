@@ -35,6 +35,24 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-15 on Node v26.5.1 for the **claim record's extraction materialization block**
+(`wip/tech-head/claim-record-semantic`, kanban `t_229601e4`, ADR-0011 — schema/contract accuracy, not a
+protocol change): **532 tests across 73 files**, 31 schema files, `claim.schema.json` the only schema
+file changed (`SHA256SUMS` regenerated; the required set and every other property are unchanged). The
+delta over the entry below is 2 tests — a fixture group in `test/schemas-v0.5.0.test.ts` (the block is
+optional, closed, and required-field-complete when present) and one test in
+`test/semantic-materialization.test.ts` (the records `reflect.auto` appends validate against the
+published schema) — plus the pinned `test/layer1/legacy-operation-id.test.ts`, which now asserts the
+**whole** Ajv error list of the record `insertClaim` appends is empty instead of pinning the known
+divergence (same test count). `claim.schema.json` now enumerates the optional `semantic` block, so an
+active record the reference implementation writes is accepted by the contract it publishes; the block
+is optional, not a wire field, and no conformance claim depends on it. Two same-class divergences were
+measured while deciding this and stay open, carded with their evidence (ADR-0011 → *Known
+divergences*): `insertClaim`'s forgotten path omits `supersedes` that the schema's forgotten branch
+requires (`t_3ba3ee39`), and pod-profile records carry `pod/<pod>/<lane>` scopes and
+`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed`). No other
+suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
 (`wip/smarty/l1-legacy-op-id`, kanban `t_85817375`): **530 tests across 73 files**, 31 schema files, no
 schema file changed (the `OperationId` pattern is unchanged). The delta over the baseline below is 6
@@ -44,7 +62,9 @@ pins the marker to the one `src/layer1/tombstone-backfill.ts` stamps on a pre-A3
 writer fixed in the entry below). The placeholder was `op_LEGACY00000000000000000000`, whose `L` the
 published Crockford-base32 pattern rejects; it is now `op_000000000000000000000000A3`. One Ajv error
 remains on such a record — the internal `semantic` block the published claim schema does not enumerate
-— measured, unchanged by this fix, and carded separately. No other suite changed.
+— measured, unchanged by this fix, and carded separately; **that second half was decided in the entry
+above** (the schema enumerates the block, and the pinned test now asserts an empty error list). No
+other suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **tombstone backfill writer**
 (`wip/neo/tombstone-backfill-writer`, kanban `t_9e124fe6`): **524 tests across 72 files**, 31 schema
@@ -260,6 +280,9 @@ The exact ordering and recovery state table are documented in
   **content form** — the snapshot block enumerates neither the structured assertion
   nor `semantic`, so a structured value would not be re-derivable from the artifact
   whose purpose is reconstruction (`t_9e124fe6`, ADR-0003 → *Known divergence*).
+  (Deliberately unchanged by `t_229601e4` / ADR-0011: the L1 *record* now enumerates
+  the materialization block, the snapshot block still does not — its promise is the
+  claim schema's **required** fields, and the block is optional.)
 - The suite does not prove concurrent multi-writer serialization or universal
   sudden-power-loss durability.
 - REFLECT page output and search databases are rerunnable projections rather

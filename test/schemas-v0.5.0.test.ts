@@ -304,6 +304,76 @@ describe('Smartware v0.5.0 schemas', () => {
     assert.equal(claim({ ...activeClaim(), reinstated_by: 'agent' }), false);
   });
 
+  test('claim.schema.json enumerates the extraction materialization block the L1 record writer appends', () => {
+    const ajv = createAjv();
+    const claim = validator(ajv, 'claim.schema.json');
+
+    // Control: a version without the block is fully conformant — the block is optional, and every
+    // record written before v0.6 omits it.
+    assert.equal(claim(activeClaim()), true, JSON.stringify(claim.errors));
+
+    // The block the record writer appends on an active version (`ClaimSemanticMaterialization`,
+    // fixed by kanban t_229601e4): the structured extraction beside the admitted, reduced fields.
+    const semantic = {
+      subject_name: 'Graphiti API',
+      subject_type: 'tool',
+      predicate: 'status_is',
+      object: { type: 'enum', value: 'deployed' },
+      t_valid_from: { value: NOW, state: 'inferred', basis: 'source_observed_at' },
+      t_valid_to: { value: null, state: 'null' },
+      extracted_epistemic: 'observed',
+      extracted_confidence: 0.85,
+      sensitive: false,
+      extraction: {
+        method: 'deterministic',
+        model: null,
+        compiler_version: '0.6.1',
+        prompt_hash: null,
+        extracted_at: NOW,
+      },
+    };
+    assert.equal(claim({ ...activeClaim(), semantic }), true, JSON.stringify(claim.errors));
+
+    // The block preserves the raw values the admitted fields reduce: an extraction confidence that
+    // is not on the bucket grid (the record writer copies the caller's number verbatim) and a
+    // label stronger than the claim's bounded tag both stay valid.
+    assert.equal(claim({
+      ...activeClaim(),
+      confidence: 'high',
+      epistemic_tag: 'fact',
+      semantic: { ...semantic, extracted_confidence: 1.5, extracted_epistemic: 'user_confirmed' },
+    }), true, JSON.stringify(claim.errors));
+
+    // Closed block: an unenumerated subfield is rejected rather than silently carried.
+    assert.equal(claim({ ...activeClaim(), semantic: { ...semantic, invented_field: true } }), false);
+    // ...and every subfield is required once the block is present.
+    const { predicate: _predicate, ...withoutPredicate } = semantic;
+    assert.equal(claim({ ...activeClaim(), semantic: withoutPredicate }), false);
+    // The typed value and the valid-time shape are closed too.
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, object: { type: 'tool', value: 'deployed' } },
+    }), false);
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_to: { value: NOW, state: 'unknown' } },
+    }), false);
+    // A pass-through extraction date without a time is tolerated (the LLM path copies the model's
+    // `validity.from`), but a non-string valid-time value is not.
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_from: { value: '2026-01-05', state: 'known' } },
+    }), true, JSON.stringify(claim.errors));
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_from: { value: 20260105, state: 'known' } },
+    }), false);
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_from: { value: NOW, state: 'known', basis: 7 } },
+    }), false, 'the valid-time basis is a string label, not free data');
+  });
+
   test('tombstone-frontmatter: the snapshot carries the claim record envelope', () => {
     const ajv = createAjv();
     const tombstone = validator(ajv, 'tombstone-frontmatter.schema.json');
@@ -372,7 +442,10 @@ describe('Smartware v0.5.0 schemas', () => {
       .properties as Record<string, unknown>;
 
     // Same definitions, same descriptions: the snapshot is a claim version, so the two blocks
-    // must not drift apart as the envelope grows.
+    // must not drift apart as the envelope grows. `semantic` is deliberately not in this list: the
+    // snapshot's promise is the claim schema's *required* fields, the block is optional, and the
+    // block's shape is not mirrored into the recovery artifact (ADR-0011 → *Explicitly not decided
+    // here*).
     for (const field of ['superseded_by', 'superseded_at', 'superseded_by_origin', 'reinstated_by']) {
       assert.ok(claimProperties[field], `claim.schema.json does not define ${field}`);
       assert.deepEqual(

@@ -10,6 +10,11 @@
 // pin the shared convention: the marker is the same value `src/layer1/tombstone-backfill.ts` stamps
 // on backfilled tombstones (t_9e124fe6), so one value identifies every record the library had to
 // write without a real OperationId.
+//
+// The second half of the same measurement — the record's internal `semantic` block, which the
+// published claim schema did not enumerate — was decided separately (kanban t_229601e4): the schema
+// describes the L1 record, so it now enumerates the block. The record therefore validates whole,
+// which is what the tests below assert.
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -185,10 +190,13 @@ describe('the L1 record writer stamps an OperationId the published contract acce
 
     expect(errors.filter(e => e.instancePath === '/operation_id')).toEqual([]);
 
-    // The one error left is the carded `semantic` divergence (see the test below): an active
-    // record carries the internal materialization block, which the published claim schema does
-    // not enumerate. Pinned here so it cannot silently become two errors, or hide a new one.
-    expect(errors.map(e => `${e.instancePath}:${e.keyword}`)).toEqual([':additionalProperties']);
+    // ...and nothing else fails either: the record the writer appends is accepted by the contract the
+    // library publishes. The internal `semantic` block this probe used to flag was decided on the
+    // schema side — the published claim schema now enumerates the record envelope, block included
+    // (kanban t_229601e4, ADR-0011). Asserted as the whole error list, so a new divergence cannot
+    // hide behind an existing one.
+    expect(valid).toBe(true);
+    expect(errors).toEqual([]);
   });
 
   test('the marker is the one the tombstone backfill stamps — one convention, not two', () => {
@@ -214,19 +222,39 @@ describe('the L1 record writer stamps an OperationId the published contract acce
     expect(LEGACY_OPERATION_ID).toMatch(pattern);
   });
 
-  test('known divergence: claim.schema.json does not enumerate the record’s internal semantic block', () => {
+  test('the record the writer appends validates entirely against the published claim schema', () => {
     seedSubjectEntity();
     store.insertClaim(claimWithoutOperationId());
 
     const record = writtenRecord(CLAIM_A);
     expect(Object.keys(record)).toContain('semantic');
 
+    // The published claim schema describes the L1 record — so the materialization block the writer
+    // carries is enumerated in it (kanban t_229601e4, ADR-0011), and the schema stayed closed.
     const claimSchema = readSchema('claim.schema.json');
     expect(claimSchema.additionalProperties).toBe(false);
-    expect(Object.keys(claimSchema.properties as Record<string, unknown>)).not.toContain('semantic');
+    const semanticSchema = (claimSchema.properties as Record<string, any>).semantic as Record<string, any>;
+    expect(semanticSchema).toBeDefined();
+    expect(semanticSchema.additionalProperties).toBe(false);
 
-    // Whether the published claim schema describes the L1 record or the spec §6 claim version is a
-    // separate, carded question — not this card's ask. When it is answered (the schema gains the
-    // block, or the writer stops emitting it) this test fails in the same change and gets updated.
+    // Enumerating the block did not open the envelope: the record validates, an unenumerated
+    // subfield inside the block is still rejected, and so is a block missing a subfield.
+    const claim = validator(createAjv(), 'claim.schema.json');
+    expect(claim(record)).toBe(true);
+    expect(claim({ ...record, semantic: { ...record.semantic, invented_field: true } })).toBe(false);
+    const { predicate: _predicate, ...blockWithoutPredicate } = record.semantic as Record<string, unknown>;
+    expect(claim({ ...record, semantic: blockWithoutPredicate })).toBe(false);
+
+    // Why the block belongs on the record at all: it is the typed assertion the derived row is
+    // rebuilt from, so a record that carries it survives a replay the content form cannot.
+    expect(record.semantic).toMatchObject({
+      subject_name: 'Acme',
+      subject_type: 'organization',
+      predicate: 'deadline_is',
+      object: { type: 'date', value: '2026-02-01' },
+      t_valid_from: { value: AT, state: 'known' },
+      extracted_epistemic: 'observed',
+      extracted_confidence: 0.5,
+    });
   });
 });
