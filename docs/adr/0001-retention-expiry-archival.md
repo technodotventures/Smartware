@@ -1,6 +1,6 @@
 # ADR-0001 — Retention, Expiry & Archival
 
-**Status:** Approved (owner sign-off 2026-09-10 — Tier-1 invariants §2.2 frozen; `staleness` block deprecated §2.4)
+**Status:** Approved (owner sign-off 2026-09-10 — Tier-1 invariants §2.2 frozen; `staleness` block deprecated §2.4) — **Tier-1 invariant 5 and the §2.3 / §2.5 / §4-AC3 description of the `retention.expire` entry are superseded by [ADR-0013](0013-retention-sweep-commit-identity.md) (Proposed, 2026-09-15: the sweep always commits under an OperationId); the other four Tier-1 invariants stand unchanged.**
 **Author:** @smarty-pants
 **Date:** 2026-09-10
 **Supersedes:** none

@@ -735,9 +735,14 @@ Two host-triggered lifecycle surfaces, both owner/staff-gated and receipt-backed
 - **Retention expiry** — `memory.expireRetention({ actor, scope, operation_id?, as_of? })`
   (MCP `smartware_expire_retention`). Optional `retention` config (additive; absent ⇒
   `forever`, today's behavior). Tombstones elapsed `duration`-policy observations and
-  retracts their sole-evidence claims, with one `retention.expire` ops entry. Idempotent;
-  run it on a host scheduler (like `drainCompileQueue`). Physical storage reclaim is
-  `forgetScope({ reason: 'erasure' })` — there is no separate record-level purge.
+  retracts their sole-evidence claims, committing exactly ONE `retention.expire` ops entry
+  per sweep: the caller's `operation_id` when supplied — and then a retry with the same id
+  replays the recorded counts instead of sweeping again — otherwise one the substrate mints
+  for that sweep, returned as `operation_id` in the result and carried by every artifact the
+  sweep wrote (ADR-0013). Idempotent by effect: a re-run finds no new expired records, and a
+  bare retry commits its own zero-count entry. Run it on a host scheduler (like
+  `drainCompileQueue`). Physical storage reclaim is `forgetScope({ reason: 'erasure' })` —
+  there is no separate record-level purge.
 - **Consolidation** — `memory.consolidate({ actor, claim_ids[], summary, subject_name,
   predicate, scope, operation_id })` (MCP `smartware_consolidate`, user-only). Collapses
   2+ active claims into one reviewed current-understanding claim whose `derived_from` is

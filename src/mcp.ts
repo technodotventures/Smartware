@@ -451,11 +451,11 @@ export function createSmartwareMcpServer(
 
   server.tool(
     'smartware_expire_retention',
-    'Retention expiry sweep (ADR-0001). Tombstones elapsed duration-policy observations in one scope and retracts their sole-evidence claims. Idempotent; host-triggered like compile. Requires a forget grant on the scope (or owner).',
+    'Retention expiry sweep (ADR-0001, ADR-0013). Tombstones elapsed duration-policy observations in one scope and retracts their sole-evidence claims, committing exactly one `retention.expire` ops entry per sweep with exact counts. Host-triggered like compile (not protocol-versioned); requires a forget grant on the scope (or owner).',
     {
       actor_id: z.string(),
       scope: z.string().describe('Scope id to sweep'),
-      operation_id: z.string().optional().describe('Idempotency key — retry returns the same counts'),
+      operation_id: z.string().optional().describe('Idempotency key — a retry with the same id returns the recorded counts instead of sweeping again. Omit to let the substrate mint one for this sweep; the id it committed under is returned either way'),
       as_of: z.string().optional().describe('ISO 8601 instant to evaluate expiry against (default: now)'),
     },
     async args => wrap(() => core.expireRetention({
