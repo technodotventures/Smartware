@@ -68,12 +68,18 @@ released *duty*, `saveConfig` writes atomically with fsync, and the v0.5.0
 ops-log enum completed with `consolidate` / `reflect.explicit` /
 `retention.expire`): **541 tests across 75 files**, build clean (`tsc`), 31
 schema files verified, `verify:saas` pass — same kernel and conformance results.
+Re-measured a ninth time 2026-09-15 after the writer-surface pin landed (card
+t_0e3989eb: `OpType` derives from an exported `OP_TYPES` runtime list, the four
+dead members `recall` / `watch.subscribe` / `watch.event` / `guardian` removed,
+and `test/schemas-v0.5.0.test.ts` now asserts every writer op validates against
+the published `op` enum): **542 tests across 75 files**, build clean (`tsc`), 31
+schema files verified, `verify:saas` pass — same kernel and conformance results.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **541 tests across 75 files** with no skips
+- The standalone suite passes **542 tests across 75 files** with no skips
   (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship

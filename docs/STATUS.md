@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/neo/legal-hold-findings` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/ops-enum-symmetry` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -25,24 +25,25 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-15-t_c5c999ba.md`](journal/2026-09-15-t_c5c999ba.md) — DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition) (2026-09-15)
-- **Journal entries:** 45 · tasks completed on board `smartware`: 54
+- **Journal entries:** 45 · tasks completed on board `smartware`: 58
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
+| `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
-| `wip/smarty/retention-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
-| `wip/tech-head/claim-record-semantic` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
 | `wip/neo/tombstone-backfill-writer` | 53 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_9e124fe6) |
-| `wt/t_9740ae98` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
+| `wt/t_9740ae98` | 53 | 2026-09-15 | gate: Coffee company-brain acceptance run — packaged artifact, 79/79, two defects fixed in-lane (ADR-0011) |
 | `wt/t_ba868906` | 52 | 2026-09-15 | docs: record the exact status:check outcome (board-counter drift) for the adapter cut |
+| `wip/neo/legal-hold-findings` | 51 | 2026-09-15 | docs: state delta for t_7a64ded2 (gate evidence, conformance counts, STATUS projection) |
 | `wip/smarty/tombstone-snapshot-envelope` | 51 | 2026-09-15 | fix(schemas): tombstone snapshot block enumerates the claim record envelope |
 | `wip/neo/repick-survivor` | 50 | 2026-09-15 | docs: regenerate STATUS (board counters; drift is projection-only) |
+| `wip/neo/storage-fencing` | 50 | 2026-09-15 | docs: regenerate STATUS projection (board counters moved while closing t_695656d8) |
 | `wip/neo/legal-hold-marker` | 49 | 2026-09-15 | docs: state delta for t_463c1ff9 (legal-hold marker) + journal/STATUS projections |
 | `wip/neo/f1b-demoted-fingerprint` | 48 | 2026-09-15 | fix: a fingerprint hit on a demoted duplicate routes corroboration to the fact's survivor (ADR-0005 F1b) |
-| `wip/neo/storage-fencing` | 48 | 2026-09-15 | fence: storage-level fencing — epoch-stamped mutations, an atomic commit gate, and stale-set rejection (ADR-0010) |
 | `falsifier/t_e8bd6747` | 47 | 2026-09-15 | test-tree: compose F1 + F2 onto one tree for the ADR-0005 steady-state falsifier |
 | `wt/t_c5c999ba` | 47 | 2026-09-14 | docs: decide legal hold — v1 composition stands, marker not built (ADR-0008) |
 | `feat/deepseek-provider` | 46 | 2026-09-15 | feat(extraction): add deepseek provider (OpenAI-compatible, api.deepseek.com) |
@@ -56,6 +57,7 @@
 | `docs/protocol-identity-adr` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
+| `docs/saas-retention-ops-entry` | 37 | 2026-09-15 | docs: the retention sweep's ops entry is caller-supplied only (measured) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
 | `feat/corroboration-reachable` | 33 | 2026-09-12 | feat: make corroboration reachable, and demonstrate it in the reference example |
 | `fix/concurrent-schema-migration` | 32 | 2026-09-11 | fix: make column migrations idempotent when two processes open one brain |
@@ -74,10 +76,14 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_66f1dd7d` [todo] GATE review: independent Coffee company-brain release verdict (created 2026-09-13, assignee smarty-pants)
 - `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
+- `t_3ba3ee39` [todo] L1 record writer: `insertClaim`'s forgotten path omits `supersedes`, so the record fails claim.schema.json's forgotten branch (measured, carded out of t_229601e4) (created 2026-09-15, assignee smarty-pants)
+- `t_9a700aed` [todo] Library-written L1 records: pod-profile scopes (`pod/<pod>/<lane>`) and `substrate:<ULID>` actor ids are rejected by the v0.5.0 Scope/ActorId patterns (measured, carded out of t_229601e4) (created 2026-09-15, assignee neo)
+- `t_432be9c9` [todo] STATUS projection: the ADR README template's `- **Status:**` bullet is not read by scripts/substrate-status.mjs (every template-shaped ADR shows "(no status line)" and is invisible as a pending decision) (created 2026-09-15, assignee smarty-pants)
+- `t_f2b584dc` [todo] DECIDE: FORGET.SCOPE revokes whole grant rows — multi-client staff lose their other clients (Coffee gate finding, ADR-0011) (created 2026-09-15, assignee tech-head)
 
 ## Blockers and stale work
 
-- No blocked tasks on the board.
+- `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
 
 ## Decisions
 
@@ -101,8 +107,9 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (4d old)
-- ✅ kanban board readable (61 tasks, 2695 events)
-- ⚠️ 9 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (69 tasks, 2917 events)
+- ⚠️ 13 completed task(s) have no journal entry — run: npm run journal:sync
+- ⚠️ 1 blocked task(s)
 
 ## Canonical index
 
