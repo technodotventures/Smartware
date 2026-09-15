@@ -530,6 +530,16 @@ export class ClaimStore {
         operation_id: opId,
         actor_id: actId,
         tags: [],
+        // Spec §6 defines `supersedes` as "the prior version number this version replaces", and the
+        // published record contract requires it for version > 1 (`claim.schema.json`: `if version >= 2
+        // then required supersedes`). Every other writer of the canonical surface sets it — FORGET,
+        // retention, consolidation, FORGET.SCOPE and REVISE all hand-build `supersedes: latest.version`
+        // — while this one derived the number (from `nextVersionFor`) and then dropped it, so every
+        // version ≥ 2 record it appended failed the contract (measured kanban t_3ba3ee39).
+        // A version-1 record names nothing: a claim can be *born* forgotten on the legacy/migration
+        // and `replay.ts` retraction paths, and there is no prior version to point at — which is why
+        // `claim.schema.json`'s forgotten branch does not require this field (ADR-0012).
+        ...(version > 1 ? { supersedes: version - 1 } : {}),
         // A demotion rides the canonical record, not just the derived row: without this,
         // re-materialising the record (compile-path sync) or replaying the log restores the
         // duplicate to the recall-eligible set. `t_invalidated` is the demotion commit time
