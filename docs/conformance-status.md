@@ -35,6 +35,30 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-16 on Node v26.5.1 for **the compiled L2 page frontmatter against
+`page-frontmatter.schema.json`** (`wip/tech-head/l2-page-frontmatter-schema`, stacked on the ADR-0013 lane
+`wip/smarty/canonical-schema-boundary @ 6ed7a93`; kanban `t_8d6f4a5c`, ADR-0013 → D2 — a **writer** fix, so
+**no published schema byte moves**, `SHA256SUMS` unchanged): **543 tests across 76 files**, 31 schema
+files. The delta over the entry below is 2 tests, all in `test/layer2/l2-page-frontmatter-boundary.test.ts`,
+whose assertions **inverted**: the compiled page's raw frontmatter now validates with an **empty** error
+list where it previously rejected with exactly 19 (`required` ×2 — `created`, `epistemic_tag`;
+`additionalProperties` ×12; `/category:enum`, `/sources/0:pattern`, `/updated:format`,
+`/confidence:type`, `/confidence:enum`), and the same file now also pins the **endorsed** page (ENDORSE is
+a second writer of this artifact) and the pre-fix read path. The writer emits spec §9's field set verbatim;
+the compile envelope (`entity_id`, `entity`, `type`, `sensitive`, `compiled_at`, `compiled_by`, `model`,
+`supersedes`, `related`, and ENDORSE's recovery metadata) renders into the page's derived **Evidence
+Timeline** region as a `smartware-envelope` block instead of into the frozen contract, and READ derives
+sensitivity from L1 and resolves entity → page from the L1 entity record rather than from removed
+frontmatter. A/B with one probe over both revisions: 19 errors at `6ed7a93` → 0 errors at the fix, and the
+old pin passes at `6ed7a93` (2/2) while failing loudly at the fix (1 failed | 1 passed) — the inverted pin
+is not tautological. Pages already on disk are read through the compatibility accessor
+(`src/layer2/envelope.js`) and upgraded deterministically in place on their next compile or endorsement;
+no user prose, locked `sources`, `created`, or user `tags`/`aliases`/`notices` is rewritten. Not covered:
+the page `scope` value is the substrate's own string, so a page in a scope outside the v0.5.0 `Scope`
+pattern stays an ADR-0015 boundary rather than a page-vocabulary claim. Fixtures in
+`f_l2_voice_protection`, `g_endorsement` and `demotion-durability` moved to the published vocabulary;
+`e2e/smoke` and `protocol/query` assert the published fields. No other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
 evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
 `t_0920aa1d`, ADR-0013 — schema/contract accuracy plus a disclosed boundary; **no published schema byte

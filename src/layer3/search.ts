@@ -2,6 +2,7 @@
 
 import Database from 'better-sqlite3';
 import type { CompiledPage, FreshnessCounts } from '../layer2/types.js';
+import { stripEnvelopeBlock } from '../layer2/envelope.js';
 import type { Claim, Entity } from '../layer1/types.js';
 import type { ClaimStore } from '../layer1/store.js';
 import { dirname } from 'node:path';
@@ -220,13 +221,15 @@ export class SearchIndex {
 
   /** Index or re-index a compiled page */
   indexPage(page: CompiledPage): void {
-    const { entity_id, entity, scope } = page.frontmatter;
+    const { entity_id, entity } = page.envelope;
+    const { scope } = page.frontmatter;
 
     // Index only the page BODY, not the YAML frontmatter. Frontmatter fields
     // (type, scope, epistemic, model, ids, dates) are metadata, not content —
     // indexing them pollutes full-text search (e.g. "person" matching every
-    // `type: person` page and cross-contaminating results).
-    const body = page.raw.replace(/^---\n[\s\S]*?\n---\n/, '');
+    // `type: person` page and cross-contaminating results). The derived
+    // envelope block inside the body is machine metadata for the same reason.
+    const body = stripEnvelopeBlock(page.raw.replace(/^---\n[\s\S]*?\n---\n/, ''));
 
     // Delete old entry
     this.db.prepare("DELETE FROM search_index WHERE entity_id = ?").run(entity_id);

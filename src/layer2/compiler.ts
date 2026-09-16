@@ -10,14 +10,30 @@ import { appendObservation } from '../layer0/log.js';
 import { assignIntegrity } from '../layer0/integrity.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { Entity, Claim } from '../layer1/types.js';
+import { confidenceToBucket, epistemicToTag, type EpistemicLabel } from '../layer1/types.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { resetEntityTelemetry, getEntityMergeLog, getNewEntityLog } from '../layer1/entities.js';
 import { extractDeterministic } from '../extraction/deterministic.js';
 import { extractClaimsLLM, compileMarkdownLLM } from '../extraction/llm.js';
 import type { SmartwareConfig } from '../config.js';
-import type { Frontmatter, CompiledPage, CompilationAudit, CompileTelemetry, EntityMerge } from './types.js';
+import type { Frontmatter, CompiledPage, CompilationAudit, CompileTelemetry, EntityMerge, PageEnvelope, PageNotice } from './types.js';
+import { PAGE_CATEGORY_DIRS } from './paths.js';
 import { ensurePrivateDirectory, writePrivateFile } from '../storage/private-fs.js';
-import { serialiseFrontmatter, parseFrontmatter } from './frontmatter.js';
+import { serialiseFrontmatter } from './frontmatter.js';
+import {
+  isoDate,
+  pageCitedClaimIds,
+  pageCreatedDate,
+  readPageFile,
+  renderEnvelopeBlock,
+} from './envelope.js';
+import {
+  categoryDirForEntity,
+  entityPagePath,
+  entitySlug,
+  pageCategoryForDir,
+  pageIdForSlug,
+} from './paths.js';
 import { buildOneliner, buildParagraph, buildFullPage } from './resolutions.js';
 import { commitWikiChanges, buildCommitMessage, ensureGitRepo } from './git.js';
 import type { SearchIndex } from '../layer3/search.js';
@@ -212,69 +228,90 @@ export async function compile(
       fullPage = buildFullPage(entity, claims);
     }
 
-    const category = categorizeEntity(entity);
-    const slug = entitySlug(entity);
+    const categoryDir = categoryDirForEntity(entity);
+    const category = pageCategoryForDir(categoryDir) ?? 'concept';
+    const slug = entitySlug(entity.canonical_name);
     const claimIds = claims.map(c => c.id);
+    const sourceObservationIds = [...new Set(claims.flatMap(c => c.supporting_evidence))];
+    const pagePath = entityPagePath(wikiDir, entity);
+
+    // Voice protection: on user-authored pages the Current Understanding prose, the cited
+    // `sources`, the creation date, user tags/aliases and the notice slot survive a recompile;
+    // only the derived cached region (Evidence Timeline + envelope), `updated` and
+    // `supporting_claims` are agent-maintained (§9). `Read` the page in *either* shape so a
+    // tree that predates ADR-0013 → D2 is upgraded in place.
+    const existingPage = fs.existsSync(pagePath)
+      ? readPageFile(fs.readFileSync(pagePath, 'utf-8'))
+      : null;
+    const isUserPage = existingPage?.frontmatter['author'] === 'user';
+    const existingEnvelope = existingPage?.envelope ?? null;
+
     const frontmatter: Frontmatter = {
-      entity_id: entity.id,
-      entity: entity.canonical_name,
-      type: entity.type,
-      scope: entity.scope,
-      epistemic,
-      sensitive,
-      sources: [...new Set(claims.flatMap(c => c.supporting_evidence))],
-      claim_ids: claimIds,
-      compiled_at: now,
-      compiled_by: 'smartware-compiler',
-      model: usedLLM ? config.llm.model : undefined,
-      confidence,
-      supersedes: [],
-      related: [],
-      // ── Spec v1.5.4.2 fields (PR-6 / A5) ────────────────────────────
-      category,
-      author: 'agent',
-      page_id: `page_${slug}`,
       title: entity.canonical_name,
-      summary: undefined, // populated below from oneliner
-      sources_claim_ids: claimIds,
+      page_id: pageIdForSlug(slug),
+      category,
+      author: isUserPage ? 'user' : 'agent',
+      // §9: `sources` is locked at endorsement on user-authored pages. On a legacy page the
+      // published name still holds the observation list, so the cited claims are read through
+      // the compatibility accessor.
+      sources: isUserPage && existingPage ? pageCitedClaimIds(existingPage) : claimIds,
       supporting_claims: [],
-      notices: [],
+      created: existingPage ? pageCreatedDate(existingPage.frontmatter, now) : isoDate(now),
+      updated: isoDate(now),
+      scope: entity.scope,
+      confidence: confidenceToBucket(confidence),
+      epistemic_tag: epistemicToTag(epistemic, 'active'),
+      summary: '',
       tags: [],
       aliases: [],
-      updated: now,
+      notices: [],
     };
     frontmatter.summary = oneliner.trim().split('\n')[0]?.slice(0, 240) ?? '';
 
-    // ── Stage 6: VERIFY — two-region page + voice protection ────────────
-    const pagePath = entityPath(wikiDir, entity);
-    const evidenceTimeline = buildEvidenceTimeline(claims, now);
-
-    // Voice protection: on user-authored pages, preserve Current
-    // Understanding prose and sources; only update Evidence Timeline,
-    // supporting_claims, _index, and updated timestamp.
-    const existingParsed = fs.existsSync(pagePath)
-      ? parseFrontmatter(fs.readFileSync(pagePath, 'utf-8'))
-      : null;
-    const isUserPage = existingParsed?.frontmatter?.author === 'user';
-
-    let body: string;
-    if (isUserPage && existingParsed) {
-      const existingBody = existingParsed.body;
-      body = replaceEvidenceTimeline(existingBody, evidenceTimeline);
-      frontmatter.author = 'user';
-      frontmatter.sources = existingParsed.frontmatter.sources;
-      frontmatter.claim_ids = existingParsed.frontmatter.claim_ids;
-      frontmatter.sources_claim_ids = existingParsed.frontmatter.sources_claim_ids;
-      frontmatter.notices = existingParsed.frontmatter.notices ?? [];
+    if (isUserPage && existingPage) {
+      const existingFm = existingPage.frontmatter;
       frontmatter.supporting_claims = [
         ...new Set([
-          ...(existingParsed.frontmatter.supporting_claims ?? []),
-          ...claimIds.filter(id => !(existingParsed.frontmatter.sources_claim_ids ?? []).includes(id)),
+          ...toStringArray(existingFm['supporting_claims']),
+          ...claimIds.filter(id => !frontmatter.sources.includes(id)),
         ]),
       ];
+      frontmatter.notices = (Array.isArray(existingFm['notices']) ? existingFm['notices'] : []) as PageNotice[];
+      frontmatter.tags = toStringArray(existingFm['tags']);
+      frontmatter.aliases = toStringArray(existingFm['aliases']);
+    }
+
+    // The compile envelope is implementation mechanics, not page vocabulary: it renders into
+    // the derived cached region below rather than into the published frontmatter
+    // (ADR-0013 → D2).
+    const envelope: PageEnvelope = {
+      compiled_at: now,
+      compiled_by: 'smartware-compiler',
+      entity_id: entity.id,
+      entity: entity.canonical_name,
+      type: entity.type,
+      sensitive,
+      source_observation_ids: sourceObservationIds,
+      supersedes: [],
+      related: [],
+    };
+    if (usedLLM) envelope.model = config.llm.model;
+    // Endorsement-recovery metadata is durable state about a warranted action, not a compile
+    // artifact: a later recompile carries it forward instead of erasing it.
+    if (existingEnvelope?.endorsement_operation_id) {
+      envelope.endorsement_operation_id = existingEnvelope.endorsement_operation_id;
+    }
+    if (existingEnvelope?.endorsed_by) envelope.endorsed_by = existingEnvelope.endorsed_by;
+    if (existingEnvelope?.endorsed_at) envelope.endorsed_at = existingEnvelope.endorsed_at;
+
+    // ── Stage 6: VERIFY — two-region page + voice protection ────────────
+    const evidenceTimeline = buildEvidenceTimeline(claims, envelope);
+
+    let body: string;
+    if (isUserPage && existingPage) {
+      body = replaceEvidenceTimeline(existingPage.body, evidenceTimeline);
     } else {
       body = `\n## Current Understanding\n\n${oneliner}\n\n${paragraph}\n\n${fullPage}\n\n${evidenceTimeline}\n`;
-      frontmatter.notices = [];
     }
 
     const raw = serialiseFrontmatter(frontmatter, body);
@@ -284,7 +321,7 @@ export async function compile(
     writePrivateFile(pagePath, raw, 'utf-8');
     changedFiles.push(pagePath);
 
-    const page: CompiledPage = { path: pagePath, frontmatter, oneliner, paragraph, fullPage, raw };
+    const page: CompiledPage = { path: pagePath, frontmatter, envelope, oneliner, paragraph, fullPage, raw };
     pages.push(page);
 
     const contestedCount = claims.filter(c => c.status === 'contested').length;
@@ -293,7 +330,7 @@ export async function compile(
       entity_name: entity.canonical_name,
       claims_used: claims.length,
       claims_contested: contestedCount,
-      observations_used: frontmatter.sources.length,
+      observations_used: sourceObservationIds.length,
       compiled_at: now,
       model: usedLLM ? config.llm.model : null,
       path: pagePath,
@@ -350,50 +387,12 @@ export async function compile(
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function entitySlug(entity: Entity): string {
-  return entity.canonical_name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-/**
- * Spec v1.5.4.2 page-category routing. The substrate's existing Entity.type
- * vocabulary (`person`, `agent`, `project`, `concept`, `decision`, `event`,
- * `tool`, `organisation`, `preference`, `manifest`) projects onto the spec's
- * six page categories.
- */
-function categorizeEntity(entity: Entity): 'concepts' | 'entities' | 'decisions' | 'profiles' {
-  // Profiles are agent-only (see Profile target REFLECT). The compiler doesn't
-  // emit profile pages here; reflectSelfProfile handles that surface.
-  switch (entity.type) {
-    case 'decision':
-    case 'event':
-      return 'decisions';
-    case 'person':
-    case 'agent':
-    case 'project':
-    case 'organisation':
-    case 'manifest':
-      return 'entities';
-    default:
-      // concept, tool, preference, plus anything new → concepts
-      return 'concepts';
-  }
-}
-
-/**
- * Spec-shaped page path: `pod_data/wiki/<category>/<slug>.md`.
- * The scope is preserved inside the frontmatter, not the directory layout.
- */
-function entityPath(wikiDir: string, entity: Entity): string {
-  const category = categorizeEntity(entity);
-  const slug = entitySlug(entity);
-  return path.join(wikiDir, category, `${slug}.md`);
-}
-
-function mostConfidentEpistemic(claims: Claim[]): Frontmatter['epistemic'] {
-  const order: Frontmatter['epistemic'][] = ['user_confirmed', 'asserted', 'observed', 'inferred', 'system_generated'];
+function mostConfidentEpistemic(claims: Claim[]): EpistemicLabel {
+  const order: EpistemicLabel[] = ['user_confirmed', 'asserted', 'observed', 'inferred', 'system_generated'];
   for (const label of order) {
     if (claims.some(c => c.epistemic === label)) return label;
   }
@@ -402,7 +401,7 @@ function mostConfidentEpistemic(claims: Claim[]): Frontmatter['epistemic'] {
 
 /** Ensure all six spec-shaped category directories exist. Idempotent. */
 function ensureCategoryDirs(wikiDir: string): void {
-  for (const cat of ['concepts', 'entities', 'decisions', 'synthesis', 'tombstones', 'profiles']) {
+  for (const cat of PAGE_CATEGORY_DIRS) {
     ensurePrivateDirectory(path.join(wikiDir, cat));
   }
 }
@@ -451,11 +450,11 @@ function rebuildCategoryIndex(wikiDir: string, category: string): void {
   writePrivateFile(path.join(dir, '_index.md'), lines.join('\n'), 'utf-8');
 }
 
-function buildEvidenceTimeline(claims: Claim[], compiledAt: string): string {
+function buildEvidenceTimeline(claims: Claim[], envelope: PageEnvelope): string {
   const lines: string[] = [];
   lines.push('## Evidence Timeline');
   lines.push('');
-  lines.push(`<!-- cached view — compiled_at: ${compiledAt} -->`);
+  lines.push(renderEnvelopeBlock(envelope));
   lines.push('');
   const sorted = [...claims].sort((a, b) =>
     (a.extraction.extracted_at ?? '').localeCompare(b.extraction.extracted_at ?? ''),

@@ -9,7 +9,14 @@ import path from 'path';
 import type { Actor } from '../layer0/types.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SmartwareConfig } from '../config.js';
-import { parseFrontmatter } from '../layer2/frontmatter.js';
+import {
+  bucketToConfidence,
+  pageConfidenceBucket,
+  readPageFile,
+  stripEnvelopeBlock,
+} from '../layer2/envelope.js';
+import { PAGE_CATEGORY_DIRS, entityPagePath, entitySlug } from '../layer2/paths.js';
+import type { PageFile } from '../layer2/types.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { isOwner } from '../auth/grants.js';
 import type { SessionStore } from '../session/store.js';
@@ -98,25 +105,35 @@ export async function handleRead(
   }
 
   // Find the page file for this entity
-  const pagePath = findEntityPage(wikiDir, entityId);
+  const pagePath = findEntityPage(wikiDir, entityId, store);
   if (!pagePath) {
     throw new ProtocolError('not_found', `No compiled page found for entity '${entityId}'`);
   }
 
   const raw = fs.readFileSync(pagePath, 'utf-8');
-  const parsed = parseFrontmatter(raw);
-  if (!parsed) {
+  const page = readPageFile(raw);
+  if (!page) {
     throw new ProtocolError('parse_error', `Could not parse frontmatter for '${entityId}'`);
   }
 
-  const { frontmatter, body } = parsed;
+  const { frontmatter, envelope } = page;
+  const scope = pageScope(page);
 
   // Check grant on the page's scope
-  requireGrant(actorId, 'read', frontmatter.scope, config);
+  requireGrant(actorId, 'read', scope, config);
 
-  // Sensitive pages: explicit opt-in required even for the owner. Non-owners
-  // are never permitted, regardless of the flag.
-  if (frontmatter.sensitive) {
+  // Sensitivity is an L1 property; the compiled envelope only caches it (ADR-0013 → D2). L1
+  // decides whenever it has an active claim for this entity — with none (a stale render) the
+  // cached flag is the only signal left, and it is used fail-closed. Non-owners are never
+  // permitted, regardless of the flag.
+  const activeClaims = store && scope
+    ? store.getActiveClaims(scope).filter(claim => claim.subject_id === entityId && claim.status === 'active')
+    : [];
+  const sensitive = activeClaims.length > 0
+    ? activeClaims.some(claim => claim.sensitive)
+    : (envelope?.sensitive ?? false);
+
+  if (sensitive) {
     if (!isOwner(actorId, config)) {
       throw new ProtocolError('sensitive', 'This page is sensitive. Access requires owner privileges.');
     }
@@ -128,9 +145,10 @@ export async function handleRead(
     }
   }
 
-  // Return content at requested resolution
+  // Return content at requested resolution. The derived envelope block is machine metadata,
+  // not page content — it is stripped exactly as the frontmatter envelope used to be.
   let content: string;
-  const lines = body.split('\n');
+  const lines = stripEnvelopeBlock(page.body).split('\n');
 
   switch (params.resolution ?? 'full') {
     case 'oneliner': {
@@ -147,18 +165,43 @@ export async function handleRead(
       break;
     }
     default:
-      content = body.trim();
+      content = stripEnvelopeBlock(page.body).trim();
   }
 
   return {
-    entity_id: frontmatter.entity_id,
-    entity_name: frontmatter.entity,
-    scope: frontmatter.scope,
+    entity_id: entityId,
+    entity_name: envelope?.entity || pageTitle(page) || entityId,
+    scope,
     content,
-    sensitive: frontmatter.sensitive,
-    compiled_at: frontmatter.compiled_at,
-    confidence: frontmatter.confidence,
+    sensitive,
+    compiled_at: envelope?.compiled_at || legacyCompiledAt(page),
+    confidence: activeClaims.length > 0
+      ? Math.round((activeClaims.reduce((sum, claim) => sum + claim.confidence, 0) / activeClaims.length) * 1000) / 1000
+      : bucketToConfidence(pageConfidenceBucket(frontmatter)),
   };
+}
+
+/** The page's scope — the published field, with the pre-fix shape as the fallback. */
+function pageScope(page: PageFile): string {
+  const scope = page.frontmatter['scope'];
+  if (typeof scope === 'string' && scope.length > 0) return scope;
+  const legacy = page.frontmatter['entity_id'];
+  throw new ProtocolError(
+    'parse_error',
+    `Page has no scope in its frontmatter${typeof legacy === 'string' ? ` (entity '${legacy}')` : ''}`,
+  );
+}
+
+function pageTitle(page: { frontmatter: Record<string, unknown> }): string {
+  const title = page.frontmatter['title'];
+  if (typeof title === 'string') return title;
+  const legacy = page.frontmatter['entity'];
+  return typeof legacy === 'string' ? legacy : '';
+}
+
+function legacyCompiledAt(page: { frontmatter: Record<string, unknown> }): string {
+  const value = page.frontmatter['compiled_at'];
+  return typeof value === 'string' ? value : '';
 }
 
 function resolveEntityScope(
@@ -173,15 +216,15 @@ function resolveEntityScope(
   if (!entityId) {
     throw new ProtocolError('invalid_params', 'A scope is required for session-authenticated reads by name');
   }
-  const pagePath = findEntityPage(wikiDir, entityId);
+  const pagePath = findEntityPage(wikiDir, entityId, store);
   if (!pagePath) {
     throw new ProtocolError('not_found', `No compiled page found for entity '${entityId}'`);
   }
-  const parsed = parseFrontmatter(fs.readFileSync(pagePath, 'utf-8'));
-  if (!parsed) {
+  const page = readPageFile(fs.readFileSync(pagePath, 'utf-8'));
+  if (!page) {
     throw new ProtocolError('parse_error', `Could not parse frontmatter for '${entityId}'`);
   }
-  return parsed.frontmatter.scope;
+  return pageScope(page);
 }
 
 // ── Scope browse ────────────────────────────────────────────────────────────
@@ -212,13 +255,13 @@ function browseScopeEntities(
 
     // Try to read oneliner from compiled page
     let oneliner = '';
-    const pagePath = findEntityPage(wikiDir, entity.id);
+    const pagePath = findEntityPage(wikiDir, entity.id, store);
     if (pagePath) {
       try {
         const raw = fs.readFileSync(pagePath, 'utf-8');
-        const parsed = parseFrontmatter(raw);
-        if (parsed) {
-          const lines = parsed.body.split('\n');
+        const page = readPageFile(raw);
+        if (page) {
+          const lines = page.body.split('\n');
           oneliner = lines.find(l => l.trim() !== '') ?? '';
         }
       } catch { /* skip if page unreadable */ }
@@ -256,7 +299,31 @@ function browseScopeEntities(
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function findEntityPage(wikiDir: string, entityId: string): string | null {
+/**
+ * Resolve entity → page file.
+ *
+ * Page identity is the entity's slug (`page_<slug>` at `wiki/<category>/<slug>.md`) and the
+ * compiler writes by exactly that rule, so when the L1 entity record is available the path is
+ * derived rather than searched — entity→page lookup must not depend on a frontmatter field that
+ * the published contract no longer carries (ADR-0013 → D2). The scan is the fallback for a
+ * store-less caller (and for a page whose category moved when the entity type changed); it
+ * matches the identity recorded on the page — the envelope's `entity_id`, or a legacy page's
+ * inline one.
+ */
+function findEntityPage(wikiDir: string, entityId: string, store?: ClaimStore): string | null {
+  if (store) {
+    const entity = store.getEntity(entityId);
+    if (entity) {
+      const direct = entityPagePath(wikiDir, entity);
+      if (fs.existsSync(direct)) return direct;
+      const slug = entitySlug(entity.canonical_name);
+      for (const dir of PAGE_CATEGORY_DIRS) {
+        const candidate = path.join(wikiDir, dir, `${slug}.md`);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+  }
+
   const search = (dir: string): string | null => {
     if (!fs.existsSync(dir)) return null;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -265,8 +332,8 @@ function findEntityPage(wikiDir: string, entityId: string): string | null {
         if (found) return found;
       } else if (entry.name.endsWith('.md')) {
         const p = path.join(dir, entry.name);
-        const raw = fs.readFileSync(p, 'utf-8');
-        if (raw.includes(`entity_id: ${entityId}`)) return p;
+        const page = readPageFile(fs.readFileSync(p, 'utf-8'));
+        if (page?.envelope?.entity_id === entityId) return p;
       }
     }
     return null;

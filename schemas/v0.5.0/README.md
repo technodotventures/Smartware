@@ -86,15 +86,18 @@ rationale is ADR-0013):
    v0.5.0 schema describes. A record schema is required for that manifest claim to be
    honest; until it exists, treat the exported record shape as defined by the
    implementation, not by this set.
-2. **The reference implementation's compiled page frontmatter does not yet validate
-   against `page-frontmatter.schema.json`.** The compiler emits the L2 page with a
-   legacy internal envelope and a different vocabulary (`category` plural,
-   `confidence` numeric, `epistemic` for `epistemic_tag`, observation ids under
-   `sources`); the schema's field set is the normative one, and spec §9 prints the same field set
-   (`tags`, `aliases` and `notices` optional). The writer fix is carded. `page-frontmatter.schema.json`
-   is the contract
-   for that artifact — do not read the implementation's current output as an
-   alternative contract.
+2. **The compiled page frontmatter conforms to `page-frontmatter.schema.json`** — fixed
+   2026-09-16 (kanban `t_8d6f4a5c`, ADR-0013 → D2). The compiler now writes spec §9's field set
+   verbatim: singular `category`, `created`/`updated` as `format: date`, `confidence` bucketed
+   through `confidenceToBucket`, `epistemic_tag` through `epistemicToTag`, and `sources` holding
+   the page's cited `ClaimId`s (its published meaning). The compile envelope is **not** page
+   vocabulary — entity identity, compile provenance, the observation groundtruth and
+   endorsement-recovery metadata render into the page's derived **Evidence Timeline** region as a
+   `smartware-envelope` block, a cached render §9 already makes agent-managed and rebuildable.
+   `page-frontmatter.schema.json` is the contract for that artifact, and
+   `test/layer2/l2-page-frontmatter-boundary.test.ts` pins **both** writers of it (COMPILE and
+   ENDORSE) to an empty error list. A page written before this change is still read through the
+   compatibility accessor (`src/layer2/envelope.js`) and is upgraded in place on its next write.
 
 `tombstone-frontmatter.schema.json` covers `wiki/tombstones/*.md` and
 `profile-frontmatter.schema.json` covers `wiki/profiles/*.md`; the page schema's
