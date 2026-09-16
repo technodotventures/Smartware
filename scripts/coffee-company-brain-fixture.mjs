@@ -177,6 +177,11 @@ const adapters = [];
 const replicas = new Map();   // business key -> { a, b }
 const tenants = new Map();
 
+// Every claim the adapter admitted through `handleWrite`, with the OperationId the caller supplied.
+// Instrumented at the replica factory so no write site can be missed; the P10 check asserts each of
+// these records names that operation on the canonical line (kanban t_5ef44cc1).
+const admittedClaims = [];
+
 function tenantFor(business) {
   if (tenants.has(business.key)) return tenants.get(business.key);
   const dir = path.join(dataRoot, business.slug);
@@ -206,6 +211,20 @@ function replica(business, instanceId, extra = {}) {
     tenant, brainDir: tenant.data_dir, instanceId,
     ports: { appStore, arbiter }, leaseTtlMs: 8000, namespace: 'coffee', ...extra,
   });
+  // Instrument the write path: the P10 conformance check compares what the caller asked for with
+  // what the canonical claim record says. Only writes the adapter accepted (a 201 with admitted
+  // claims) and that carried a well-formed OperationId are recorded, since those are the ones the
+  // record must name.
+  const write = adapter.handleWrite.bind(adapter);
+  adapter.handleWrite = async (params) => {
+    const result = await write(params);
+    const operationId = params?.operation_id;
+    const validId = typeof operationId === 'string' && /^op_[0-9A-HJKMNP-TV-Z]{26}$/.test(operationId);
+    for (const claimId of result?.claims?.claim_ids ?? []) {
+      if (validId) admittedClaims.push({ claim_id: claimId, operation_id: operationId, business: business.key });
+    }
+    return result;
+  };
   adapters.push(adapter);
   return adapter;
 }
@@ -327,6 +346,7 @@ function validateEmittedRecords({ root, schemasDir, Ajv2020, addFormats, maxSamp
   const families = {};
   const classes = new Map();
   const samples = [];
+  const firstByClaimId = {};
   const bucket = family => (families[family] ?? (families[family] = { files: 0, records: 0, violations: 0 }));
   const classify = (family, file, index, record, errors) => {
     bucket(family).violations += 1;
@@ -352,14 +372,36 @@ function validateEmittedRecords({ root, schemasDir, Ajv2020, addFormats, maxSamp
       try { record = JSON.parse(line); } catch { classify(family, file, index, null, [{ instancePath: '', keyword: 'unparseable-json', params: {} }]); return; }
       bucket(family).records += 1;
       if (line.includes(LEGACY_LITERAL)) legacyLiteralHits.push({ family, file: path.relative(root, file), line: index + 1 });
+      if (line.includes(LEGACY_MARKER)) {
+        markerRecords.push({
+          family,
+          file: path.relative(root, file),
+          line: index + 1,
+          claim_id: record.claim_id ?? null,
+          // A substrate-minted (ULID) id means a host operation produced this record; a digest-derived
+          // id means the replay/reconstruction path did, and there is no host operation to name.
+          ulid_addressed: typeof record.claim_id === 'string' && /^claim_[0-9A-HJKMNP-TV-Z]{26}$/.test(record.claim_id),
+          operation_id: record.operation_id ?? null,
+        });
+      }
       if (family === 'brain_claims' && record.state === 'forgotten') forgotten += 1;
+      if (family === 'brain_claims' && typeof record.claim_id === 'string' && !(record.claim_id in firstByClaimId)) {
+        firstByClaimId[record.claim_id] = {
+          operation_id: record.operation_id ?? null,
+          actor_id: record.actor_id ?? null,
+          file: path.relative(root, file),
+          line: index + 1,
+        };
+      }
       if (validate(record)) return;
       classify(family, file, index, record, validate.errors ?? []);
     });
   };
 
   const LEGACY_LITERAL = 'op_LEGACY00000000000000000000';
+  const LEGACY_MARKER = 'op_000000000000000000000000A3';
   const legacyLiteralHits = [];
+  const markerRecords = [];
 
   let forgotten = 0;
   const files = [];
@@ -385,16 +427,42 @@ function validateEmittedRecords({ root, schemasDir, Ajv2020, addFormats, maxSamp
   }
 
   // Tombstone frontmatter: `wiki/tombstones/*.md`, written by the tombstone backfill (not this
-  // fixture). Validated when present so the family is covered the moment a run writes one.
+  // fixture). Read with a minimal reader for the shape that writer emits — one `key: <inline JSON or
+  // scalar>` per line between `---` fences — then validated against the published tombstone schema.
+  // A file the reader cannot parse is a violation, not a skip (fail closed).
   const tombstoneFiles = files.filter(file => /\/wiki\/tombstones\/[^/]+\.md$/.test(path.relative(root, file)));
+  const readFrontmatter = (body) => {
+    const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(body);
+    if (!match) return null;
+    const frontmatter = {};
+    for (const line of match[1].split('\n')) {
+      if (!line.trim()) continue;
+      const at = line.indexOf(': ');
+      if (at === -1) return null;
+      const key = line.slice(0, at).trim();
+      const raw = line.slice(at + 2).trim();
+      try { frontmatter[key] = JSON.parse(raw); } catch { frontmatter[key] = raw.replace(/^["']|["']$/g, ''); }
+    }
+    return frontmatter;
+  };
   let tombstoneViolations = 0;
+  const tombstoneSamples = [];
   for (const file of tombstoneFiles) {
-    const body = fs.readFileSync(file, 'utf8');
-    const match = /^---\n([\s\S]*?)\n---/.exec(body);
-    let frontmatter = null;
-    try { frontmatter = match ? JSON.parse(match[1]) : null; } catch { frontmatter = null; }
-    if (frontmatter === null) { tombstoneViolations += 1; continue; }
-    if (!validators.tombstone(frontmatter)) tombstoneViolations += 1;
+    const frontmatter = readFrontmatter(fs.readFileSync(file, 'utf8'));
+    if (frontmatter === null) {
+      tombstoneViolations += 1;
+      tombstoneSamples.push({ file: path.relative(root, file), errors: ['unreadable-frontmatter'] });
+      continue;
+    }
+    if (validators.tombstone(frontmatter)) continue;
+    tombstoneViolations += 1;
+    if (tombstoneSamples.length < maxSamples) {
+      tombstoneSamples.push({
+        file: path.relative(root, file),
+        claim_id: frontmatter.claim_id ?? null,
+        errors: (validators.tombstone.errors ?? []).map(e => `${e.instancePath || '/'}:${e.keyword}${e.keyword === 'additionalProperties' ? `(${e.params.additionalProperties})` : ''}`),
+      });
+    }
   }
 
   const recordsValidated = Object.values(families).reduce((sum, b) => sum + b.records, 0);
@@ -408,9 +476,12 @@ function validateEmittedRecords({ root, schemasDir, Ajv2020, addFormats, maxSamp
     forgotten_records: forgotten,
     tombstone_frontmatter_files: tombstoneFiles.length,
     tombstone_frontmatter_violations: tombstoneViolations,
+    tombstone_samples: tombstoneSamples,
     not_validated: other,
     violation_classes: Object.fromEntries([...classes].sort((a, b) => b[1] - a[1])),
     legacy_literal_hits: legacyLiteralHits,
+    marker_records: markerRecords,
+    first_by_claim_id: firstByClaimId,
     samples,
   };
 }
@@ -1493,7 +1564,9 @@ try {
 
     if (Ajv2020) {
       const report = validateEmittedRecords({ root: dataRoot, schemasDir, Ajv2020, addFormats });
-      runMeta.record_conformance = report;
+      // The per-claim index stays in the sidecar inventory; the run's report carries the counters.
+      const { first_by_claim_id: _claimIndex, ...metaReport } = report;
+      runMeta.record_conformance = metaReport;
 
       const claims = { records: 0, violations: 0 };
       const operations = { records: 0, violations: 0 };
@@ -1511,7 +1584,7 @@ try {
         `${operations.violations}/${operations.records} in violation`);
       check('10c tombstone frontmatter files a run writes validate against the published tombstone schema',
         report.tombstone_frontmatter_violations === 0,
-        J({ files: report.tombstone_frontmatter_files, violations: report.tombstone_frontmatter_violations, note: 'the tombstone-backfill writer is not exercised by this fixture' }));
+        J({ files: report.tombstone_frontmatter_files, violations: report.tombstone_frontmatter_violations, samples: report.tombstone_samples.slice(0, 3) }));
       // Non-vacuity: the three read paths above must each have carried records, or a green 10a/10b is
       // silence, not evidence (the blind spot this check exists to close).
       check('10d the conformance check saw every family it claims to cover',
@@ -1525,6 +1598,25 @@ try {
       check('10e no canonical record carries the pre-fix legacy OperationId literal',
         report.legacy_literal_hits.length === 0,
         J(report.legacy_literal_hits.slice(0, 6)));
+      // 10f — attributability, against what the fixture itself asked for. Every claim the adapter
+      // admitted through `handleWrite` with a well-formed OperationId must name that operation on the
+      // canonical line. This is the defect the GATE review measured (t_66f1dd7d, finding B2): `#admit`
+      // built the claim and let `insertClaim` stamp its legacy "no OperationId" marker instead of
+      // forwarding the caller's id — so the marker is legitimate on records the *substrate*
+      // reconstructs with no host operation behind them (the replay path, the tombstone backfill),
+      // and illegitimate on a claim a host write admitted.
+      const attributed = [];
+      const unrecorded = [];
+      for (const entry of admittedClaims) {
+        const record = report.first_by_claim_id[entry.claim_id];
+        if (!record) { unrecorded.push(entry); continue; }
+        if (record.operation_id !== entry.operation_id) {
+          attributed.push({ ...entry, found: record.operation_id, file: record.file, line: record.line });
+        }
+      }
+      check('10f every claim a host write admitted names that operation on the canonical record',
+        admittedClaims.length > 0 && attributed.length === 0,
+        J({ admitted: admittedClaims.length, mismatched: attributed.slice(0, 6), no_canonical_record: unrecorded.length }));
 
       // Durable, machine-readable inventory beside the run's report (the check detail is truncated).
       const reportAt = process.argv.indexOf('--report');

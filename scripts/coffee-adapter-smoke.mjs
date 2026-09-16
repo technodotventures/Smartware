@@ -39,6 +39,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import Ajv2020 from 'ajv/dist/2020.js';
+import addFormats from 'ajv-formats';
 import { showAttributionByDefault, attributionLine } from 'smartware/render';
 
 import {
@@ -61,6 +63,31 @@ function check(name, condition, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok || !detail ? '' : ` — ${detail}`}`);
 }
 const eq = (actual, expected) => `${JSON.stringify(actual)} !== ${JSON.stringify(expected)}`;
+
+// ── the schemas the package publishes, applied to the records it wrote ───────
+/** Ajv compiled against this tree's `schemas/v0.5.0`, returning the claim-record validator. */
+function claimRecordValidator() {
+  const ajv = new Ajv2020({ allErrors: true, strict: false, strictRequired: false });
+  addFormats(ajv);
+  const schemaDir = path.join(process.cwd(), 'schemas', 'v0.5.0');
+  for (const file of fs.readdirSync(schemaDir).filter(name => name.endsWith('.schema.json')).sort()) {
+    try { ajv.addSchema(JSON.parse(fs.readFileSync(path.join(schemaDir, file), 'utf8'))); } catch { /* duplicate $id */ }
+  }
+  return ajv.getSchema('https://smartware.dev/schemas/v0.5.0/claim.schema.json');
+}
+
+/** The canonical L1 line for one claim id, read back off disk (the portability artifact). */
+function canonicalClaimRecord(dataDir, claimId) {
+  const claimsDir = path.join(dataDir, 'claims');
+  if (!fs.existsSync(claimsDir)) return null;
+  for (const file of fs.readdirSync(claimsDir).filter(name => name.endsWith('.jsonl')).sort()) {
+    for (const line of fs.readFileSync(path.join(claimsDir, file), 'utf8').split('\n').filter(Boolean)) {
+      const record = JSON.parse(line);
+      if (record.claim_id === claimId) return record;
+    }
+  }
+  return null;
+}
 
 // ── the host ports (Coffee replaces these with Redis; the contract is identical) ──
 
@@ -288,6 +315,22 @@ try {
     JSON.stringify(recallA.results.map(r => r.claim?.predicate)));
   check('4d the app store still holds the authoritative record',
     (await appStore.list({ key: messagesKeyFor(identityA, ACME) })).length === 1);
+
+  // 4e — the canonical claim record is attributable to the operation and validates against the
+  // published schema. This is the adapter's own bug class (GATE review t_66f1dd7d, finding B2 /
+  // kanban t_5ef44cc1): `#admit` built the claim without forwarding the caller's `operation_id`, so
+  // `insertClaim` stamped its legacy "no OperationId" marker on every host-extracted claim the
+  // ordinary write path produced — and a claim JSONL or EXPORT.SCOPE package a third party imports
+  // then failed the contract the package publishes. Read the raw line back and assert both halves.
+  const admittedRecord = canonicalClaimRecord(tenants.a.data_dir, written.claims.claim_ids[0]);
+  const validateClaimRecord = claimRecordValidator();
+  check('4e the canonical claim record carries the operation that admitted it, and validates',
+    admittedRecord !== null && admittedRecord.operation_id === opWrite && validateClaimRecord(admittedRecord) === true,
+    JSON.stringify({
+      operation_id: admittedRecord?.operation_id,
+      expected: opWrite,
+      errors: (validateClaimRecord.errors ?? []).map(error => `${error.instancePath || '/'}:${error.keyword}`),
+    }));
 
   // ── 5. operation_id retry is idempotent in both stores ───────────────────
   const replay = await a1.handleWrite({
