@@ -229,7 +229,9 @@ describe('handleExportScope — one-scope boundary (spec §10c.4)', () => {
     expect(result.manifest.export_id).toBe(result.export_id);
     expect(result.manifest.scope).toBe(SCOPE);
     expect(result.manifest.protocol).toBe('v0.5.0');
-    expect(result.manifest.schemas).toBe('v0.5.0');
+    expect(result.manifest.schemas).toBe('v0.5.1');
+    expect(result.manifest.record_schema)
+      .toBe('https://smartware.dev/schemas/v0.5.1/observation-record.schema.json');
     expect(result.manifest.scope_exclusive).toBe(true);
 
     // One-scope rule: every content record has scope === SCOPE.

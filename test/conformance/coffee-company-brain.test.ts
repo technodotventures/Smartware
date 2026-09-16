@@ -231,7 +231,9 @@ describe('Coffee company brain · tenant + staff grants + scope-exclusive export
     const acmeExport = await fx.core.exportScope({ actor: OWNER, scope: ACME });
     expect(acmeExport.manifest.scope_exclusive).toBe(true);
     expect(acmeExport.manifest.protocol).toBe('v0.5.0');
-    expect(acmeExport.manifest.schemas).toBe('v0.5.0');
+    expect(acmeExport.manifest.schemas).toBe('v0.5.1');
+    expect(acmeExport.manifest.record_schema)
+      .toBe('https://smartware.dev/schemas/v0.5.1/observation-record.schema.json');
     expect(acmeExport.manifest.scope).toBe(ACME);
     expect(acmeExport.counts.observations).toBeGreaterThanOrEqual(2);
 
