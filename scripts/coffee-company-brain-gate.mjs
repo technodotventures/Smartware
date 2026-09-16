@@ -25,9 +25,10 @@
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
@@ -87,6 +88,14 @@ fs.copyFileSync(path.join(REPO, 'examples', 'coffee-adapter', 'adapter.mjs'), pa
 fs.copyFileSync(path.join(REPO, 'scripts', 'coffee-company-brain-fixture.mjs'), path.join(appDir, 'fixture.mjs'));
 
 // ── 4. run the fixture against the installed package ────────────────────────
+// The fixture's emitted-record conformance check validates the run's own records with ajv. ajv is a
+// devDependency of this repository, NOT a dependency of the published artifact, so the fixture cannot
+// resolve it from the scratch app — hand it the resolved absolute paths instead. This changes nothing
+// about the artifact under test: only the schemas (read from the installed package) and the records
+// (written by it) are the artifact's.
+const require_ = createRequire(path.join(REPO, 'package.json'));
+const ajvModule = pathToFileURL(require_.resolve('ajv/dist/2020.js')).href;
+const ajvFormatsModule = pathToFileURL(require_.resolve('ajv-formats')).href;
 const reportPath = path.join(evidenceDir, 'results.json');
 const brainsDir = path.join(scratch, 'brains');
 const fixture = step('coffee company-brain fixture', () => run('node', ['fixture.mjs', '--report', reportPath], {
@@ -96,6 +105,8 @@ const fixture = step('coffee company-brain fixture', () => run('node', ['fixture
     GATE_ARTIFACT: tarball,
     GATE_ARTIFACT_SHA256: tarballSha,
     GATE_DATA_DIR: brainsDir,
+    GATE_AJV_MODULE: ajvModule,
+    GATE_AJV_FORMATS_MODULE: ajvFormatsModule,
   },
   timeout: 30 * 60 * 1000,
 }));
@@ -128,6 +139,7 @@ const summary = {
     latency: results.meta?.latency,
     resources: results.meta?.resources,
     counts: results.meta?.counts,
+    record_conformance: results.meta?.record_conformance,
     slo_breaches: results.meta?.slo_breaches,
     findings: results.meta?.findings,
     failed_checks: results.checks.filter(check => !check.ok).map(check => check.name),
@@ -156,6 +168,11 @@ if (results) {
     lines.push(`| ${name} | ${group.pass}/${group.pass + group.fail} |`);
   }
   lines.push('');
+  if (results.meta?.record_conformance?.families) {
+    const rc = results.meta.record_conformance;
+    lines.push(`Emitted-record conformance (P10): **${rc.records_validated - rc.records_in_violation}/${rc.records_validated}** canonical records (claim JSONL, operations log, exported packages) validated against \`${rc.schema_set}\` — ${rc.records_in_violation} in violation. Full inventory: \`record-conformance.json\`.`);
+    lines.push('');
+  }
   lines.push('Latency (in-process, in-memory ports — excludes Redis/network):');
   lines.push('');
   lines.push('```');

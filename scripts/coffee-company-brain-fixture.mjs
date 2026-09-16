@@ -26,7 +26,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ADAPTER_SPEC = process.env.GATE_ADAPTER ?? './coffee-adapter.mjs';
@@ -291,6 +291,137 @@ const claimOf = (value, validityFrom, predicate = 'renewal_date', subject = 'Acm
   subject: { name: subject, type: 'organization' }, predicate,
   object: { type: 'text', value }, validity_from: validityFrom,
 }]);
+
+/**
+ * Validate EVERY canonical record this run wrote against the schemas the *installed package*
+ * publishes — the contract a Coffee-side consumer, a migration or a third-party import inherits.
+ *
+ * Families covered (the canonical surfaces the run writes):
+ *   - `<brain>/claims/<yyyy-mm>.jsonl`            -> claim.schema.json (both states; a `state:
+ *      "forgotten"` record is the L1 tombstone form, counted separately below)
+ *   - `<brain>/operations/<yyyy-mm-dd>.jsonl`     -> operation-log-entry.schema.json
+ *   - `<brain>/exports/exp_*\/claims.jsonl`        -> claim.schema.json (the portability artifact)
+ *   - `<brain>/exports/exp_*\/operations.jsonl`    -> operation-log-entry.schema.json
+ *   - `<brain>/wiki/tombstones/*.md` frontmatter  -> tombstone-frontmatter.schema.json (written by
+ *      the tombstone backfill, not by this fixture — reported, with the count disclosed)
+ *
+ * Deliberately NOT validated, and why (ADR-0013): `evidence/<date>.jsonl` is the L0 evidence record,
+ * whose published-schema question is carded separately (kanban t_f1157ed4, schemas/v0.5.1); the
+ * package's `observations.jsonl` / `evidence.jsonl` / `entities.jsonl` are copies of the same shapes.
+ * Their counts are reported so a reader can see exactly what this check does and does not cover.
+ */
+function validateEmittedRecords({ root, schemasDir, Ajv2020, addFormats, maxSamples = 6 }) {
+  const ajv = new Ajv2020({ allErrors: true, strict: false, strictRequired: false });
+  if (addFormats) addFormats(ajv);
+  for (const file of fs.readdirSync(schemasDir).filter(name => name.endsWith('.schema.json')).sort()) {
+    try { ajv.addSchema(JSON.parse(fs.readFileSync(path.join(schemasDir, file), 'utf8'))); } catch { /* duplicate $id */ }
+  }
+  const schemaId = name => JSON.parse(fs.readFileSync(path.join(schemasDir, name), 'utf8')).$id;
+  const validators = {
+    claim: ajv.getSchema(schemaId('claim.schema.json')),
+    operation: ajv.getSchema(schemaId('operation-log-entry.schema.json')),
+    tombstone: ajv.getSchema(schemaId('tombstone-frontmatter.schema.json')),
+  };
+  if (!validators.claim || !validators.operation) throw new Error(`schemas not registered in ${schemasDir}`);
+
+  const families = {};
+  const classes = new Map();
+  const samples = [];
+  const bucket = family => (families[family] ?? (families[family] = { files: 0, records: 0, violations: 0 }));
+  const classify = (family, file, index, record, errors) => {
+    bucket(family).violations += 1;
+    const signature = errors.map(e => `${e.instancePath || '/'}:${e.keyword}`).join(',');
+    classes.set(`${family} ${signature}`, (classes.get(`${family} ${signature}`) ?? 0) + 1);
+    if (samples.length < maxSamples) {
+      samples.push({
+        family,
+        file: path.relative(root, file),
+        line: index + 1,
+        claim_id: record?.claim_id ?? null,
+        state: record?.state ?? null,
+        operation_id: record?.operation_id ?? record?.op ?? null,
+        errors: errors.map(e => `${e.instancePath || '/'}:${e.keyword}${e.keyword === 'additionalProperties' ? `(${e.params.additionalProperties})` : ''}`),
+      });
+    }
+  };
+  const validateFile = (family, file, validate) => {
+    bucket(family).files += 1;
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    lines.forEach((line, index) => {
+      let record;
+      try { record = JSON.parse(line); } catch { classify(family, file, index, null, [{ instancePath: '', keyword: 'unparseable-json', params: {} }]); return; }
+      bucket(family).records += 1;
+      if (line.includes(LEGACY_LITERAL)) legacyLiteralHits.push({ family, file: path.relative(root, file), line: index + 1 });
+      if (family === 'brain_claims' && record.state === 'forgotten') forgotten += 1;
+      if (validate(record)) return;
+      classify(family, file, index, record, validate.errors ?? []);
+    });
+  };
+
+  const LEGACY_LITERAL = 'op_LEGACY00000000000000000000';
+  const legacyLiteralHits = [];
+
+  let forgotten = 0;
+  const files = [];
+  const stack = [root];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries = [];
+    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.isFile()) files.push(full);
+    }
+  }
+  const other = { evidence_records: 0 };
+  for (const file of files) {
+    const rel = path.relative(root, file);
+    if (/\/claims\/[^/]+\.jsonl$/.test(rel)) validateFile('brain_claims', file, validators.claim);
+    else if (/\/operations\/[^/]+\.jsonl$/.test(rel)) validateFile('brain_ops_log', file, validators.operation);
+    else if (/\/exports\/[^/]+\/claims\.jsonl$/.test(rel)) validateFile('export_package_claims', file, validators.claim);
+    else if (/\/exports\/[^/]+\/operations\.jsonl$/.test(rel)) validateFile('export_package_ops_log', file, validators.operation);
+    else if (/\/evidence\/[^/]+\.jsonl$/.test(rel)) other.evidence_records += fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).length;
+  }
+
+  // Tombstone frontmatter: `wiki/tombstones/*.md`, written by the tombstone backfill (not this
+  // fixture). Validated when present so the family is covered the moment a run writes one.
+  const tombstoneFiles = files.filter(file => /\/wiki\/tombstones\/[^/]+\.md$/.test(path.relative(root, file)));
+  let tombstoneViolations = 0;
+  for (const file of tombstoneFiles) {
+    const body = fs.readFileSync(file, 'utf8');
+    const match = /^---\n([\s\S]*?)\n---/.exec(body);
+    let frontmatter = null;
+    try { frontmatter = match ? JSON.parse(match[1]) : null; } catch { frontmatter = null; }
+    if (frontmatter === null) { tombstoneViolations += 1; continue; }
+    if (!validators.tombstone(frontmatter)) tombstoneViolations += 1;
+  }
+
+  const recordsValidated = Object.values(families).reduce((sum, b) => sum + b.records, 0);
+  const recordsInViolation = Object.values(families).reduce((sum, b) => sum + b.violations, 0);
+  return {
+    schemas_dir: schemasDir,
+    schema_set: path.basename(schemasDir),
+    records_validated: recordsValidated,
+    records_in_violation: recordsInViolation,
+    families,
+    forgotten_records: forgotten,
+    tombstone_frontmatter_files: tombstoneFiles.length,
+    tombstone_frontmatter_violations: tombstoneViolations,
+    not_validated: other,
+    violation_classes: Object.fromEntries([...classes].sort((a, b) => b[1] - a[1])),
+    legacy_literal_hits: legacyLiteralHits,
+    samples,
+  };
+}
+
+const formatConformance = report => [
+  `${report.records_validated} records validated against ${report.schema_set}`,
+  Object.entries(report.families).map(([name, b]) => `${name}: ${b.records - b.violations}/${b.records}`).join(' · '),
+  `${report.records_in_violation} in violation`,
+  Object.entries(report.violation_classes).map(([name, count]) => `${count}× ${name}`).join(' · '),
+].filter(Boolean).join(' — ');
+
 
 const percentiles = (samples) => {
   if (samples.length === 0) return { n: 0, p50: null, p95: null, max: null };
@@ -1341,6 +1472,74 @@ try {
       checks_failed: failed,
     });
   }
+  // ═══ P10 — the contract the records themselves keep ══════════════════════
+  setSection('P10 emitted-record contract conformance');
+  {
+    // The schemas under test are the ones the *installed package* ships — resolved through its own
+    // `exports` map, so a packaged run validates against the artifact's schemas and a development run
+    // against this tree's. The validator (ajv) is a devDependency of the library: the gate runner
+    // hands its resolved path to the fixture, so the check runs identically in both modes.
+    const schemaUrl = import.meta.resolve('smartware/schemas/v0.5.0/claim.schema.json');
+    const schemasDir = path.dirname(fileURLToPath(schemaUrl));
+    const toSpecifier = value => (value.startsWith('/') ? pathToFileURL(value).href : value);
+    let Ajv2020; let addFormats = null;
+    try {
+      ({ default: Ajv2020 } = await import(toSpecifier(process.env.GATE_AJV_MODULE ?? 'ajv/dist/2020.js')));
+      ({ default: addFormats } = await import(toSpecifier(process.env.GATE_AJV_FORMATS_MODULE ?? 'ajv-formats')));
+    } catch (error) {
+      Ajv2020 = null;
+      runMeta.record_conformance = { error: `validator unavailable: ${error?.message ?? error}` };
+    }
+
+    if (Ajv2020) {
+      const report = validateEmittedRecords({ root: dataRoot, schemasDir, Ajv2020, addFormats });
+      runMeta.record_conformance = report;
+
+      const claims = { records: 0, violations: 0 };
+      const operations = { records: 0, violations: 0 };
+      for (const [name, family] of Object.entries(report.families)) {
+        const into = name.endsWith('claims') ? claims : operations;
+        into.records += family.records;
+        into.violations += family.violations;
+      }
+
+      check('10a every canonical claim record this run wrote validates against the published claim schema',
+        claims.records > 0 && claims.violations === 0,
+        `${formatConformance(report)}${report.samples.length ? ` — e.g. ${J(report.samples[0])}` : ''}`);
+      check('10b every operations-log entry this run wrote validates against the published operation-log schema',
+        operations.records > 0 && operations.violations === 0,
+        `${operations.violations}/${operations.records} in violation`);
+      check('10c tombstone frontmatter files a run writes validate against the published tombstone schema',
+        report.tombstone_frontmatter_violations === 0,
+        J({ files: report.tombstone_frontmatter_files, violations: report.tombstone_frontmatter_violations, note: 'the tombstone-backfill writer is not exercised by this fixture' }));
+      // Non-vacuity: the three read paths above must each have carried records, or a green 10a/10b is
+      // silence, not evidence (the blind spot this check exists to close).
+      check('10d the conformance check saw every family it claims to cover',
+        (report.families.brain_claims?.records ?? 0) > 0
+        && (report.families.brain_ops_log?.records ?? 0) > 0
+        && (report.families.export_package_claims?.records ?? 0) > 0
+        && (report.families.export_package_ops_log?.files ?? 0) > 0,
+        J(Object.fromEntries(Object.entries(report.families).map(([name, b]) => [name, [b.files, b.records]]))));
+      // The pre-fix literal, pinned so the class the review measured cannot return unnoticed even if a
+      // future schema widens the OperationId pattern.
+      check('10e no canonical record carries the pre-fix legacy OperationId literal',
+        report.legacy_literal_hits.length === 0,
+        J(report.legacy_literal_hits.slice(0, 6)));
+
+      // Durable, machine-readable inventory beside the run's report (the check detail is truncated).
+      const reportAt = process.argv.indexOf('--report');
+      if (reportAt !== -1 && process.argv[reportAt + 1]) {
+        const conformancePath = path.join(path.dirname(process.argv[reportAt + 1]), 'record-conformance.json');
+        fs.writeFileSync(conformancePath, `${JSON.stringify(report, null, 2)}\n`);
+        console.log(`record conformance inventory: ${conformancePath}`);
+      }
+      console.log(`emitted records: ${formatConformance(report)}`);
+    } else {
+      check('10a every canonical claim record this run wrote validates against the published claim schema', false,
+        `validator unavailable — ${J(runMeta.record_conformance)}`);
+    }
+  }
+
 } catch (error) {
   check('the fixture completed without an unexpected exception', false, `${error?.stack ?? error}`);
 } finally {

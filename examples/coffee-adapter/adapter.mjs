@@ -570,7 +570,7 @@ export class CoffeeBrainAdapter {
     const summary = { inserted: 0, corroborated: 0, contested: 0, superseded: 0, skipped: 0, claim_ids: [], outcomes: [] };
     if (observation.status !== 'duplicate' && claimInputs.length > 0) {
       for (const input of claimInputs) {
-        const outcome = this.#admit(observation.id, targetScope, input, verifiedActor);
+        const outcome = this.#admit(observation.id, targetScope, input, verifiedActor, operationId);
         summary.outcomes.push({ predicate: input.predicate, outcome: outcome.outcome, claim_id: outcome.claim_id });
         summary.claim_ids.push(outcome.claim_id);
         if (outcome.outcome in summary) summary[outcome.outcome] += 1;
@@ -595,7 +595,7 @@ export class CoffeeBrainAdapter {
     };
   }
 
-  #admit(observationId, scope, input, actor) {
+  #admit(observationId, scope, input, actor, operationId) {
     const typedObject = { ...input.object };
     // Identity discipline: the canonical key is (subject_id, predicate, scope,
     // validity_from). A fresh entity id per observation would make every
@@ -646,6 +646,14 @@ export class CoffeeBrainAdapter {
       superseded_by: null,
       contested_by: [],
       actor_id: actor.id,
+      // The L1 record this claim becomes carries the caller's OperationId. The canonical claim
+      // version record is written by `insertClaim`, which reads `claim.operation_id` and falls back
+      // to the library's legacy marker when the caller supplies none — so an adapter that does not
+      // forward it writes every host-extracted claim under that marker, and a marker is not an
+      // operation (it identifies "no OperationId", by construction). Forwarded here so the claim
+      // record is attributable to the operation that admitted it, and so a claim JSONL or an
+      // EXPORT.SCOPE package validates against the schemas the package publishes.
+      ...(operationId ? { operation_id: operationId } : {}),
     };
     // Confidence is derived, not stored input — set it with the same formula
     // the corroboration path will recompute, so the two agree.
