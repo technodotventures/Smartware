@@ -145,7 +145,18 @@ implementation is `t_864a5900`):
 | C4 | `test/protocol/forget-scope.test.ts` | two rows for one actor: forgetting one scope reports exactly that row, the other stays `active`, and the actor's other scope stays authorized | row-scope exactness at unit level |
 | C5 | `scripts/verify-config-shape.mjs` + the two example configs | the shipped examples are per-client rows and the §10b.5 facts still hold (union semantics) | keeping "code-verified" claims true |
 | C6 | `test/regressions.test.ts` ([Phase-E] session block) | two rows for one actor: `session_start` with `requested_scopes: [<second row's client>]` returns that client's capability cluster — non-empty, and the same scope the operation surface authorizes — with caps/trust resolved across all the actor's active rows; and the trust/quarantine caps take the **most restrictive** union (untrusted row present → `user_facing`; quarantined row present → `background_agent`), independent of row order | the S4 first-row derivation in `src/session/policy.ts:96` (live on the public MCP tool `smartware_session_start`) |
-| C7 | `scripts/coffee-company-brain-fixture.mjs` (packaged gate, after the erasure check 6c already performs) | **no active row references the removed scope id**: after the `erasure` of `client:arcadia#1`, `config.scopes` no longer lists it and no row with `status:'active'` lists it in any capability array (provisioning hygiene, the same class as C2 — a row left `active` on the retired id must never be the re-grant) | the retired-marker case of §3: the row an erasure leaves behind still names the retired id, and re-activating it re-authorizes the purged scope (measured R4/R5) — the case fails open today |
+| C7 | `scripts/coffee-company-brain-fixture.mjs` (packaged gate — the `ember-group` block, in the erasure **check 6n** performs, `client:arcadia#1`) | **no active row references the removed scope id**: after that erasure, the **persisted `config.json`'s `scopes`** no longer lists `client:arcadia#1`, and no row with `status:'active'` lists it in any capability array (provisioning hygiene, the same class as C2 — a row left `active` on the retired id must never be the re-grant). Read the **file**, not the in-memory tenant object the fixture hands the adapter: the erasure prunes the file's scope registry and leaves the object's `scopes` untouched (measured, round 4) | the retired-marker case of §3: the row an erasure leaves behind still names the retired id, and re-activating it re-authorizes the purged scope (measured R4/R5) — the case fails open today |
+
+**C7 hangs off check 6n, not 6c** — measured with the fixture's own provisioning
+(`measure-c7-geography.mjs`, round 4): check 6c's erasure retires `bob-studio`'s
+`client:meridian#1`, and **no grant row in that tenant references it**
+(`grants_revoked: []` — `user:lina` carries `client:acme#1`, and the owner is
+authorized by `config.owner_id`, not by a row), so an assertion placed there guards
+nothing; the id an `erasure` retires **while a grant row still lists it** is
+`client:arcadia#1`, retired by check 6n in the `ember-group` tenant, where the
+fixture's multi-client row lives (`user:sam`,
+`scripts/coffee-company-brain-fixture.mjs:151`). C2 is the shape half of the same
+hygiene (no active row lists two client scopes); C7 is the retired-marker half.
 
 ## Consequences
 

@@ -293,7 +293,12 @@ first) — never re-activate the row that still names `client:<id>#n`. After an
 **offboarding** the opposite holds: re-activation *is* the sanctioned revival path
 — the protocol keeps grants "revoked but re-activatable" (protocol v0.5.0
 §FORGET.SCOPE), the scope entry remains, and no id was retired. Asserted in
-ADR-0012 §6 as **C7**, after the erasure the packaged fixture already performs.
+ADR-0012 §6 as **C7**: in the packaged fixture, after the `erasure` **check 6n**
+performs (`ember-group`'s `client:arcadia#1`), the persisted `config.json`'s
+`scopes` no longer lists the retired id and no `active` row lists it in any
+capability array. (Not check 6c: its erasure retires `bob-studio`'s
+`client:meridian#1`, which no grant row in that tenant ever referenced —
+`grants_revoked: []`.)
 
 **Degraded reads union the actor's rows.** The config-derived precheck on the
 standby/fallback path (see §5) must allow a scope covered by **any** active row of
