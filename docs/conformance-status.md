@@ -35,6 +35,34 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-16 on Node v26.5.1 for the **emitted-record contract conformance** compose
+(`fix/coffee-rc-emitted-record-conformance`, kanban `t_5ef44cc1`, from the independent Coffee GATE
+review's finding B2): **577 tests across 81 files**, 31 schema files, `tsc` clean,
+`verify:coffee-adapter` 54/54, and a new gate check (`P10`) that validates every canonical record a
+gate run writes against the schemas the *installed package* ships — claim JSONL, operations log,
+EXPORT.SCOPE package copies and tombstone frontmatter — with the full inventory written beside the
+run's report as `record-conformance.json`.
+
+The class this closes, measured on the Coffee RC the review pinned (`wt/t_9740ae98` @ `e937fab`, its
+own brains, its own schemas): **125 of 234 canonical records failed** —
+`op_LEGACY00000000000000000000` on 123 brain claim records and 2 exported claims (the adapter's
+`#admit` never forwarded the caller's `operation_id`), the undeclared `semantic` materialization block
+on 125, `supersedes` missing on 9 version ≥ 2 records, digest-derived `claim_id`s on 2, and one
+tombstone frontmatter file the backfill path wrote. After this compose the same run reports **2
+records in violation, all `claim_id:pattern`** — the replay path's digest-derived ids, carded
+`t_0b079fbf` (a decision, since either side moving re-addresses existing data); this card's criterion
+is zero, so it stays dependency-blocked on that card.
+
+Composed onto the RC: `t_85817375` (`0a68482`), `t_229601e4` / ADR-0011 (`b49ae4b`, the materialization
+block), `t_0177d9c3` (`37c914c`, the retention sweep's OperationId), `t_9e124fe6` (`fbce04d` +
+`35f34d2`, tombstone snapshot envelope + backfill writer), `t_3ba3ee39` / ADR-0014 (`eb93bd0`,
+`supersedes` follows the version), plus the demotion pointer and its four schema fields (the composed
+tests assert the whole envelope). The Coffee adapter now forwards the caller's `operation_id` into the
+L1 commit. The check is load-bearing, measured by mutation: dropping the adapter's forwarding turns
+`10f` and the adapter smoke's `4e` red; restoring the pre-fix literal turns `10e` red; removing the
+`semantic` block from the schema turns `10a` red with 125 records in violation. No `src/` or `schemas/`
+change here is new policy: every one is a recorded decision from a card listed above.
+
 Verified 2026-09-10 for the 0.7.0 release cut on Node v26.5.1 (CI re-runs the
 same gate via `npm ci` from `package-lock.json` on Node 22 and 24, so the two
 runtime lines are verified by CI rather than by this local run), superseding
