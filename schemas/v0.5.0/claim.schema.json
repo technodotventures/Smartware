@@ -129,6 +129,28 @@
       "$ref": "common.schema.json#/$defs/TombstoneId",
       "description": "TombstoneId of the revival source"
     },
+    "superseded_by": {
+      "$ref": "common.schema.json#/$defs/ClaimId",
+      "description": "Set on a demoted duplicate (resolved fact match, §1e): the surviving claim that supersedes this one. The claim stays state=active for history and audit; recall eligibility derives from this pointer (status 'superseded')."
+    },
+    "superseded_at": {
+      "$ref": "common.schema.json#/$defs/Iso8601",
+      "description": "Commit time of the demotion; present whenever superseded_by is."
+    },
+    "superseded_by_origin": {
+      "type": "string",
+      "enum": [
+        "user"
+      ],
+      "description": "Warrant for the demotion. Absent = the library's mechanical duplicate resolution; 'user' = the user re-picked against this copy (REVISE repick_survivor, protocol v0.5.0)."
+    },
+    "reinstated_by": {
+      "type": "string",
+      "enum": [
+        "user"
+      ],
+      "description": "Audit-only marker on a version that released a demotion: the user reinstated this claim as the recall-eligible copy (REVISE repick_survivor). Never a lifecycle input."
+    },
     "semantic": {
       "type": "object",
       "description": "Optional extraction materialization the L1 record writer carries on an active version: the structured meaning the extractor produced (subject, predicate, typed object, valid time) plus the raw pre-reduction epistemic values. It is what makes a record re-materializable — the recall-eligible row (entity name/type, predicate, typed object, valid time, sensitivity, extraction provenance) is derived from this block (ClaimStore.claimVersionVals) — which is why the record envelope enumerates it. It carries no independent epistemic authority: `confidence`/`epistemic_tag` remain the canonical spec §6 values (spec §6 -> 'Implementation note'), nothing in it is required, and a version that omits the block is fully conformant (records written before v0.6 do). Bound types are the writers' declared input contract, not policy: the block is enumerated to the shape the reference writers emit, so that a record the implementation appends validates against the contract it publishes (kanban t_229601e4, ADR-0011). Not a wire field: no protocol request or response carries it.",

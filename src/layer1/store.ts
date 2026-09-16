@@ -538,7 +538,14 @@ export class ClaimStore {
         // A version-1 record names nothing: a claim can be *born* forgotten on the legacy/migration
         // and `replay.ts` retraction paths, and there is no prior version to point at — which is why
         // `claim.schema.json`'s forgotten branch does not require this field (ADR-0014).
-        ...(version > 1 ? { supersedes: version - 1 } : {}),     };
+        ...(version > 1 ? { supersedes: version - 1 } : {}),
+        // A demotion rides the canonical record, not just the derived row: without this,
+        // re-materialising the record (compile-path sync) or replaying the log restores the
+        // duplicate to the recall-eligible set. `t_invalidated` is the demotion commit time
+        // when the caller stamped one; otherwise the record's own commit time stands in.
+        ...(claim.status === 'superseded' && claim.superseded_by != null
+          ? { superseded_by: claim.superseded_by, superseded_at: claim.t_invalidated.value ?? versionAt }
+          : {}),     };
       const record: ClaimVersionRecord = state === 'active'
         ? {
             ...base,
