@@ -313,11 +313,15 @@ key; export is scope-exclusive; health carries no tenant content.
 ### The acceptance gate — the packaged artifact, six businesses (ADR-0011)
 
 `npm run verify:coffee-gate` packs the build, `npm install`s the tarball into a
-scratch app, copies this adapter next to the install, and drives the installed
-package's own `exports` surface. 79 checks, one `PASS` line each: six businesses
+scratch app, copies this adapter — and the second-process reader the fixture
+spawns — next to the install, and drives the installed
+package's own `exports` surface. 85 checks, one `PASS` line each: six businesses
 with overlapping client names, staff + agents + strangers, shared and private
 sources, duplicates and paraphrases, contradictions, corrections (granted and
-un-granted), offboarding, erasure (including a derived-index wipe), retention
+un-granted, plus a restart drill: write → CORRECT → a new adapter instance over
+the same brain dir → the same question from a second process, which must serve the
+corrected value and nothing else), offboarding, erasure (including a
+derived-index wipe), retention
 expiry, export → disaster → restore equivalence and tamper refusal, replica
 failover with degraded reads, the guard/fence stale-writer pair, restart during
 load (a replica restarted mid-loop, plus a modelled process death between the two

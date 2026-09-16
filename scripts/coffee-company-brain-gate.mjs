@@ -85,6 +85,10 @@ const installedPackage = JSON.parse(fs.readFileSync(path.join(appDir, 'node_modu
 // ── 3. copy the adapter + the fixture next to the install ───────────────────
 fs.copyFileSync(path.join(REPO, 'examples', 'coffee-adapter', 'adapter.mjs'), path.join(appDir, 'coffee-adapter.mjs'));
 fs.copyFileSync(path.join(REPO, 'scripts', 'coffee-company-brain-fixture.mjs'), path.join(appDir, 'fixture.mjs'));
+// The second-process reader the fixture spawns for the correction-durability check
+// (3n): a restart is a replay, so the check reopens the brain from a process that
+// shares nothing with the run except the brain directory.
+fs.copyFileSync(path.join(REPO, 'scripts', 'coffee-correction-restart-probe.mjs'), path.join(appDir, 'coffee-correction-restart-probe.mjs'));
 
 // ── 4. run the fixture against the installed package ────────────────────────
 const reportPath = path.join(evidenceDir, 'results.json');

@@ -1425,7 +1425,18 @@ export class SmartwareCore {
 
   async correct(params: CorrectParams): Promise<CorrectResult> {
     this.fenceGuard('correct');
-    return handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
+    const result = await handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
+    // Keep the claim-FTS surface truthful, exactly as `consolidate()` does below:
+    // CORRECT retracts the target claim and spawns a replacement, and both halves
+    // live in the derived rows the index is built from. A verb that appends claim
+    // versions without re-syncing leaves the replacement unfindable — a warranted
+    // correction answers *nothing* until some later write re-syncs the scope
+    // (measured through the Coffee adapter, kanban t_8ddfa350; retention replay
+    // hides the retracted side already, so the verdict was an empty result set,
+    // which a user cannot tell apart from data loss).
+    const correctedScope = this.store.getClaim(result.original_claim_id)?.scope;
+    syncSearchFromClaims(this.store, this.searchIndex, correctedScope);
+    return result;
   }
 
   async revise(params: ReviseParams): Promise<ReviseResult> {
