@@ -153,3 +153,53 @@ Because (2) and (3) touch page endorsement — a core verb that reads this front
 5. **Disclose only (no ADR, no cards).** Rejected: the L0 gap is a portability defect on a shipped
    artifact, and the page gap will keep widening while three code paths and three test fixtures depend on
    the un-published vocabulary.
+
+## Delta (2026-09-16) — D1 carried out: the record schema is published in the v0.5.1 set
+
+*Appended on kanban `t_f1157ed4` (branch `wip/smarty/l0-record-schema`, forked from this lane's
+`wip/smarty/canonical-schema-boundary`). Nothing above is edited. This section records the outcome of
+the reversal trigger in *Consequences* and which option was chosen. ADR-0013 stays **Proposed** — the
+owner gate is now the gate on the new schema file, not on the boundary statement.*
+
+**Chosen: option (a) — a new, additive set.** `schemas/v0.5.1/observation-record.schema.json` (with
+its `SHA256SUMS` entry and set README) is the published contract for the L0 record. The set is the
+v0.5.0 set plus that one file: **no v0.5.0 byte moves** (`schemas/v0.5.0/SHA256SUMS` sha256
+`8d47a427…` unchanged), and the record schema `$ref`s `../v0.5.0/common.schema.json` for `Scope`,
+`ActorId`, `ObservationId`, `OperationId` and `Iso8601` — the shared vocabulary (and with it the
+ADR-0015 host-lane boundary on `scope`) is reused, not restated.
+
+**Option (b) — add the file to the v0.5.0 directory and bump the set's version of record — was
+evaluated and not taken**: it moves the set's file list and checksum manifest, which this card's
+constraint forbids without the owner explicitly accepting that move. The schema content is identical
+either way; if the owner prefers one 17-file set, supersede this delta and move the file and its
+`$id` (no other change).
+
+**The manifest is now honest.** `EXPORT.SCOPE`'s `manifest.json` declares `"schemas": "v0.5.1"` plus
+an explicit `"record_schema": "https://smartware.dev/schemas/v0.5.1/observation-record.schema.json"`
+(`EXPORT_SCHEMA_VERSION` / `EXPORT_RECORD_SCHEMA`, `src/protocol/export_scope.ts`). The version names
+the set that actually covers the package's `observations.jsonl` / `evidence.jsonl` bytes, and the
+second field names the file rather than leaving a consumer to infer it.
+
+**Pinned in both directions.** `test/layer0/l0-record-wire-boundary.test.ts` asserts that the record
+the reference writer appends validates against the record schema with an **empty error list**; that
+the schema stays closed (unknown top-level key, unknown key inside `integrity`, missing `policy`);
+that the record schema does **not** accept the wire observation object (12 exact errors), so it
+cannot be widened into the wire shape without failing the pin; that `observation.schema.json` still
+rejects the record with its exact 14 errors; and that an export package's record lines stay
+byte-identical to the canonical line while validating against the schema its manifest names.
+
+**Migration story.** Existing data dirs: nothing to migrate — the writer is unchanged and L0 is
+append-only, so protocol-native-lane records already on disk validate as-is. Existing export
+packages: nothing to rewrite — a package is immutable (an `operation_id` retry returns the same
+manifest), so a package produced before this change keeps its historical `"schemas": "v0.5.0"` label
+while its bytes are the shape the record schema covers; re-exporting under a **new** `operation_id`
+writes the corrected label. Detail: `schemas/v0.5.1/README.md` → *Migration*.
+
+**Adjacent finding, reported and not fixed here** (measured by sweeping every L0 writer in one brain;
+evidence attached to `t_f1157ed4`): the consent-change writers (`src/protocol/grant.ts`,
+`src/protocol/revoke.ts`) hardcode `scope: 'personal'` — an id the published `Scope` vocabulary does
+not admit, and one that is not in a Core-opened brain's scope registry either (`self` is the spec's
+personal lane; `quarantine_review.ts` and `forget.ts` use the same literal as a fallback). Those
+records are outside this set's conformance claim for that reason alone — the ADR-0015 boundary, not a
+record-schema defect — and the record schema is deliberately **not** widened to admit the literal.
+Carded separately as a writer defect.

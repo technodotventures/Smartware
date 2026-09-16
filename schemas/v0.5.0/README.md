@@ -12,6 +12,11 @@ retained under `schemas/v0.4.2` and remains valid for five-verb conformance
 claims (see the protocol contract's change history — a migration note, not a
 break).
 
+A companion set, [`schemas/v0.5.1`](../v0.5.1/README.md), is this set **plus one
+additive schema** — `observation-record.schema.json`, the L0 evidence record that
+this set does not describe (see *Which schema covers which surface* below). No
+file in this set moves for it, and v0.5.0 conformance claims are unaffected.
+
 ## What `claim.schema.json` describes
 
 `claim.schema.json` describes the **L1 claim version record** — one line on the
@@ -71,21 +76,21 @@ use the schema named here and no other (ADR-0013, kanban `t_0920aa1d`):
 | surface | what it is | what validates it |
 |---|---|---|
 | `observation.schema.json` | **the observation object on the wire** — the OBSERVE payload (`content`, `source` identifier string, `scope`, `metadata{timestamp, actor, informed_by, tags}`, `idempotency_key`) plus the server-stamped `observation_id`, `operation_id`, `actor_id` | itself |
-| `<data_dir>/evidence/<date>.jsonl` (one line per observation) | **the L0 record** — the append-only storage envelope. It carries the wire payload's information under different names (`id`, `source.app`, `source.observed_at`, `source.actor`) **plus** canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` tamper-evidence chain | **no schema in this set** — see the gap below |
+| `<data_dir>/evidence/<date>.jsonl` (one line per observation) | **the L0 record** — the append-only storage envelope. It carries the wire payload's information under different names (`id`, `source.app`, `source.observed_at`, `source.actor`) **plus** canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` tamper-evidence chain | `observation-record.schema.json` in the **v0.5.1 set** — **not in this set** (v0.5.0 is frozen; the record schema is additive, see the gap below) |
 | `page-frontmatter.schema.json` | **L2 page frontmatter** (spec §9) for `wiki/<category>/<slug>.md` | itself |
 
 **Known gaps, disclosed rather than silently relaxed** (both carded with measured
 evidence; the measurement is `test/layer0/l0-record-wire-boundary.test.ts` and the
 rationale is ADR-0013):
 
-1. **The L0 record shape is unpublished in v0.5.0.** Applying `observation.schema.json`
-   to an evidence line yields errors by construction (4 `required`, 9
-   `additionalProperties`, `/source:type`). This includes the copies in
-   `EXPORT.SCOPE` packages (`observations.jsonl`, `evidence.jsonl`) — a package whose
-   `manifest.json` declares `"schemas": "v0.5.0"` while shipping a record shape no
-   v0.5.0 schema describes. A record schema is required for that manifest claim to be
-   honest; until it exists, treat the exported record shape as defined by the
-   implementation, not by this set.
+1. **The L0 record shape is not in this set — it is published in v0.5.1.**
+   `observation.schema.json` (this set) describes the observation object on the wire and rejects the
+   evidence line by construction (4 `required`, 9 `additionalProperties`, `/source:type`); the record
+   has its own schema, `schemas/v0.5.1/observation-record.schema.json`, which is the validator for
+   `<data_dir>/evidence/<date>.jsonl` **and for the byte-identical copies `EXPORT.SCOPE` ships in
+   `observations.jsonl` / `evidence.jsonl`**. It ships additively (no v0.5.0 byte moves) and an export
+   package's manifest names it explicitly (`"schemas": "v0.5.1"` + `"record_schema"`), so the
+   portability claim matches the bytes.
 2. **The reference implementation's compiled page frontmatter does not yet validate
    against `page-frontmatter.schema.json`.** The compiler emits the L2 page with a
    legacy internal envelope and a different vocabulary (`category` plural,

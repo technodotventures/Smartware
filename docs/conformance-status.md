@@ -1,7 +1,8 @@
 # Implementation conformance
 
 **Target:** Specification v1.6.16 (five-verb surface), Protocol v0.5.0,
-Schemas v0.5.0. The v0.5.0 conformance surface is **the five core memory verbs
+Schemas v0.5.0 plus the additive v0.5.1 set (`observation-record.schema.json`, the
+L0 evidence record). The v0.5.0 conformance surface is **the five core memory verbs
 (OBSERVE, RECALL, REFLECT, REVISE, FORGET) plus FORGET.SCOPE.**
 
 Smartware is beta software. The repository provides executable evidence for
@@ -34,6 +35,32 @@ Specification v1.6.16 conformance.
   pin `0.6.3`.
 
 ## Verified baseline
+
+Verified 2026-09-16 on Node v26.5.1 for **the published L0 evidence record schema and the export
+manifest's schema label** (`wip/smarty/l0-record-schema`, kanban `t_f1157ed4`, ADR-0013 → *Delta
+(2026-09-16): D1 carried out* — an additive schema set; `schemas/v0.5.0/SHA256SUMS` sha256
+`8d47a427…` unchanged, so no frozen v0.5.0 byte moves): **543 tests across 76 files**, **32 schema
+files** (`v0.4.2`, `v0.5.0`, `v0.5.1`). The delta over the entry below is 2 tests —
+`test/layer0/l0-record-wire-boundary.test.ts` (2 → 4: the record the reference writer appends
+validates against `schemas/v0.5.1/observation-record.schema.json` with an **empty error list**; the
+schema is closed (unknown top-level key, unknown key inside `integrity`, and a record missing
+`policy` are each rejected with their exact single error); and the record schema does **not** accept
+the wire observation object — 12 exact errors, so it cannot be widened into the wire shape) — plus
+updated assertions in `test/protocol/export-scope.test.ts` and
+`test/conformance/coffee-company-brain.test.ts` (the manifest now declares `"schemas": "v0.5.1"` and
+an explicit `"record_schema"` `$id`). `observation.schema.json` still rejects the record with its
+exact 14 errors, and an export package's record lines stay byte-identical to the canonical line while
+validating against the schema its manifest names. A sweep of **every** L0 writer in one brain (12
+records across 8 writer paths: OBSERVE plain / with `operation_id` / with an idempotency key and an
+attachment-shaped body / in a client lane; the retention-expiry tombstone; a quarantined OBSERVE; the
+quarantine review; the FORGET tombstone; GRANT + REVOKE consent records; the claim correction; the
+FORGET.SCOPE audit marker) reports **10 valid with an empty error list and 0 unexpected failures**;
+the two divergences are the consent-change writers' hardcoded `scope: 'personal'` — outside the
+published `Scope` vocabulary (ADR-0015 boundary), reported as a writer defect rather than admitted
+into the record schema. Mutation checks: dropping the `sha256:` prefix from the writer's chain hash
+fails 2 tests with `/integrity/hash:pattern`; widening the record schema until the wire object
+validates (`required` emptied, wire property names admitted, `source`/`content` relaxed) fails the
+canonical-state pin and the wire-object pin (2 failed | 2 passed). No other suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
 evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
@@ -280,18 +307,22 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
-- **The L0 evidence record's field shape is not published in v0.5.0.** `observation.schema.json` covers the
-  observation object *on the wire* (the OBSERVE payload plus the stamped identity), not the record the
-  substrate appends to `<data_dir>/evidence/<date>.jsonl` — which carries the same information under
-  different names plus `status`, `visibility`, `version`, `policy` and the `integrity` chain, none of
-  which a closed wire schema can hold. **This includes the copies `EXPORT.SCOPE` ships** in
-  `observations.jsonl` / `evidence.jsonl`, in a package whose manifest declares `"schemas": "v0.5.0"`.
-  An integrator validating raw evidence — or a third-party implementation claiming v0.5.0 — has no
-  published contract for the record until the carded record schema lands (`t_f1157ed4`). Disclosed in
-  `schemas/v0.5.0/README.md` → *Which schema covers which surface*; decided in
-  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md); pinned by
-  `test/layer0/l0-record-wire-boundary.test.ts` (the record envelope, the wire projection validating,
-  the record's exact 14-error rejection, and the export package carrying the same bytes).
+- **The L0 evidence record is published in v0.5.1, not in v0.5.0.** `observation.schema.json` (the
+  v0.5.0 set) covers the observation object *on the wire* (the OBSERVE payload plus the stamped
+  identity), not the record the substrate appends to `<data_dir>/evidence/<date>.jsonl` — which
+  carries the same information under different names plus `status`, `visibility`, `version`, `policy`
+  and the `integrity` chain, none of which a closed wire schema can hold. That record now has its own
+  schema, `schemas/v0.5.1/observation-record.schema.json`, which ships **additively** (no v0.5.0 byte
+  moves) and is the validator for the copies `EXPORT.SCOPE` ships in `observations.jsonl` /
+  `evidence.jsonl`; the package's manifest names it (`"schemas": "v0.5.1"` + `"record_schema"`), so the
+  portability claim matches the bytes. **Residual:** a record whose `scope` is a lane the published
+  vocabulary does not admit is outside this set even with a valid shape — host-registered lanes
+  (`pod/<pod>/<lane>`, ADR-0015) and, measured on the same writer sweep, the consent-change writers'
+  hardcoded `personal` lane (`src/protocol/grant.ts`, `src/protocol/revoke.ts`; carded as a writer
+  defect). Disclosed in `schemas/v0.5.1/README.md` → *Boundaries this schema does not widen*; decided
+  in [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md) (its
+  2026-09-16 delta carries D1 out); pinned by
+  `test/layer0/l0-record-wire-boundary.test.ts`.
 - **The reference implementation's compiled page frontmatter does not yet validate against
   `page-frontmatter.schema.json`** — 19 Ajv errors (`created`/`epistemic_tag` missing, plural `category`,
   ISO `updated`, numeric `confidence`, observation ids under `sources`, plus the compile envelope). The
