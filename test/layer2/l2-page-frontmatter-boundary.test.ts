@@ -223,6 +223,63 @@ describe('compiled L2 page frontmatter vs page-frontmatter.schema.json', () => {
     assert.equal(envelope.endorsed_by, 'user:local');
   }, 120_000);
 
+  test('a recompile of an endorsed page keeps the voice-protected surface (prose, `sources`, `created`, endorsement metadata)', async () => {
+    // §9 voice protection, through the real compiler: on a user-authored page the Current
+    // Understanding prose and `sources` are locked, `created` is kept, and the derived cached
+    // region is the only thing a recompile rewrites. The migration note claims exactly this for a
+    // page carrying the pre-fix shape, so it is pinned rather than asserted in prose.
+    const { dataDir, pagePath, raw } = await compileOnePage();
+
+    const core = await SmartwareCore.open({ dataDir });
+    try {
+      await core.endorse({
+        actor: { type: 'person' as const, id: 'user:local', display_name: 'Owner' },
+        page_id: String(parseFrontmatter(raw)!.frontmatter['page_id']),
+        page_path: pagePath,
+        dry_run: false,
+        reason: 'the owner confirms this page',
+        operation_id: `op_${ulid()}`,
+      });
+    } finally {
+      core.close();
+    }
+
+    // The user edits the Current Understanding prose, as §9 says they may.
+    const endorsed = readFileSync(pagePath, 'utf8');
+    const userProse = 'Graphiti API is deployed, and the owner has confirmed it.';
+    const edited = endorsed.replace(
+      /## Current Understanding\n\n[\s\S]*?\n\n## Evidence Timeline/,
+      `## Current Understanding\n\n${userProse}\n\n## Evidence Timeline`,
+    );
+    assert.notEqual(edited, endorsed, 'the fixture must actually rewrite the prose');
+    writeFileSync(pagePath, edited, 'utf8');
+
+    const before = parseFrontmatter(edited)!.frontmatter;
+    const core2 = await SmartwareCore.open({ dataDir });
+    try {
+      await core2.compile({
+        actor: { type: 'person' as const, id: 'user:local', display_name: 'Owner' },
+        scope: 'workspace',
+        use_llm: false,
+      });
+    } finally {
+      core2.close();
+    }
+
+    const afterRaw = readFileSync(pagePath, 'utf8');
+    const after = parseFrontmatter(afterRaw)!.frontmatter;
+    assert.deepEqual(errorKeys(validator(createAjv(), 'page-frontmatter.schema.json'), after), []);
+    assert.equal(after['author'], 'user');
+    assert.equal(after['created'], before['created'], '`created` is not re-stamped by a recompile');
+    assert.deepEqual(after['sources'], before['sources'], '`sources` is locked on a user-authored page');
+    assert.ok(afterRaw.includes(userProse), 'the Current Understanding prose survives the recompile');
+    const envelope = parseEnvelope(afterRaw);
+    assert.ok(
+      envelope?.endorsement_operation_id,
+      'the endorsement recovery metadata survives a recompile (it is durable, not a compile artifact)',
+    );
+  }, 120_000);
+
   test('the page schema vocabulary excludes the tombstone/profile pages that have their own schemas', async () => {
     const read = (name: string): Record<string, unknown> => JSON.parse(
       readFileSync(path.join(schemaDir, name), 'utf8'),
