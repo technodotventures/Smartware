@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **76** entries.
+Total: **78** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -83,5 +83,7 @@ Total: **76** entries.
 | 2026-09-15 | [`2026-09-15-t_e8bd6747.md`](2026-09-15-t_e8bd6747.md) | Identity falsifier (ADR-0005 #1): steady-state both-surfaces run — recall must answer once in every round, F1+F2 on one tree |
 | 2026-09-15 | [`2026-09-15-t_f2b584dc.md`](2026-09-15-t_f2b584dc.md) | DECIDE: the revocation boundary is the grant row — one row per (actor, client), and the re-grant requirement (ADR-0012) |
 | 2026-09-15 | [`2026-09-15-t_fa18b2bf.md`](2026-09-15-t_fa18b2bf.md) | VERIFY (independent, F1–F3 fix): hold-release keying + duty-scoped replay convergence + durable config writes + v0.5.0 ops enum completion (wip/neo/legal-hold-findings @ 29f5642, PR #12) |
+| 2026-09-16 | [`2026-09-16-t_0920aa1d.md`](2026-09-16-t_0920aa1d.md) | MEASURE+DECIDE: raw L0 evidence line and compiled page frontmatter have a different field shape than observation.schema.json / page-frontmatter.schema.json (found via t_9a700aed) |
 | 2026-09-16 | [`2026-09-16-t_102f3dfa.md`](2026-09-16-t_102f3dfa.md) | REVIEW (independent): ADR-0012 — is option (a) the right call, and is the §10b amendment + re-grant requirement correctly recorded? |
 | 2026-09-16 | [`2026-09-16-t_598278eb.md`](2026-09-16-t_598278eb.md) | Retention sweep: an OperationId already consumed by another op is not matched, so the sweep reuses the id and the ops log ends up with two ops under one id (measured) |
+| 2026-09-16 | [`2026-09-16-t_804449f1.md`](2026-09-16-t_804449f1.md) | DECIDE (owner): host-registered lanes in the next protocol revision, or hosts migrate onto the Scope vocabulary (ADR-0012 fork) |

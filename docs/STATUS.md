@@ -24,16 +24,16 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-16-t_598278eb.md`](journal/2026-09-16-t_598278eb.md) — Retention sweep: an OperationId already consumed by another op is not matched, so the sweep reuses the id and the ops log ends up with two ops under one id (measured) (2026-09-16)
-- **Journal entries:** 76 · tasks completed on board `smartware`: 76
+- **Journal:** [`2026-09-16-t_804449f1.md`](journal/2026-09-16-t_804449f1.md) — DECIDE (owner): host-registered lanes in the next protocol revision, or hosts migrate onto the Scope vocabulary (ADR-0012 fork) (2026-09-16)
+- **Journal entries:** 78 · tasks completed on board `smartware`: 78
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/smarty/canonical-schema-boundary` | 67 | 2026-09-16 | docs: rebase onto wip/neo/host-lane-identity @ 9fcfff7 — regenerate STATUS projection, refresh the ADR-0012 -> 0015 labels (t_74faf12d) |
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
-| `wip/smarty/canonical-schema-boundary` | 64 | 2026-09-16 | docs(journal): record the round-2 corrections and the re-run gate for t_0920aa1d |
 | `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
 | `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
 | `wip/tech-head/l1-forgotten-carry-superseded` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
@@ -89,13 +89,12 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_74faf12d` [todo] INTEGRATE: rebase PR #19 (ADR-0013 lane) onto the moved base 9fcfff7 — regenerate STATUS.md, refresh the ADR-0012 → 0015 labels, re-run the gate (created 2026-09-16, assignee tech-head)
+- `t_e19e8f19` [todo] REVIEW (independent, round 3 text check): ADR-0012 retired-marker rule in the re-grant procedure, §6 C7, and the qualified handoff (wt/t_f2b584dc @ ce9005d, PR #16) (created 2026-09-16, assignee smarty-pants)
 
 ## Blockers and stale work
 
 - `t_66f1dd7d` GATE review: independent Coffee company-brain release verdict
 - `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
-- `t_804449f1` DECIDE (owner): host-registered lanes in the next protocol revision, or hosts migrate onto the Scope vocabulary (ADR-0012 fork)
 
 ## Decisions
 
@@ -122,9 +121,9 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (5d old)
-- ✅ kanban board readable (96 tasks, 8207 events)
+- ✅ kanban board readable (97 tasks, 8247 events)
 - ✅ every completed task has a journal entry
-- ⚠️ 3 blocked task(s)
+- ⚠️ 2 blocked task(s)
 
 ## Canonical index
 
