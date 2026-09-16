@@ -76,11 +76,31 @@ export interface SmartwareConfig {
   };
 }
 
+/**
+ * The pod's own lane — the protocol-native `self` scope, spelled once.
+ *
+ * Spec §7 roots the memory hierarchy at `self` (the pod's private lane); a
+ * Core-opened brain registers it with `visibility_default: 'private'`, and
+ * FORGET.SCOPE's audit marker resolves to it ("the marker itself lives in the
+ * POD scope (self)"). Protocol v0.5.0 → *Conformance boundary* requires schema
+ * validity on every canonical write, and `common.schema.json#/$defs/Scope`
+ * admits `self` — so every record the substrate writes into its own lane must
+ * name this value.
+ *
+ * `personal` is the pre-fix spelling at the writers that carried it
+ * (`grant.ts`, `revoke.ts`, and the `?? 'personal'` fallbacks in
+ * `quarantine_review.ts` / `forget.ts`): a legacy name for this lane that no
+ * published set admits and that no released version ever registered as a scope
+ * (measured on kanban `t_e6fce49a`, ADR-0015's boundary class). Records already
+ * on disk keep the spelling they were written with — L0 is append-only.
+ */
+export const POD_SELF_SCOPE = 'self';
+
 const DEFAULT_CONFIG: Omit<SmartwareConfig, 'instance_id' | 'writer_id' | 'data_dir'> = {
   owner_id: 'user:local',
   version: SMARTWARE_VERSION,
   scopes: [
-    { id: 'self', parent: null, visibility_default: 'private' },
+    { id: POD_SELF_SCOPE, parent: null, visibility_default: 'private' },
     { id: 'workspace', parent: null, visibility_default: 'workspace' },
     { id: 'project:default', parent: 'workspace', visibility_default: 'scope' },
   ],
