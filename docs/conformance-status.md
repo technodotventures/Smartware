@@ -38,13 +38,15 @@ Specification v1.6.16 conformance.
 Verified 2026-09-16 on Node v26.5.1 for **the compiled L2 page frontmatter against
 `page-frontmatter.schema.json`** (`wip/tech-head/l2-page-frontmatter-schema`, stacked on the ADR-0013 lane
 `wip/smarty/canonical-schema-boundary @ 6ed7a93`; kanban `t_8d6f4a5c`, ADR-0013 → D2 — a **writer** fix, so
-**no published schema byte moves**, `SHA256SUMS` unchanged): **543 tests across 76 files**, 31 schema
-files. The delta over the entry below is 2 tests, all in `test/layer2/l2-page-frontmatter-boundary.test.ts`,
+**no published schema byte moves**, `SHA256SUMS` unchanged): **544 tests across 76 files**, 31 schema
+files. The delta over the entry below is 3 tests, all in `test/layer2/l2-page-frontmatter-boundary.test.ts`,
 whose assertions **inverted**: the compiled page's raw frontmatter now validates with an **empty** error
 list where it previously rejected with exactly 19 (`required` ×2 — `created`, `epistemic_tag`;
 `additionalProperties` ×12; `/category:enum`, `/sources/0:pattern`, `/updated:format`,
 `/confidence:type`, `/confidence:enum`), and the same file now also pins the **endorsed** page (ENDORSE is
-a second writer of this artifact) and the pre-fix read path. The writer emits spec §9's field set verbatim;
+a second writer of this artifact), the voice-protected surface across a recompile of an endorsed page
+(prose, locked `sources`, `created`, endorsement metadata — driven through the real compiler), and the
+pre-fix read path. The writer emits spec §9's field set verbatim;
 the compile envelope (`entity_id`, `entity`, `type`, `sensitive`, `compiled_at`, `compiled_by`, `model`,
 `supersedes`, `related`, and ENDORSE's recovery metadata) renders into the page's derived **Evidence
 Timeline** region as a `smartware-envelope` block instead of into the frozen contract, and READ derives
