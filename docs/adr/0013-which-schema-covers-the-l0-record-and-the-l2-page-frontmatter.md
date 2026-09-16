@@ -123,6 +123,17 @@ Because (2) and (3) touch page endorsement — a core verb that reads this front
 - The compiled page frontmatter keeps failing the published schema until the carded writer fix lands.
   The pinning test asserts the exact delta, so the fix cannot land half-done, and the test fails loudly
   when it is fixed (which is the signal to invert it and update the README/ADR).
+  **Landed 2026-09-16 (kanban `t_8d6f4a5c`, branch `wip/tech-head/l2-page-frontmatter-schema`).** The pin
+  was inverted rather than deleted: the compiled page's own frontmatter now validates against
+  `page-frontmatter.schema.json` with an empty error list, and the same file pins the *endorsed* page to
+  it too — ENDORSE is a second writer of this artifact, so its recovery metadata
+  (`endorsement_operation_id`/`endorsed_by`/`endorsed_at`) moved into the derived cached region with the
+  compile envelope instead of back into the frozen contract. Migration: the compatibility reader
+  `src/layer2/envelope.js` reconstructs the envelope from a pre-fix page's inline frontmatter and recovers
+  the cited claims from the pre-fix name, so a tree that is mid-migration keeps reading; the next compile
+  (or endorsement) of that page rewrites it in the published shape, preserving `created`, the locked
+  `sources`, user prose and user `tags`/`aliases`/`notices` verbatim. Nothing here changes `Status` — the
+  owner merge gate on this record is untouched.
 - Costs: the page fix touches `src/layer2/compiler.ts`, `src/layer2/types.ts`, `src/protocol/endorse.ts`
   and `src/protocol/read.ts`, plus hand-built frontmatter fixtures in three conformance tests
   (`f_l2_voice_protection`, `g_endorsement`, `demotion-durability`). Page-endorsement semantics are

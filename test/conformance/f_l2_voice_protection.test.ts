@@ -4,7 +4,6 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ulid } from 'ulid';
 import { parseFrontmatter, serialiseFrontmatter } from '../../src/layer2/frontmatter.js';
 import type { Frontmatter } from '../../src/layer2/types.js';
 
@@ -16,22 +15,28 @@ function makeTmpWikiDir(): string {
   return tmpDir;
 }
 
+/**
+ * Hand-built page fixture in the **published** page vocabulary — spec §9's "Page frontmatter"
+ * field set (== `schemas/v0.5.0/page-frontmatter.schema.json`). The compile envelope is *not*
+ * frontmatter: `entity_id`/`compiled_at`/`claim_ids` live in the page's derived cached region
+ * (ADR-0013 → D2), so a fixture that only exercises page-vocabulary behaviour writes none.
+ */
 function writeTestPage(wikiDir: string, category: string, slug: string, fm: Partial<Frontmatter>, body: string): string {
   const fullFm: Frontmatter = {
-    entity_id: `entity_${ulid()}`,
-    entity: slug,
-    type: 'concept',
-    scope: 'personal',
-    epistemic: 'observed',
-    sensitive: false,
-    sources: ['obs_test1'],
-    claim_ids: ['claim_test1'],
-    compiled_at: new Date().toISOString(),
-    compiled_by: 'smartware-compiler',
-    confidence: 0.8,
-    supersedes: [],
-    related: [],
+    title: slug,
+    page_id: `page_${slug}`,
+    category: 'concept',
     author: 'agent',
+    sources: ['claim_01M2NAFHDD2A9AC2KGNBQABTRP'],
+    supporting_claims: [],
+    created: '2026-01-01',
+    updated: '2026-01-01',
+    scope: 'workspace',
+    confidence: 'medium',
+    epistemic_tag: 'inference',
+    summary: `${slug} test page`,
+    tags: [],
+    aliases: [],
     notices: [],
     ...fm,
   };
@@ -83,16 +88,22 @@ Test entity is active.
   });
 
   it('F4: user_page_locks_sources', () => {
+    // §9: `sources` is the page's cited ClaimIds and is locked at endorsement. The lock is what
+    // this test asserts — the fixture's own list must survive verbatim, because the compiler
+    // may only refresh the derived cached region on a user-authored page.
     const wikiDir = makeTmpWikiDir();
     const pagePath = writeTestPage(wikiDir, 'concepts', 'test-concept', {
       author: 'user',
-      sources: ['obs_user_source'],
-      claim_ids: ['claim_user1'],
-      sources_claim_ids: ['claim_user1'],
+      sources: ['claim_01M2NAFHDD2A9AC2KGNBQABTRP'],
+      supporting_claims: ['claim_01M2NAFHDD2A9AC2KGNBQABTRQ'],
     }, '\n## Current Understanding\n\nUser prose.\n\n## Evidence Timeline\n\nTimeline.\n');
 
     const parsed = parseFrontmatter(fs.readFileSync(pagePath, 'utf-8'));
-    expect(parsed!.frontmatter.sources).toEqual(['obs_user_source']);
+    expect(parsed!.frontmatter.sources).toEqual(['claim_01M2NAFHDD2A9AC2KGNBQABTRP']);
+    expect(parsed!.frontmatter.supporting_claims).toEqual(['claim_01M2NAFHDD2A9AC2KGNBQABTRQ']);
+    // The pre-fix names for the same list are gone: one meaning per field.
+    expect(parsed!.frontmatter.sources_claim_ids).toBeUndefined();
+    expect(parsed!.frontmatter.claim_ids).toBeUndefined();
     fs.rmSync(wikiDir, { recursive: true, force: true });
   });
 

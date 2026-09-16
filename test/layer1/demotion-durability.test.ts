@@ -433,22 +433,24 @@ describe('demotion durability · hand-built version records carry the demotion f
     const previews = new CascadePreviewStore(':memory:');
 
     try {
+      // The fixture is in the published page vocabulary (§9's field set): `sources` is the
+      // page's cited ClaimIds — the list the cascade endorses (ADR-0013 → D2).
       const frontmatter: Frontmatter = {
-        entity_id: ENTITY_ID,
-        entity: FACT.subjectName,
-        type: 'organization',
-        scope: FACT.scope,
-        epistemic: 'observed',
-        sensitive: false,
-        sources: [],
-        claim_ids: [DUPLICATE],
-        sources_claim_ids: [DUPLICATE],
-        compiled_at: new Date().toISOString(),
-        compiled_by: 'smartware',
-        confidence: 0.5,
-        supersedes: [],
-        related: [],
+        title: 'Acme',
         page_id: `page_${ENTITY_ID}`,
+        category: 'entity',
+        author: 'agent',
+        sources: [DUPLICATE],
+        supporting_claims: [],
+        created: '2026-01-01',
+        updated: '2026-01-01',
+        scope: FACT.scope,
+        confidence: 'medium',
+        epistemic_tag: 'inference',
+        summary: 'Acme test page',
+        tags: [],
+        aliases: [],
+        notices: [],
       };
       const pagePath = path.join(wikiDir, 'acme.md');
       fs.writeFileSync(pagePath, serialiseFrontmatter(frontmatter, '# Acme'), 'utf8');

@@ -225,8 +225,14 @@ describe('E2E smoke — full pipeline', () => {
         const firstPage = path.join(catDir, files[0]!);
         const content = fs.readFileSync(firstPage, 'utf-8');
         expect(content).toMatch(/^---\n/);
-        expect(content).toContain('entity_id:');
-        expect(content).toContain('compiled_at:');
+        // The published page vocabulary (spec §9 == page-frontmatter.schema.json).
+        expect(content).toContain('page_id:');
+        expect(content).toContain('epistemic_tag:');
+        // The compile envelope is a derived cached render inside the page body — entity identity
+        // and the compile timestamp are deliberately NOT page-frontmatter vocabulary
+        // (ADR-0013 → D2).
+        expect(content).toContain('smartware-envelope');
+        expect(content).toContain('entity_id');
         foundPage = true;
         break;
       }

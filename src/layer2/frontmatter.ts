@@ -1,12 +1,16 @@
 // Layer 2 — YAML frontmatter read/write/validate
+//
+// The parser is deliberately untyped: a page on disk may still carry the pre-ADR-0013 → D2
+// envelope inline, and the reader has to accept both shapes. Use `readPageFile`
+// (`src/layer2/envelope.ts`) for the shape-aware entry point.
 
-import type { Frontmatter } from './types.js';
+import { toPageCategory } from './paths.js';
 
 /**
  * Parse YAML frontmatter from a markdown file's string content.
  * Returns { frontmatter, body } or null if no frontmatter found.
  */
-export function parseFrontmatter(raw: string): { frontmatter: Frontmatter; body: string } | null {
+export function parseFrontmatter(raw: string): { frontmatter: Record<string, unknown>; body: string } | null {
   if (!raw.startsWith('---\n')) return null;
   const end = raw.indexOf('\n---\n', 4);
   if (end === -1) return null;
@@ -15,7 +19,7 @@ export function parseFrontmatter(raw: string): { frontmatter: Frontmatter; body:
   const body = raw.slice(end + 5);
 
   try {
-    const frontmatter = parseYAML(yamlBlock) as unknown as Frontmatter;
+    const frontmatter = parseYAML(yamlBlock);
     return { frontmatter, body };
   } catch {
     return null;
@@ -25,26 +29,39 @@ export function parseFrontmatter(raw: string): { frontmatter: Frontmatter; body:
 /**
  * Serialise frontmatter + body back to a full markdown string.
  */
-export function serialiseFrontmatter(frontmatter: Frontmatter, body: string): string {
-  return `---\n${toYAML(frontmatter as unknown as Record<string, unknown>)}---\n${body}`;
+export function serialiseFrontmatter(frontmatter: Record<string, unknown>, body: string): string {
+  return `---\n${toYAML(frontmatter)}---\n${body}`;
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
- * Validate that a frontmatter object has all required fields.
+ * Validate that frontmatter carries the **published** page contract — spec §9's field set,
+ * which is `schemas/v0.5.0/page-frontmatter.schema.json`. The pre-fix envelope fields
+ * (`entity_id`, `compiled_at`, `claim_ids`, …) are not part of it; they live in the page's
+ * derived cached region instead (ADR-0013 → D2).
  */
-export function validateFrontmatter(fm: Partial<Frontmatter>): fm is Frontmatter {
+export function validateFrontmatter(fm: Record<string, unknown>): boolean {
+  const pageId = fm['page_id'];
+  const author = fm['author'];
+  const confidence = fm['confidence'];
   return !!(
-    fm.entity_id &&
-    fm.entity &&
-    fm.type &&
-    fm.scope &&
-    fm.epistemic &&
-    typeof fm.sensitive === 'boolean' &&
-    Array.isArray(fm.sources) &&
-    Array.isArray(fm.claim_ids) &&
-    fm.compiled_at &&
-    fm.compiled_by &&
-    typeof fm.confidence === 'number'
+    typeof fm['title'] === 'string' &&
+    typeof pageId === 'string' && /^page_[a-z0-9-]+$/.test(pageId) &&
+    toPageCategory(fm['category']) !== null &&
+    (author === 'agent' || author === 'user') &&
+    isStringArray(fm['sources']) &&
+    isStringArray(fm['supporting_claims']) &&
+    typeof fm['created'] === 'string' && ISO_DATE.test(fm['created']) &&
+    typeof fm['updated'] === 'string' && ISO_DATE.test(fm['updated']) &&
+    typeof fm['scope'] === 'string' &&
+    (confidence === 'high' || confidence === 'medium' || confidence === 'low') &&
+    typeof fm['epistemic_tag'] === 'string' &&
+    typeof fm['summary'] === 'string'
   );
 }
 

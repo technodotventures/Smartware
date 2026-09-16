@@ -11,6 +11,7 @@ import { readAll } from '../layer0/log.js';
 import type { Observation } from '../layer0/types.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import { iterAllClaimVersions, type ClaimVersionRecord } from '../layer1/jsonl.js';
+import { parseEnvelope } from '../layer2/envelope.js';
 import {
   readOperationIntentRecords,
   removeOperationIntent,
@@ -70,6 +71,11 @@ function markdownFiles(root: string): string[] {
 
 function pageOperationId(filePath: string): string | null {
   const raw = readFileSync(filePath, 'utf8');
+  // The endorsement's operation id is durable recovery metadata: it lives in the page's derived
+  // cached region (ADR-0013 → D2), or inline in the frontmatter of a page written before that
+  // change. Both shapes are read so recovery works across a tree that is mid-migration.
+  const envelope = parseEnvelope(raw);
+  if (envelope?.endorsement_operation_id) return envelope.endorsement_operation_id;
   const frontmatter = raw.match(/^---\n([\s\S]*?)\n---/)?.[1];
   if (!frontmatter) return null;
   const match = frontmatter.match(/^(?:operation_id|endorsement_operation_id):\s*["']?([^\s"']+)["']?\s*$/m);
