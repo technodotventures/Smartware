@@ -32,7 +32,7 @@ Raw output: `workspaces/t_0920aa1d/probe/shape-before.out`; instrument:
 |---|---|---|
 | L0 line as written | `observation.schema.json` | **rejected** — 14 errors: `required` ×4 (`observation_id`, `metadata`, `operation_id`, `actor_id`), `additionalProperties` ×9, `/source:type` |
 | L0 line, projected to the contract's OBSERVE payload + stamped identity | `observation.schema.json` | **valid**, `errors=[]` |
-| compiled page frontmatter as written | `page-frontmatter.schema.json` | **rejected** — 19 errors: `required` ×2 (`created`, `epistemic_tag`), `additionalProperties` ×13, `/category:enum`, `/sources/0:pattern`, `/updated:format`, `/confidence:type`+`/confidence:enum` |
+| compiled page frontmatter as written | `page-frontmatter.schema.json` | **rejected** — 19 errors: `required` ×2 (`created`, `epistemic_tag`), `additionalProperties` ×12, `/category:enum`, `/sources/0:pattern`, `/updated:format`, `/confidence:type`+`/confidence:enum` |
 | compiled page frontmatter, projected to the spec §9 field set | `page-frontmatter.schema.json` | **valid**, `errors=[]` |
 | `exports/<exp>/observations.jsonl` + `evidence.jsonl` | `observation.schema.json` | **rejected** — byte-identical shape to the L0 line, in a package whose `manifest.json` declares `"protocol": "v0.5.0", "schemas": "v0.5.0"` |
 

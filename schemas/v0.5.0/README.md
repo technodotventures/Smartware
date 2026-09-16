@@ -99,6 +99,11 @@ rationale is ADR-0013):
 `tombstone-frontmatter.schema.json` covers `wiki/tombstones/*.md` and
 `profile-frontmatter.schema.json` covers `wiki/profiles/*.md`; the page schema's
 `category` enum deliberately excludes `tombstone` and `profile` for that reason.
+Spec §9 prints the **wider union** in its single "Page frontmatter" block —
+`category: concept | entity | decision | synthesis | profile | tombstone` — so an
+integrator following that block literally routes `profile` and `tombstone` pages to
+`profile-frontmatter.schema.json` / `tombstone-frontmatter.schema.json`, not to
+`page-frontmatter.schema.json`, which rejects those two values with `/category:enum`.
 
 Canonical relation schemas intentionally reject `origin: model` and
 `origin: reviewed`: model output is a derived candidate, and delegated reviewed
