@@ -66,11 +66,28 @@ meridian recall answers with no re-provisioning.
 host that provisions a multi-client row (§10b.2 permits it) gets row-scoped
 revocation for that row: offboarding or erasing any one of its clients removes the
 actor's access to all of them. Such a host MUST re-provision the actor's remaining
-scopes as part of the same offboarding/erasure step. Re-granting is a **config
-provision** — write `config.json` (mode 0600); the adapter reads it on the next
-operation. There is no protocol call and no adapter method for it. This is stated
-in `docs/integration/coffee-adapter.md` §7 ("Provisioning grants") and carried
-verbatim into the Coffee release handoff (paragraph at the end of this ADR).
+**live** scope ids as part of the same offboarding/erasure step. Re-granting is a
+**config provision** — write `config.json` (mode 0600); the adapter reads it on the
+next operation. There is no protocol call and no adapter method for it. Measured
+(R3): the file is authoritative — an in-memory tenant change re-grants nothing —
+and a freshly written row restores the owner/brain path and the standby degraded
+path on the next operation, with no restart.
+
+**The procedure carries §10b.2's retired-marker rule, because the obvious edit is
+the trap.** Re-provisioning after an **erasure** covers the actor's remaining
+**live** scope ids only, in a **fresh** row: a row that still lists the retired
+`client:<id>#n` must not be re-activated (mint a fresh row, or edit the revoked
+row's capability arrays down to the live ids first). An erasure leaves the revoked
+row still listing the retired id, and re-activating it silently re-authorizes the
+purged scope — measured (R4/R5): `checkGrant('user:sam','query','client:arcadia#1')
+= true`, `handleWrite` → 201, owner recall `ok:true` (`n:0` before that write, then
+`n:1`), standby degraded read `ok:true n:1`; control, with the revoked row left
+alone, `403 insufficient_permission`. After an **offboarding**, re-activation is by
+contrast the sanctioned revival path: protocol v0.5.0 §FORGET.SCOPE keeps grants
+"revoked but re-activatable" and the scope entry remains. Both rules are stated in
+`docs/integration/coffee-adapter.md` §7 ("Provisioning grants") and the second is
+asserted by C7 of §6. The paragraph at the end of this ADR is carried verbatim into
+the Coffee release handoff.
 
 **4. Three companion changes are implied by (2) and are not optional.** All three
 are measured, and all three are in card `t_864a5900` (created by this decision;
@@ -128,6 +145,7 @@ implementation is `t_864a5900`):
 | C4 | `test/protocol/forget-scope.test.ts` | two rows for one actor: forgetting one scope reports exactly that row, the other stays `active`, and the actor's other scope stays authorized | row-scope exactness at unit level |
 | C5 | `scripts/verify-config-shape.mjs` + the two example configs | the shipped examples are per-client rows and the §10b.5 facts still hold (union semantics) | keeping "code-verified" claims true |
 | C6 | `test/regressions.test.ts` ([Phase-E] session block) | two rows for one actor: `session_start` with `requested_scopes: [<second row's client>]` returns that client's capability cluster — non-empty, and the same scope the operation surface authorizes — with caps/trust resolved across all the actor's active rows; and the trust/quarantine caps take the **most restrictive** union (untrusted row present → `user_facing`; quarantined row present → `background_agent`), independent of row order | the S4 first-row derivation in `src/session/policy.ts:96` (live on the public MCP tool `smartware_session_start`) |
+| C7 | `scripts/coffee-company-brain-fixture.mjs` (packaged gate, after the erasure check 6c already performs) | **no active row references the removed scope id**: after the `erasure` of `client:arcadia#1`, `config.scopes` no longer lists it and no row with `status:'active'` lists it in any capability array (provisioning hygiene, the same class as C2 — a row left `active` on the retired id must never be the re-grant) | the retired-marker case of §3: the row an erasure leaves behind still names the retired id, and re-activating it re-authorizes the purged scope (measured R4/R5) — the case fails open today |
 
 ## Consequences
 
@@ -196,6 +214,25 @@ implementation is `t_864a5900`):
   session surface — the affected consumer is any host using
   `smartware_session_start` with per-client rows.
 
+- **Evidence, round 3 (`R2`–`R5` — the re-grant procedure and the retired-marker
+  trap).** Same directory: `measure-regrant.mjs` + `regrant-raw.log` +
+  `regrant-facts.json` (17 facts, R2/R3/R4) and `measure-hazard.mjs` +
+  `hazard-raw.log` + `hazard-facts.json` (7 facts, R5) — the review card's own
+  probes (`t_102f3dfa`), re-run first-party at `55fc628` (the branch is docs-only
+  against that review's base `e937fab`, so the code under test is the same tree);
+  every fact is identical to the review's raw logs after id/ULID normalization
+  (`normalize_check_round3.py` → `normalize-report-round3.txt`). They measure the
+  two halves §3 now states: the file is authoritative and a written row re-grants on
+  the next operation (R2: an in-memory tenant change re-grants nothing, R3: owner
+  `ok n:1` `brain` **and** standby `ok n:1` `app-store-fallback`, plus
+  hand-revocation in the file taking effect), and the trap — an erased row restored
+  verbatim re-authorizes the purged scope while `config.scopes` no longer contains
+  it (R4/R5: `checkGrant` true, write `201`, owner recall `ok:true` `n:0`→`n:1`,
+  standby degraded `ok:true n:1`; control `403`). Two honest limits: the probes
+  drive the adapter in-process with stub `arbiter`/`appStore` ports (no Redis, no
+  second host, no packaged artifact), and C7 does not exist in the fixture yet — the
+  assertion is specified in §6 and lands with `t_864a5900`.
+
 ## Alternatives considered
 
 - **(b) Narrow the revocation: strip the forgotten scope from the capability
@@ -228,12 +265,20 @@ implementation is `t_864a5900`):
 
 > **Grant revocation is row-scoped.** `FORGET.SCOPE` revokes every grant row whose
 > capability arrays reference that client scope (spec §10b.3), and the reference
-> adapter provisions one grant row per (staff member, client), so offboarding or
-> erasing one client cannot touch that staff member's other clients. If your
-> provisioning instead lists several clients in one grant row (the §10b.4 worked
-> example shape), that row is revoked whole and the staff member loses **every**
-> client in it — the adapter exposes no re-grant call. Re-provision the actor's
-> remaining scopes as part of the same offboarding/erasure step: re-granting is a
-> config provision (`config.json`, mode 0600, read on the next operation), never a
-> protocol call. Measured before the fix: a `meridian` recall that answered `ok`
-> before an `erasure` of `arcadia` answered `403 insufficient_permission` after it.
+> adapter is being changed to provision one grant row per (staff member, client) —
+> one row per actor until card `t_864a5900` lands (measured `row_count: 1` in the
+> shipped template, and contract §7 says which shape is shipped today). Once it
+> lands, offboarding or erasing one client cannot touch that staff member's other
+> clients. If your provisioning instead lists several clients in one grant row (the
+> §10b.4 worked example shape), that row is revoked whole and the staff member
+> loses **every** client in it — the adapter exposes no re-grant call. Re-provision
+> the actor's remaining **live** scope ids as part of the same offboarding/erasure
+> step: re-granting is a config provision (`config.json`, mode 0600, read on the
+> next operation), never a protocol call. Do **not** re-activate the revoked row an
+> `erasure` leaves behind — it still lists the retired `client:<id>#n`, and
+> re-activating it re-authorizes the purged scope (measured: `checkGrant` returns
+> true, a write is accepted `201`, recall answers `ok:true`); after an
+> `offboarding`, re-activation *is* the sanctioned revival path (protocol v0.5.0
+> §FORGET.SCOPE: revoked but re-activatable). Measured before the fix: a `meridian`
+> recall that answered `ok` before an `erasure` of `arcadia` answered `403
+> insufficient_permission` after it.

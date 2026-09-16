@@ -266,10 +266,34 @@ shows it), offboarding or erasing **any one** of those clients revokes the row a
 the staff member loses **every** client in it. Measured (ADR-0012 evidence, S1, and
 gate check `6n`): a `meridian` recall that answered `ok` before an `erasure` of
 `arcadia` answered `403 insufficient_permission` after it. The host MUST
-re-provision that actor's remaining scopes as part of the same
+re-provision that actor's remaining **live** scope ids as part of the same
 offboarding/erasure step. Re-granting is a **config provision**: write
 `config.json` (mode 0600); the adapter reads it on the next operation. There is no
-re-grant protocol call and no adapter method for it.
+re-grant protocol call and no adapter method for it. Measured (ADR-0012 evidence,
+R3): the file is authoritative — an in-memory tenant change re-grants nothing — and
+a freshly written row restores the owner/brain path (`ok n:1`, `brain`) and the
+standby degraded path (`ok n:1`, `app-store-fallback`) on the next operation, with
+no restart.
+
+**Never re-activate a row that still lists a retired marker (spec §10b.2).** An
+`erasure` retires the scope id permanently (a returning client mints
+`client:<id>#2`), but the row it revoked still lists the retired id in its
+capability arrays — and that revoked row is the surface an operator lands on here.
+Re-activating it silently re-authorizes the purged scope. Measured (ADR-0012
+evidence, R4/R5) on a config whose `scopes` no longer contain `client:arcadia#1`:
+`checkGrant('user:sam','query','client:arcadia#1') = true`, a `handleWrite` on
+`arcadia` → **201** (new observations under a retired marker), owner recall →
+`ok:true` (`n:0` before that write — answered, not refused) and the standby
+degraded read → `ok:true n:1` from the app store. Control, with the revoked row
+left alone: `403 insufficient_permission`. The runtime performs no scope-id
+validation (§10b.5), so only provisioning discipline prevents this. Therefore:
+after an **erasure**, re-provision the actor's remaining live scope ids only, in a
+**fresh** row (or edit the revoked row's capability arrays down to the live ids
+first) — never re-activate the row that still names `client:<id>#n`. After an
+**offboarding** the opposite holds: re-activation *is* the sanctioned revival path
+— the protocol keeps grants "revoked but re-activatable" (protocol v0.5.0
+§FORGET.SCOPE), the scope entry remains, and no id was retired. Asserted in
+ADR-0012 §6 as **C7**, after the erasure the packaged fixture already performs.
 
 **Degraded reads union the actor's rows.** The config-derived precheck on the
 standby/fallback path (see §5) must allow a scope covered by **any** active row of
