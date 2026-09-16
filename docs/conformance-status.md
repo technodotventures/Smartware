@@ -36,6 +36,26 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-16 on Node v26.5.1 for **the lane the reference implementation's own consent-change
+records are written in** (`wip/neo/consent-change-scope`, kanban `t_e6fce49a`, stacked on the
+L0-record-schema lane `e0241d4`; carded out of `t_f1157ed4`'s writer sweep): **77 files / 548 tests**,
+**32 schema files** (v0.4.2, v0.5.0, v0.5.1). GRANT, REVOKE and the two `?? 'personal'` fallbacks
+(`quarantine_review.ts`, `forget.ts`) now write the protocol-native `self` through one constant
+(`POD_SELF_SCOPE`, `src/config.ts`) — the lane a Core-opened brain registers and FORGET.SCOPE's audit
+marker resolves to — so those records validate against
+`schemas/v0.5.1/observation-record.schema.json` with an **empty** error list (were
+`['/scope:pattern']`). The A/B pair is the same test file (sha256 `ee8144ca…`) at `e0241d4`
+(1 failed | 4 passed, quoting `/scope:pattern`) and at the fix (5/5), pinned by
+`test/protocol/consent-change-lane.test.ts`. Measured behaviour of the literal: it decided the
+*scope-keyed read surfaces* (raw-window search, `EXPORT.SCOPE` closure) and nothing else — replay
+produces no claims from `consent_change`, retention is `forever`, FORGET.SCOPE refuses pod-internal
+scopes, grants never read a record's `scope`, and both fallbacks are unreachable (a missing target is
+refused before any lane resolves). No published schema byte and no `SHA256SUMS` line moved (v0.5.0
+`8d47a427…`, v0.5.1 `a7c3095d…`). Pre-fix records keep the `personal` spelling — L0 is append-only.
+Adjacent `personal` literals (`reflect.ts`'s no-scope sentinel, `session.ts`'s summarizer default,
+`confidence.ts`'s half-life key, the OBSERVE tool-description example) are measured and carded, not
+fixed here.
+
 Verified 2026-09-16 on Node v26.5.1 for **the published L0 evidence record schema and the export
 manifest's schema label** (`wip/smarty/l0-record-schema`, kanban `t_f1157ed4`, ADR-0013 → *Delta
 (2026-09-16): D1 carried out* — an additive schema set; `schemas/v0.5.0/SHA256SUMS` sha256
@@ -317,12 +337,18 @@ The exact ordering and recovery state table are documented in
   `evidence.jsonl`; the package's manifest names it (`"schemas": "v0.5.1"` + `"record_schema"`), so the
   portability claim matches the bytes. **Residual:** a record whose `scope` is a lane the published
   vocabulary does not admit is outside this set even with a valid shape — host-registered lanes
-  (`pod/<pod>/<lane>`, ADR-0015) and, measured on the same writer sweep, the consent-change writers'
-  hardcoded `personal` lane (`src/protocol/grant.ts`, `src/protocol/revoke.ts`; carded as a writer
-  defect). Disclosed in `schemas/v0.5.1/README.md` → *Boundaries this schema does not widen*; decided
-  in [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md) (its
+  (`pod/<pod>/<lane>`, ADR-0015). Disclosed in `schemas/v0.5.1/README.md` → *Boundaries this schema
+  does not widen*; decided in
+  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md) (its
   2026-09-16 delta carries D1 out); pinned by
-  `test/layer0/l0-record-wire-boundary.test.ts`.
+  `test/layer0/l0-record-wire-boundary.test.ts`. The second divergence the same writer sweep measured —
+  the reference implementation's own consent-change writers stamping `scope: 'personal'` — is **fixed**
+  (kanban `t_e6fce49a`, `wip/neo/consent-change-scope`): GRANT, REVOKE and the two `?? 'personal'`
+  fallbacks (`quarantine_review.ts`, `forget.ts`) now write the protocol-native `self` through one
+  constant (`POD_SELF_SCOPE`, `src/config.ts`), pinned by
+  `test/protocol/consent-change-lane.test.ts` (the driven records' complete Ajv error list against the
+  v0.5.1 record schema is empty; the pre-fix revision fails the identical assertion with
+  `['/scope:pattern']`). Pre-fix records on disk keep the `personal` spelling — L0 is append-only.
 - **The reference implementation's compiled page frontmatter does not yet validate against
   `page-frontmatter.schema.json`** — 19 Ajv errors (`created`/`epistemic_tag` missing, plural `category`,
   ISO `updated`, numeric `confidence`, observation ids under `sources`, plus the compile envelope). The

@@ -203,3 +203,15 @@ personal lane; `quarantine_review.ts` and `forget.ts` use the same literal as a 
 records are outside this set's conformance claim for that reason alone — the ADR-0015 boundary, not a
 record-schema defect — and the record schema is deliberately **not** widened to admit the literal.
 Carded separately as a writer defect.
+
+**Fixed 2026-09-16** (kanban `t_e6fce49a`, `wip/neo/consent-change-scope`, stacked on this lane):
+those four writers now stamp the protocol-native `self`, spelled once as `POD_SELF_SCOPE`
+(`src/config.ts`, the same value `initialiseDataDir` registers and FORGET.SCOPE's audit marker
+resolves to), and `test/protocol/consent-change-lane.test.ts` drives GRANT + REVOKE + the
+review/tombstone writers and asserts the appended records' complete Ajv error list against this set's
+record schema is empty — the pre-fix revision fails the identical assertion with `['/scope:pattern']`
+(A/B pair). No published schema byte, no `SHA256SUMS` line, and no record already on disk changes: L0
+keeps the spelling it was written with. The two `?? 'personal'` fallbacks are measured-unreachable
+(the effective-status lookup throws `not_found` first and `observations.scope` is NOT NULL), so that
+half is a spelling change, not a behaviour change; what the literal *did* decide (raw-window search by
+scope, EXPORT.SCOPE's closure, and nothing else) is recorded in the task's journal entry.
