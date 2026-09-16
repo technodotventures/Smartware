@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `HEAD` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/smarty/canonical-schema-boundary` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,8 +24,8 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-15-t_9a700aed.md`](journal/2026-09-15-t_9a700aed.md) — Decision: host-registered lanes are not v0.5.0 scopes; the substrate has one ActorId (ADR-0015) (2026-09-15)
-- **Journal entries:** 38 · tasks completed on board `smartware`: 78
+- **Journal:** [`2026-09-16-t_74faf12d.md`](journal/2026-09-16-t_74faf12d.md) — Integration: rebase the ADR-0013 lane onto the moved base `9fcfff7`, regenerate `STATUS.md`, refresh the `ADR-0012` → `0015` labels (PR #19) (2026-09-16)
+- **Journal entries:** 39 · tasks completed on board `smartware`: 78
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -33,7 +33,6 @@
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
-| `wip/smarty/canonical-schema-boundary` | 64 | 2026-09-16 | docs(journal): record the round-2 corrections and the re-run gate for t_0920aa1d |
 | `wt/t_f2b584dc` | 62 | 2026-09-16 | docs: record the round-3 status drift measurements and regenerate the projection |
 | `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
 | `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
@@ -120,7 +119,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (5d old)
-- ✅ kanban board readable (97 tasks, 8229 events)
+- ✅ kanban board readable (97 tasks, 8243 events)
 - ⚠️ 40 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 2 blocked task(s)
 

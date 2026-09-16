@@ -4,7 +4,7 @@
 **Date:** 2026-09-15
 **Deciders:** @smarty-pants (measurement and decision prepared on kanban `t_0920aa1d`); owner sign-off is the gate for the carded fixes.
 **Supersedes:** —
-**Numbering note:** `0008`–`0012` are held by other in-flight branches and two of them are double-allocated; `0013` is the next free number.
+**Numbering note:** `0008`–`0012` are held by other in-flight branches and several of them are double-allocated. `0013` is free on this base (`wip/neo/host-lane-identity` @ `9fcfff7` holds `0001`, `0002`, `0003`, `0011`, `0015` — this lane's own earlier record was refiled `0012` → `0015` there), but it is **also minted by `wip/tech-head/retention-sweep-audit`** (`0013-retention-sweep-commit-identity.md`, kanban `t_543cb61a`, committed 2026-09-15T12:09Z, unpushed), so `0013` is double-allocated across two unmerged lanes. The contention is carded as `t_73ea9510` and the allocation rule/registry is in flight as PR #20; the number is not changed here. *(Corrected 2026-09-16 during the rebase onto `9fcfff7`, kanban `t_74faf12d`, after an every-ref scan — see `docs/journal/2026-09-16-t_74faf12d.md`; the decision this record carries is untouched.)*
 
 ## Context
 
@@ -16,7 +16,7 @@ rest of that flow's canonical artifacts against the published v0.5.0 schema set.
    `page-frontmatter.schema.json`.
 
 Both failed on the **protocol-native control flow too** (`scope: self|workspace`), so neither is the
-host-lane divergence ADR-0012 settled, and neither is fixed by it. The card asked the question this
+host-lane divergence ADR-0015 settled, and neither is fixed by it. The card asked the question this
 record answers: do these schemas describe the artifacts the writers emit (fix the writer, widen the
 schema, or disclose — ADR-0011 precedent), or a *different* artifact (write the boundary down and pin it)?
 
