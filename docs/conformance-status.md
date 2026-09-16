@@ -39,8 +39,8 @@ Specification v1.6.16 conformance.
 Verified 2026-09-16 on Node v26.5.1 for **the published L0 evidence record schema and the export
 manifest's schema label** (`wip/smarty/l0-record-schema`, kanban `t_f1157ed4`, ADR-0013 → *Delta
 (2026-09-16): D1 carried out* — an additive schema set; `schemas/v0.5.0/SHA256SUMS` sha256
-`8d47a427…` unchanged, so no frozen v0.5.0 byte moves): **542 tests across 76 files**, **32 schema
-files** (`v0.4.2`, `v0.5.0`, `v0.5.1`). The delta over the entry below is 1 test —
+`8d47a427…` unchanged, so no frozen v0.5.0 byte moves): **543 tests across 76 files**, **32 schema
+files** (`v0.4.2`, `v0.5.0`, `v0.5.1`). The delta over the entry below is 2 tests —
 `test/layer0/l0-record-wire-boundary.test.ts` (2 → 4: the record the reference writer appends
 validates against `schemas/v0.5.1/observation-record.schema.json` with an **empty error list**; the
 schema is closed (unknown top-level key, unknown key inside `integrity`, and a record missing
