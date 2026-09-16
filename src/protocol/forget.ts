@@ -8,7 +8,7 @@ import { assignIntegrity, computeHash } from '../layer0/integrity.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
-import type { SmartwareConfig } from '../config.js';
+import { POD_SELF_SCOPE, type SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, requireRegisteredActor, ProtocolError } from '../auth/middleware.js';
 import { TERMINAL_STATES } from '../layer0/types.js';
@@ -208,7 +208,11 @@ export async function handleForget(
       throw new ProtocolError('terminal_state', `Observation '${target.id}' is already in terminal state '${effectiveStatus}'`);
     }
     const obsRow = layer0.getDB().prepare('SELECT scope FROM observations WHERE id = ?').get(target.id) as { scope: string } | undefined;
-    scope = obsRow?.scope ?? 'personal';
+    // A missing index row cannot happen on the path above (the effective-status
+    // lookup throws `not_found` first, and `observations.scope` is NOT NULL);
+    // if it ever did, fall back to the pod's own lane rather than the pre-fix
+    // literal `personal` (kanban t_e6fce49a).
+    scope = obsRow?.scope ?? POD_SELF_SCOPE;
   } else {
     const claim = store.getClaim(target.id);
     if (!claim) {

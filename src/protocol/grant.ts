@@ -4,7 +4,7 @@ import type { Observation, Actor } from '../layer0/types.js';
 import { appendObservation } from '../layer0/log.js';
 import { assignIntegrity } from '../layer0/integrity.js';
 import type { Layer0Index } from '../layer0/index.js';
-import type { SmartwareConfig } from '../config.js';
+import { POD_SELF_SCOPE, type SmartwareConfig } from '../config.js';
 import type { Grant } from '../auth/grants.js';
 import { createGrant } from '../auth/grants.js';
 import { requireOwner, ProtocolError } from '../auth/middleware.js';
@@ -70,7 +70,11 @@ export async function handleGrant(
       captured_at: now,
       observed_at: now,
     },
-    scope: 'personal',
+    // The pod's own lane: this is the substrate's audit record about a consent
+    // change, not host content, so it belongs in `self` — the protocol-native
+    // personal lane (the pre-fix literal `personal` is not in `$defs/Scope` and
+    // is not a registered scope; kanban t_e6fce49a).
+    scope: POD_SELF_SCOPE,
     visibility: 'private',
     content: {
       format: 'application/json',

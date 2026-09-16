@@ -67,10 +67,13 @@ always appends.
 
 - **`scope` is the shared `common.schema.json#/$defs/Scope`.** A record written in a lane the
   vocabulary does not admit — a host-registered lane such as `pod/<pod>/<lane>`
-  ([ADR-0015](../../docs/adr/0015-host-registered-lanes-and-the-substrate-actor-id.md)), or the
-  reference implementation's consent-change writers' hardcoded `personal` lane — is outside this
-  set's conformance claim. The record schema does not silently admit it; the vocabulary is closed and
-  a widening is a protocol revision, not a schema edit.
+  ([ADR-0015](../../docs/adr/0015-host-registered-lanes-and-the-substrate-actor-id.md)) — is outside
+  this set's conformance claim. The record schema does not silently admit it; the vocabulary is closed
+  and a widening is a protocol revision, not a schema edit. (The reference implementation's
+  consent-change writers hardcoded the literal `personal` here until kanban `t_e6fce49a`: GRANT,
+  REVOKE and the two `?? 'personal'` fallbacks now write the protocol-native `self`. Records already on
+  disk keep the spelling they were written with — L0 is append-only — so a pre-fix `personal` record is
+  a pre-fix artifact and still outside this set.)
 - **Legacy value shapes are not admitted by pattern tricks.** `id`, `actor_id`, `operation_id` and
   the integrity hash reuse the published `$defs`, so a record either matches the published identifier
   forms or is out of the set.

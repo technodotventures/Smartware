@@ -10,7 +10,7 @@ import { appendObservation } from '../layer0/log.js';
 import { assignIntegrity } from '../layer0/integrity.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
-import type { SmartwareConfig } from '../config.js';
+import { POD_SELF_SCOPE, type SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireOwner, ProtocolError } from '../auth/middleware.js';
 import { TERMINAL_STATES } from '../layer0/types.js';
@@ -60,7 +60,7 @@ export async function handleQuarantineReview(
   // Look up scope from the index for the audit record
   const obsRow = layer0.getDB().prepare('SELECT scope FROM observations WHERE id = ?')
     .get(params.target_obs_id) as { scope: string } | undefined;
-  const scope = obsRow?.scope ?? 'personal';
+  const scope = obsRow?.scope ?? POD_SELF_SCOPE;
 
   const now = new Date().toISOString();
   const seq = layer0.getLastSequence() + 1;
