@@ -19,7 +19,7 @@ import type { SmartwareConfig } from '../config.js';
 import type { Frontmatter, CompiledPage, CompilationAudit, CompileTelemetry, EntityMerge, PageEnvelope, PageNotice } from './types.js';
 import { PAGE_CATEGORY_DIRS } from './paths.js';
 import { ensurePrivateDirectory, writePrivateFile } from '../storage/private-fs.js';
-import { serialiseFrontmatter } from './frontmatter.js';
+import { serialisePageFrontmatter } from './frontmatter.js';
 import {
   isoDate,
   pageCitedClaimIds,
@@ -314,7 +314,12 @@ export async function compile(
       body = `\n## Current Understanding\n\n${oneliner}\n\n${paragraph}\n\n${fullPage}\n\n${evidenceTimeline}\n`;
     }
 
-    const raw = serialiseFrontmatter(frontmatter, body);
+    // The re-serialise refuses *by page*: a hand-authored page can carry a mixed `notices`
+    // array (the reader yields one for a block array with a non-mapping item — a bare `- `, a
+    // `|-`, a nested sequence; VERIFY t_6012c8ca Finding 2), and a compile that meets one must
+    // name the page it cannot carry — not throw unnamed from inside the writer — and must leave
+    // the page's bytes exactly as authored rather than drop or stringify the item (t_5742162f).
+    const raw = serialisePageFrontmatter(pagePath, frontmatter, body);
 
     // Write page
     ensurePrivateDirectory(path.dirname(pagePath));

@@ -35,6 +35,47 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-17 on Node v26.5.1 for **the compile/endorse re-serialise of a page the writer
+refuses** (`wip/neo/compile-page-refusal` @ `19d5172`, stacked on the still-unmerged
+`wip/neo/frontmatter-write-residuals @ a415578`; kanban `t_5742162f` — one shared helper plus two
+call sites, so **no published schema byte moves**, `SHA256SUMS` unchanged): **575 tests across 81
+files**, 31 schema files. The delta over the entry below is 3 tests in one new file
+(`test/layer2/l2-page-refusal-mixed-notices.test.ts`). The independent VERIFY `t_6012c8ca`
+Finding 2 measured that the pre-existing mixed-array refusal is **reachable from the reader** — a
+hand-authored block array whose item is not a mapping parses to a mixed object/non-object array (a
+bare `- ` item → `[{…}, ""]`, a `|-` item → `[{…}, "|-"]`, a nested sequence → `["", {…}]`) — and
+that the next COMPILE of such a page threw an unnamed base `Error`; the ENDORSE re-serialise is
+reachable the same way (measured). Decided and fixed here (option 3 of the card — keep the loud
+refusal and make it explicit; normalising would drop or stringify the user's bytes, against the
+entry below's "a loud refusal, not silent flattening", and reader semantics for `-` nested
+sequences / `|-` are the reader lane's decision, not this fix's):
+
+- both page re-serialise paths — COMPILE's user-page branch (`src/layer2/compiler.ts`) and the
+  ENDORSE cascade (`src/protocol/endorse.ts`) — now serialise through `serialisePageFrontmatter`,
+  which raises a named `PageRefusalError` (`page_refused: "<path>" cannot be re-serialised —
+  <the writer's own field reason>`) naming the page *and* the field. The write-boundary refusal
+  itself is untouched: nothing is dropped, stringified or otherwise normalised, and a refused page
+  keeps its bytes exactly as authored (pinned at the byte level for both halves).
+- the remedy is stated, not implied: a page carrying a mixed `notices` array fails its next
+  compile/endorse until its array is made homogeneous (or the reader lane decides the construct —
+  `t_cf744a8e` left nested sequences unread; `t_6fc254cd` owns `|-`), and fixing the value lets
+  the same flow proceed (pinned).
+
+Non-tautological: the pin (sha256
+`89f8744e86f5bebdaafdf1d93a1098cc5d4ac2285c76cbec431d25cfa2d849b5`) is **2 failed | 1 passed (3)**
+in a worktree at `a415578` with the fix absent (byte-identical pin; the two feature tests fail on
+`Error` / no page named / the wrapper not exported; the write-boundary control passes on both
+arms) and **3 passed (3)** on the fix. The reader half is asserted structurally (a mixed
+object/non-object array) rather than as exact values: on a combined tree that also carries the
+reader lane's `- |-` fix (`t_6fc254cd`, PR #34) the item parses as its content (`"text"` instead
+of the marker `"|-"`) while the array stays mixed and the refusal stands — the pin passes on both
+ancestries (measured). Controls on the compile path: a homogeneous object array
+and a bare string array both compile and are carried — the refusal is the *mixed* shape only, no
+over-refusal added. Gate: `npm run build` exit 0; focused `test/layer2` **6 files / 36 tests**;
+full suite **81 files / 575 tests exit 0** (133 s); `verify:schemas` 31 files OK; `verify:saas`
+`SMOKE_OUTCOME=pass`; `npm audit --omit=dev` 0 vulnerabilities. Not run: `npm ci` (shared
+`node_modules` symlink policy — CI runs it on Node 22/24).
+
 Verified 2026-09-17 on Node v26.5.1 for **the page YAML serialiser's remaining write-boundary
 losses** (`wip/neo/frontmatter-write-residuals` @ `a872f42` plus the `t_15b309f3` text/pin
 correction on top — no behaviour change, only the pin, the code comments and this entry; stacked
@@ -101,7 +142,8 @@ cannot produce them (0/4000 fuzzed hand-authored blocks plus the structural argu
 **pre-existing** refusal *is* reachable from the reader — a mixed scalar/object array
 (`parseBlockArray` yields one whenever a block-array item is not a mapping; 3 named blocks,
 12/4000 fuzzed) — and on the real COMPILE path the next re-serialise throws end-to-end,
-identically on both arms; the behavioural half is carded as `t_5742162f`, not this lane. A
+identically on both arms; the behavioural half is carded as `t_5742162f` (fixed in the entry
+above), not this lane. A
 byte-level re-run of the same corpus shows emitted frontmatter
 byte-identical on 5256 rows; every byte change is on a row whose status moved, plus one row
 (`'a\n \nb'`) whose status was and stays LOSS. Remaining at this tip: that string loses the space
