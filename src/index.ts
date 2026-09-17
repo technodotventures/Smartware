@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { ulid } from 'ulid';
 
-import { loadConfig, saveConfig, getDataDir, type SmartwareConfig } from './config.js';
+import { loadConfig, POD_SELF_SCOPE, saveConfig, getDataDir, type SmartwareConfig } from './config.js';
 import { SMARTWARE_VERSION } from './version.js';
 import { Layer0Index } from './layer0/index.js';
 import { ClaimStore } from './layer1/store.js';
@@ -21,6 +21,7 @@ import { handleCompile } from './protocol/compile.js';
 import { handleCorrect } from './protocol/correct.js';
 import { handleForget } from './protocol/forget.js';
 import { handleForgetScope } from './protocol/forget_scope.js';
+import { handleHoldRelease } from './protocol/hold_release.js';
 import { handleExportScope } from './protocol/export_scope.js';
 import { handleQuarantineReview } from './protocol/quarantine_review.js';
 import { handleGrant } from './protocol/grant.js';
@@ -46,9 +47,13 @@ import { openCompileQueue, runCompileBatch, startCompileWorker } from './compile
 async function initialize(dataDir: string): Promise<SmartwareConfig> {
   ensurePrivateDirectory(dataDir);
   ensurePrivateDirectory(path.join(dataDir, 'evidence'));
-  ensurePrivateDirectory(path.join(dataDir, 'wiki', 'personal'));
-  ensurePrivateDirectory(path.join(dataDir, 'wiki', 'workspace'));
-  ensurePrivateDirectory(path.join(dataDir, 'wiki', 'project'));
+  // Pages are written under `wiki/<category>/` (spec §9 L2 conventions: concepts,
+  // entities, decisions, synthesis, tombstones, profiles) and the compiler creates
+  // its category directory on demand (`layer2/compiler.ts`), so init creates the
+  // wiki root only. The `wiki/personal`, `wiki/workspace` and `wiki/project`
+  // directories init used to create were vestigial — nothing in the library reads
+  // or writes them (kanban t_574be8cd).
+  ensurePrivateDirectory(path.join(dataDir, 'wiki'));
 
   const config: SmartwareConfig = {
     instance_id: `smartware_${ulid()}`,
@@ -57,7 +62,7 @@ async function initialize(dataDir: string): Promise<SmartwareConfig> {
     version: SMARTWARE_VERSION,
     data_dir: dataDir,
     scopes: [
-      { id: 'self', parent: null, visibility_default: 'private' },
+      { id: POD_SELF_SCOPE, parent: null, visibility_default: 'private' },
       { id: 'workspace', parent: null, visibility_default: 'workspace' },
       { id: 'project:default', parent: 'workspace', visibility_default: 'scope' },
     ],
@@ -193,7 +198,11 @@ async function start(): Promise<void> {
       .catch((err: unknown): MCPContent => {
         if (err instanceof ProtocolError) {
           return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ error: err.code, message: err.message }) }] as [{ type: 'text'; text: string }],
+            content: [{ type: 'text' as const, text: JSON.stringify({
+              error: err.code,
+              message: err.message,
+              ...(err.details ? { details: err.details } : {}),
+            }) }] as [{ type: 'text'; text: string }],
           };
         }
         const msg = err instanceof Error ? err.message : String(err);
@@ -248,7 +257,7 @@ async function start(): Promise<void> {
       type: z.enum(['message', 'file', 'meeting', 'preference', 'decision', 'tool_output', 'feedback', 'system']).default('message'),
       content_format: z.enum(['text/markdown', 'text/plain', 'application/json']).default('text/plain'),
       content_body: z.string().describe('Observation content'),
-      scope: z.string().describe('Scope identifier (e.g. personal, project/foo)'),
+      scope: z.string().describe('Scope identifier (e.g. self, project:foo, client:acme#1)'),
       visibility: z.enum(['private', 'scope', 'workspace', 'public']).default('scope'),
       source_id: z.string().optional(),
       observed_at: z.string().optional(),
@@ -570,7 +579,7 @@ async function start(): Promise<void> {
   // ── Tool: smartware_revise (spec §9 admission payload) ─────────────────────
   server.tool(
     'smartware_revise',
-    'Revise a claim: admit relations, set confidence/epistemic_tag, adopt body, invalidate relations (user-only in beta)',
+    'Revise a claim: admit relations, set confidence/epistemic_tag, adopt body, invalidate relations, or re-pick which duplicate of a fact survives (user-only in beta)',
     {
       actor_id: z.string(),
       target: z.string(),
@@ -578,6 +587,7 @@ async function start(): Promise<void> {
       set_confidence: z.enum(['high', 'medium', 'low']).optional(),
       set_epistemic_tag: z.enum(['fact', 'inference', 'opinion', 'stale', 'contested']).optional(),
       adopt_body: z.boolean().optional(),
+      repick_survivor: z.boolean().optional(),
       reason: z.string(),
       operation_id: z.string(),
     },
@@ -592,6 +602,7 @@ async function start(): Promise<void> {
           set_confidence: args.set_confidence,
           set_epistemic_tag: args.set_epistemic_tag,
           adopt_body: args.adopt_body,
+          repick_survivor: args.repick_survivor,
           reason: args.reason,
           operation_id: args.operation_id,
         },
@@ -673,6 +684,30 @@ async function start(): Promise<void> {
       );
       return result;
     }, 'forget_scope'),
+  );
+
+  // ── Tool: smartware_hold_release ─────────────────────────────────────────
+  server.tool(
+    'smartware_hold_release',
+    'Release an open legal hold on a client scope (owner only; ADR-0009). While a hold is open, FORGET.SCOPE reason=erasure is refused (legal_hold_open) and the retention sweep skips the scope; release is the audited owner act that lifts both. Requires operation_id: the release is receipted (one hold.release ops entry) and replays idempotently under that key. Does not revive offboarded state.',
+    {
+      actor_id: z.string().describe('Owner actor ID'),
+      scope: z.string().describe('Scope id, e.g. client:acme#1'),
+      statement: z.string().optional().describe('Owner hold-release statement (non-PII), e.g. "no pending dispute / hold released"'),
+      operation_id: z.string().describe('Audit + idempotency key — the release writes exactly one hold.release ops entry under it; a retry returns the same receipt'),
+    },
+    async (args) => wrap(async () => {
+      const freshConfig = loadConfig(dataDir);
+      return handleHoldRelease(
+        {
+          actor: { type: 'person', id: args.actor_id, display_name: args.actor_id },
+          scope: args.scope,
+          statement: args.statement,
+          operation_id: args.operation_id,
+        },
+        { dataDir, opsDir, config: freshConfig },
+      );
+    }, 'hold_release'),
   );
 
   // ── Tool: smartware_export_scope ─────────────────────────────────────────

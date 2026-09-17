@@ -12,9 +12,10 @@ import { dirname } from 'node:path';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SearchIndex } from '../layer3/search.js';
-import type { SmartwareConfig } from '../config.js';
+import { substrateActorId, type SmartwareConfig } from '../config.js';
 import type { Actor, PreExtractedClaim } from '../layer0/types.js';
-import type { ClaimRole, ClaimType, EpistemicLabel } from '../layer1/types.js';
+import type { Claim, ClaimRole, ClaimType, EpistemicLabel } from '../layer1/types.js';
+import { resolveEntity } from '../layer1/entities.js';
 import { compile, isContextOnlyObservation, type CompileResult, type CompileOptions } from '../layer2/compiler.js';
 import { syncSearchFromClaims } from '../layer3/search.js';
 import type { CompileTelemetry } from '../layer2/types.js';
@@ -147,6 +148,37 @@ function materializeSemantic(
   };
 }
 
+/**
+ * What `reflect.auto` decided about ONE candidate whose fingerprint key missed but whose fact
+ * the store already holds (F1 / ADR-0005 D7). Recorded on the per-observation terminal receipt
+ * so a suppressed creation is auditable, not silent: `'corroborated'` means the observation was
+ * attached to the existing claim (`derived_from` extended); `'skipped'` means nothing was
+ * written — `'protected'` when the claim is user-owned (spec §9/§11: agents append no version of
+ * it), `'no_active_record'` when the store row says active but the canonical latest record does
+ * not (the record is the authority).
+ */
+export interface FactIdentityDecision {
+  claim_id: string;
+  decision: 'corroborated' | 'skipped';
+  reason?: 'protected' | 'no_active_record';
+  /**
+   * The classification the extraction produced, recorded only when it differs from the claim's
+   * own `claim_type`. Variant 1 (ADR-0005 D7 amendment) does not apply it — the existing claim's
+   * classification stands, and the autonomous pass may not admit a re-classification (spec §9) —
+   * but it is not dropped silently either: the receipt is where the discarded attribute is kept
+   * auditable. It is NOT a candidate: no admission path for claim classification exists in beta.
+   */
+  extraction_claim_type?: ClaimType;
+  /**
+   * The demoted duplicate the fingerprint (creation-key) lookup matched, when the observation was
+   * instead routed by fact identity to this claim (ADR-0005 F1b, kanban `t_6c39a895`). A demoted
+   * duplicate can still hold the fingerprint — the demotion lives in `superseded_by`, not in
+   * `state` — and it must not receive fresh corroboration the recall surface can never show.
+   * Names the matched claim so the routing decision is auditable rather than silent.
+   */
+  fingerprint_matched_demoted?: string;
+}
+
 /** Content-free replay checkpoint for one observation considered by REFLECT. */
 export interface ReflectAutoTerminalReceipt extends Record<string, unknown> {
   observation_id: string;
@@ -155,6 +187,7 @@ export interface ReflectAutoTerminalReceipt extends Record<string, unknown> {
   outcome: ReflectAutoTerminalOutcome;
   candidates_found?: number;
   claim_versions_written?: number;
+  fact_identity_matches?: FactIdentityDecision[];
 }
 
 export function isReflectAutoTerminalReceipt(
@@ -243,6 +276,8 @@ export interface ObservationProduction {
   outcome: ReflectAutoTerminalOutcome;
   candidates_found: number;
   records: ProducedClaim[];
+  /** Fact-identity decisions taken for this observation (F1 / ADR-0005 D7). */
+  fact_identity: FactIdentityDecision[];
   llm_tried: boolean;
   llm_failed: boolean;
   llm_skippedsensitive: boolean;
@@ -307,7 +342,7 @@ export async function produceObservationClaims(
       }];
       extractedEntities = [{ name: checkpoint.session_id, type: 'session' }];
     } catch {
-      return { outcome: 'no_claims', candidates_found: 0, records: [], llm_tried: false, llm_failed: false, llm_skippedsensitive: false };
+      return { outcome: 'no_claims', candidates_found: 0, records: [], fact_identity: [], llm_tried: false, llm_failed: false, llm_skippedsensitive: false };
     }
   } else {
     const extracted = extractDeterministic(
@@ -341,6 +376,8 @@ export async function produceObservationClaims(
 
   const allClaims = [...detClaims, ...llmClaims];
   const records: ProducedClaim[] = [];
+  /** Fact-identity decisions taken for this observation (F1 / ADR-0005 D7). */
+  const factIdentity: FactIdentityDecision[] = [];
 
   for (const claim of allClaims) {
     const content = claim.rendered_content ?? (typeof claim.object.value === 'string'
@@ -362,34 +399,100 @@ export async function produceObservationClaims(
     };
     const sensitive = obs.policy.sensitive || claim.sensitive;
 
-    const existingByFp = ctx.fingerprintIndex
-      ? ctx.fingerprintIndex.activeByFingerprint(fp)
-      : findByFingerprint(ctx.dataDir, fp)
-        ?? findSemanticMatch(ctx.dataDir, ctx.store, fp);
-    if (existingByFp) {
-      if (existingByFp.epistemic_owner === 'user') continue;
-      const existingClaim = ctx.store.getClaim(existingByFp.claim_id);
+    /**
+     * Attach this observation to an existing claim: refresh the entity hint the commit
+     * will consume, then — only while the claim is unprotected — extend `derived_from` with
+     * the observation as a new version. Shared by the fingerprint match and the
+     * fact-identity match (spec §238: "new corroborating observations attach to it,
+     * extending `derived_from` — but only while the claim is unprotected").
+     */
+    const attachCorroboration = (existing: ActiveClaimVersion): void => {
+      const existingClaim = ctx.store.getClaim(existing.claim_id);
       const existingEntity = existingClaim ? ctx.store.getEntity(existingClaim.subject_id) : undefined;
-      const existingHint = ctx.entityHints?.get(existingByFp.claim_id);
-      ctx.entityHints?.set(existingByFp.claim_id, {
+      const existingHint = ctx.entityHints?.get(existing.claim_id);
+      ctx.entityHints?.set(existing.claim_id, {
         name: existingClaim?.subject_name ?? existingHint?.name ?? entityInfo.name,
         type: existingEntity?.type ?? existingHint?.type ?? entityInfo.type,
         predicate: existingClaim?.predicate ?? existingHint?.predicate ?? claim.predicate,
         sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
       });
-      if (!existingByFp.derived_from.includes(obs.id)) {
-        const extended: ActiveClaimVersion = {
-          ...existingByFp,
-          version: existingByFp.version + 1,
-          derived_from: [...existingByFp.derived_from, obs.id],
-          version_at: ctx.commitTs,
-          operation_id: nextOperationId(),
-          actor_id: ctx.podActorId,
-          supersedes: existingByFp.version,
-        };
-        ctx.fingerprintIndex?.upsertVersion(extended);
-        records.push({ record: extended, isNew: false });
+      if (existing.derived_from.includes(obs.id)) return;
+      // The spread carries the substrate's demotion fields (ADR-0003): folding a restatement into
+      // an existing claim must not release a duplicate resolution.
+      const extended: ActiveClaimVersion = {
+        ...existing,
+        version: existing.version + 1,
+        derived_from: [...existing.derived_from, obs.id],
+        version_at: ctx.commitTs,
+        operation_id: nextOperationId(),
+        actor_id: ctx.podActorId,
+        supersedes: existing.version,
+      };
+      ctx.fingerprintIndex?.upsertVersion(extended);
+      records.push({ record: extended, isNew: false });
+    };
+
+    const existingByFp = ctx.fingerprintIndex
+      ? ctx.fingerprintIndex.activeByFingerprint(fp)
+      : findByFingerprint(ctx.dataDir, fp)
+        ?? findSemanticMatch(ctx.dataDir, ctx.store, fp);
+    // A demoted duplicate can still hold the fingerprint (the demotion lives in `superseded_by`,
+    // not in the record's `state` — F2/ADR-0003). It must not be extended with fresh evidence:
+    // the recall surface can never show it, so the corroboration belongs to the fact's surviving
+    // claim, decided by fact identity below (ADR-0005 F1b, kanban `t_6c39a895`). Falling through
+    // keeps the creation key's job anyway — the fact-identity block never mints.
+    const fpMatchIsDemoted = existingByFp ? isDemotedDuplicate(ctx, existingByFp) : false;
+    if (existingByFp && !fpMatchIsDemoted) {
+      if (existingByFp.epistemic_owner === 'user') continue;
+      attachCorroboration(existingByFp);
+      continue;
+    }
+
+    // ── F1 (ADR-0005 D7): ask fact identity before creating ─────────────────
+    // The fingerprint above answers "has this exact creation already happened?" (Rule B,
+    // ADR-0005 D2). It must never be read as a fact-identity verdict (D3): `claim_type` is
+    // classification metadata, not a truth judgment (spec §6), so a fact the store already
+    // holds under another classification is still the same fact. Rule A — (subject_id,
+    // predicate, scope, normaliseValue(object), validity.to === null) — decides that, and
+    // its survivor (earliest-minted claim id, ADR-0003 contract #2) is the claim to
+    // corroborate, exactly as a fingerprint match would.
+    const factMatch = findFactIdentityMatch(ctx, obs.scope, claim, entityInfo.type);
+    if (factMatch) {
+      const latest = latestActiveVersion(ctx, factMatch.id);
+      const demotedFpNote = fpMatchIsDemoted && existingByFp
+        ? { fingerprint_matched_demoted: existingByFp.claim_id }
+        : {};
+      if (factMatch.epistemic_owner === 'user' || latest?.epistemic_owner === 'user') {
+        // Protected: agents append no version of it — no corroboration, and no duplicate
+        // either (the fact is held; spec §9/§11). Recorded so the decision is auditable.
+        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'protected', ...demotedFpNote });
+      } else if (!latest) {
+        // The store row says active, the canonical record does not. The record is the
+        // authority: extend nothing, and mint nothing for a fact the store holds.
+        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'no_active_record', ...demotedFpNote });
+      } else {
+        attachCorroboration(latest);
+        factIdentity.push({
+          claim_id: factMatch.id,
+          decision: 'corroborated',
+          // Variant 1 consequence, made auditable: the extraction's classification is not
+          // applied (the held claim's stands) and is not silently dropped either.
+          ...(latest.claim_type !== claimType ? { extraction_claim_type: claimType } : {}),
+          ...demotedFpNote,
+        });
       }
+      continue;
+    }
+
+    // ── F1b fallback (ADR-0005 amendment of 2026-09-15, kanban `t_6c39a895`): the fingerprint
+    // matched a demoted duplicate and NO active claim asserts the fact (the survivor was
+    // forgotten or erased, or subject resolution finds nothing). The creation key still
+    // suppresses a duplicate creation — extend the matched claim, as before the amendment:
+    // the evidence is preserved on the claim the store holds, the version spread carries the
+    // demotion forward (nothing releases it), and no third claim is minted for a fact whose
+    // exact creation already happened.
+    if (existingByFp && fpMatchIsDemoted) {
+      if (existingByFp.epistemic_owner !== 'user') attachCorroboration(existingByFp);
       continue;
     }
 
@@ -429,9 +532,67 @@ export async function produceObservationClaims(
     outcome: allClaims.length === 0 ? 'no_claims' : 'claims_processed',
     candidates_found: allClaims.length,
     records,
+    fact_identity: factIdentity,
     llm_tried,
     llm_failed,
     llm_skippedsensitive,
+  };
+}
+
+/**
+ * The prior result of a REFLECT, reconstructed from the committed
+ * `reflect.explicit` entry that recorded it — protocol v0.5.0, "Idempotency
+ * and commit identity": the same OperationId plus an identical canonical
+ * payload returns the PRIOR RESULT. The entry is appended only after the
+ * compile has finished, so it is the durable record of a run that committed;
+ * its counts are that run's counts.
+ *
+ * Every count this returns comes from the entry, so the result is
+ * self-consistent — never a recorded count next to a freshly measured one
+ * (the mixed `claims_created` / `pages_compiled` result this replaces,
+ * `t_efa8d5a8`). Every telemetry count is 0 because THIS call produced
+ * nothing, and `freshness` is omitted rather than filled with a current-state
+ * read, for the same reason. `synthesis_deferred` is carried over when the
+ * recorded run deferred L2 synthesis, because that is what its prior result
+ * carried. The audit list and `git_sha` are not part of the entry, so a
+ * replayed result carries neither; the durable audit trail of the operation
+ * is the operations-log entry itself.
+ *
+ * Both counts have been recorded on every `reflect.explicit` entry written by
+ * every build in this tree (measured: the writer has emitted them since the
+ * initial commit `d8a2126`), so the guard below is fail-closed rather than a
+ * live path: an entry carrying no counts must not be reported as a 0/0 run.
+ */
+function replayedReflectResult(entry: OpLogEntry): CompileHandlerResult {
+  const claimsCreated = entry.details?.['claims_created'];
+  const pagesCompiled = entry.details?.['pages_compiled'];
+  if (typeof claimsCreated !== 'number' || typeof pagesCompiled !== 'number') {
+    throw new ProtocolError('conflict', `operation_id '${entry.operation_id}' has no replayable REFLECT result`);
+  }
+  const telemetry: CompileHandlerResult['telemetry'] = {
+    observations_processed: 0,
+    claims_extracted_per_observation: {},
+    observations_with_zero_claims: [],
+    entity_merges: [],
+    entities_created_new: [],
+    layer3_indexed_count: 0,
+    duration_ms: 0,
+    timed_out: false,
+    stage_durations_ms: {},
+    llm_extraction_attempted: 0,
+    llm_extraction_failed: 0,
+    llm_extraction_skipped_sensitive: 0,
+    llm_synthesis_attempted: 0,
+    llm_synthesis_failed: 0,
+    llm_synthesis_skipped_sensitive: 0,
+    replayed: true,
+  };
+  if (entry.details?.['synthesis_deferred'] === true) telemetry.synthesis_deferred = true;
+  return {
+    pages_compiled: pagesCompiled,
+    claims_created: claimsCreated,
+    audit: [],
+    telemetry,
   };
 }
 
@@ -448,13 +609,20 @@ export async function handleCompile(
   commitHooks?: ReflectCommitHooks,
 ): Promise<CompileHandlerResult> {
   // Omitting scope compiles ALL scopes; only the owner may do that. A non-owner
-  // must name a scope they're granted, else the 'personal' grant check would
+  // must name a scope they're granted, else a grant check on one lane would
   // authorise a compile across every scope.
   if (!params.scope && !isOwner(params.actor.id, config)) {
     throw new ProtocolError('invalid_scope', 'A scope is required to compile; only the owner may compile all scopes.');
   }
-  const targetScope = params.scope ?? 'personal';
-  requireGrant(params.actor.id, 'compile', targetScope, config);
+  // `undefined` IS the "every scope" spelling — the same absence the rest of
+  // this handler and its callees already read (CompileOptions.scope, the
+  // compiler's `if (options.scope && …)` gather guard, reflectAutoCreateClaims'
+  // scope filter, syncSearchFromClaims). Never a lane literal: filtering claim
+  // production by an unregistered lane and then naming that lane in the
+  // operations log is a scope the caller never asked for. An unnamed compile is
+  // owner-gated above, so the grant check applies only to a named lane.
+  const targetScope = params.scope;
+  if (targetScope) requireGrant(params.actor.id, 'compile', targetScope, config);
 
   if (params.operation_id && !OPERATION_ID_PATTERN.test(params.operation_id)) {
     throw new ProtocolError('invalid_parameter', `Invalid operation_id '${params.operation_id}'`);
@@ -493,6 +661,20 @@ export async function handleCompile(
     || parentEntry.actor_id !== params.actor.id
     || parentEntry.details?.['payload_hash'] !== parentPayloadHash)) {
     throw new ProtocolError('conflict', `operation_id '${params.operation_id}' was already used with a different payload`);
+  }
+  // A matched operation_id IS the prior result (protocol v0.5.0, "Idempotency
+  // and commit identity"), so the replay stops here. Continuing into the
+  // compile below re-ran claim production, L2 synthesis, L3 indexing and
+  // `reflect.auto` receipts while returning the entry's recorded
+  // `claims_created` next to a freshly measured `pages_compiled` — a result
+  // that described two different runs at once, and writes a retry did not ask
+  // for (`t_efa8d5a8`). Crash recovery is unaffected: this entry is appended
+  // only AFTER the compile returns, so an interrupted run has no entry to
+  // match and its retry compiles legitimately (fresh behaviour needs a fresh
+  // operation_id — see `docs/adr/0018-reflect-replay-returns-the-recorded-result.md`).
+  if (parentEntry) {
+    opsIndex?.close();
+    return replayedReflectResult(parentEntry);
   }
 
   let reflectionStats: ReflectAutoStats = {
@@ -565,7 +747,7 @@ export async function handleCompile(
   }
 
   const options: CompileOptions = {
-    scope: params.scope,
+    scope: targetScope,
     entityId: params.entity_id,
     useLLM: params.use_llm ?? false,
     observations: dataDir ? observations : undefined,
@@ -597,9 +779,7 @@ export async function handleCompile(
 
     const handlerResult: CompileHandlerResult = {
       pages_compiled: 0,
-      claims_created: typeof parentEntry?.details?.['claims_created'] === 'number'
-        ? parentEntry.details['claims_created']
-        : reflectionStats.claimsCreated,
+      claims_created: reflectionStats.claimsCreated,
       audit: [],
       telemetry: {
         observations_processed: 0,
@@ -621,7 +801,7 @@ export async function handleCompile(
         synthesis_deferred: true,
       },
     };
-    if (params.operation_id && commitCtx && !parentEntry) {
+    if (params.operation_id && commitCtx) {
       appendOpLogEntry(commitCtx.opsDir, {
         operation_id: params.operation_id,
         actor_id: params.actor.id,
@@ -629,7 +809,11 @@ export async function handleCompile(
         op: 'reflect.explicit',
         details: {
           payload_hash: parentPayloadHash,
-          scope: targetScope,
+          // The lane the caller named, or null for an unscoped run — never a
+          // lane literal. `null` is the same spelling `payload_hash` above is
+          // computed over, so the entry stays self-consistent, and it is
+          // distinguishable from a key the writer forgot to emit.
+          scope: targetScope ?? null,
           claims_created: reflectionStats.claimsCreated,
           pages_compiled: 0,
           synthesis_deferred: true,
@@ -666,7 +850,7 @@ export async function handleCompile(
     llm_extraction_failed: reflectionStats.llmFailed,
     llm_extraction_skipped_sensitive: reflectionStats.llmSkippedSensitive,
   };
-  if (params.operation_id && commitCtx && !parentEntry) {
+  if (params.operation_id && commitCtx) {
     appendOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
@@ -674,7 +858,7 @@ export async function handleCompile(
       op: 'reflect.explicit',
       details: {
         payload_hash: parentPayloadHash,
-        scope: targetScope,
+        scope: targetScope ?? null,
         claims_created: reflectionStats.claimsCreated,
         pages_compiled: compiled.pages.length,
       },
@@ -683,9 +867,7 @@ export async function handleCompile(
 
   const handlerResult: CompileHandlerResult = {
     pages_compiled: compiled.pages.length,
-    claims_created: typeof parentEntry?.details?.['claims_created'] === 'number'
-      ? parentEntry.details['claims_created']
-      : reflectionStats.claimsCreated,
+    claims_created: reflectionStats.claimsCreated,
     git_sha: compiled.gitSha,
     audit: compiled.audit,
     telemetry,
@@ -707,7 +889,9 @@ async function reflectAutoCreateClaims(
   dataDir: string,
   layer0: Layer0Index,
   store: ClaimStore,
-  scope: string,
+  /** The lane to compile, or `undefined` for every scope (owner-gated by the
+   *  caller) — the filter below treats absence as "no scope filter". */
+  scope: string | undefined,
   config: SmartwareConfig,
   useLLM: boolean,
   commitCtx?: CommitContext,
@@ -717,7 +901,7 @@ async function reflectAutoCreateClaims(
   fingerprintIndex?: FingerprintIndex,
   observations?: import('../layer0/types.js').Observation[],
 ): Promise<ReflectAutoCreateResult> {
-  const podActorId = `substrate:${config.instance_id.replace('smartware_', '')}`;
+  const podActorId = substrateActorId(config);
   let created = 0;
   let llmAttempted = 0;
   let llmFailed = 0;
@@ -842,6 +1026,11 @@ async function reflectAutoCreateClaims(
         {
           candidates_found: production.candidates_found,
           claim_versions_written: production.records.length,
+          // F1 (ADR-0005 D7): a suppressed creation is never silent — the receipt names the
+          // fact-identity decision so an operator can see why an observation produced nothing.
+          ...(production.fact_identity.length > 0
+            ? { fact_identity_matches: production.fact_identity }
+            : {}),
         },
       );
     }
@@ -866,6 +1055,53 @@ async function reflectAutoCreateClaims(
     committed_records: pendingRecords,
     committed_new_ids: committedNewIds,
   };
+}
+
+/**
+ * Rule A — the protocol's one fact-identity predicate (ADR-0003, ADR-0005 D1) — asked of the
+ * store for one candidate claim: `(subject_id, predicate, scope, normaliseValue(object),
+ * validity.to === null)`. Returns the survivor (earliest-minted claim id) or null.
+ *
+ * The subject is resolved with the same `resolveEntity` call the store applies when it
+ * materialises the candidate, so the `subject_id` asked about is the one the claim would carry.
+ * (A second, exact-name-only lookup would be a second entity-resolution rule — the divergence
+ * this ADR series exists to close.)
+ */
+function findFactIdentityMatch(
+  ctx: ProduceObservationContext,
+  scope: string,
+  claim: ReflectionCandidate,
+  subjectType: string,
+): Claim | null {
+  const subject = resolveEntity(claim.subject_name, subjectType, scope, ctx.store);
+  const matches = ctx.store.findActiveFactMatches(subject.id, {
+    predicate: claim.predicate,
+    scope,
+    object: claim.object,
+  });
+  return matches[0] ?? null;
+}
+
+/** Latest ACTIVE canonical version for one claim — the record is the authority for state. */
+function latestActiveVersion(ctx: ProduceObservationContext, claimId: string): ActiveClaimVersion | null {
+  const latest = ctx.fingerprintIndex
+    ? ctx.fingerprintIndex.activeByClaimId(claimId)
+    : readLatestVersion(ctx.dataDir, claimId);
+  return latest?.state === 'active' ? latest : null;
+}
+
+/**
+ * Is this canonical version a mechanically demoted duplicate? `resolveFactMatches` records the
+ * demotion on the demoted claim's own version records (`superseded_by` + `superseded_at`, F2 /
+ * ADR-0003 → *Carry-forward across hand-built version records*) and every materialisation derives
+ * the row from those records — so the record is the authority. The store row is consulted as
+ * well, so a tree without the F2 fix — where the demotion is projection-only and the record
+ * lacks the field — still routes fresh corroboration away from a claim the recall surface hides.
+ */
+function isDemotedDuplicate(ctx: ProduceObservationContext, version: ActiveClaimVersion): boolean {
+  if (version.superseded_by != null) return true;
+  const row = ctx.store.getClaim(version.claim_id);
+  return row?.superseded_by != null || row?.status === 'superseded';
 }
 
 function findByFingerprint(dataDir: string, fp: string): ActiveClaimVersion | null {

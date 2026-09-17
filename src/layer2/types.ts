@@ -1,20 +1,37 @@
 // Layer 2 — Compiled wiki types
 
-import type { EpistemicLabel } from '../layer1/types.js';
+import type { ConfidenceBucket, ClaimStatus, EpistemicLabel, EpistemicTag } from '../layer1/types.js';
 
 export interface ExportRule {
   to_scope: string;
   predicates: string[];
 }
 
-/** Spec v1.5.4.2 page categories (canonical wiki subdirectories). */
-export type PageCategory =
+/** Canonical wiki subdirectories (spec v1.5.4.2 page-category routing). */
+export type PageCategoryDir =
   | 'concepts'
   | 'entities'
   | 'decisions'
   | 'synthesis'
   | 'tombstones'
   | 'profiles';
+
+/** Spec §9 page categories. Singular in frontmatter, plural in the directory name. */
+export type PageCategory =
+  | 'concept'
+  | 'entity'
+  | 'decision'
+  | 'synthesis'
+  | 'profile'
+  | 'tombstone';
+
+/** Spec §9 category vocabulary the page frontmatter admits (profile/tombstone have their own schemas). */
+export const PAGE_FRONTMATTER_CATEGORIES: readonly PageCategory[] = [
+  'concept',
+  'entity',
+  'decision',
+  'synthesis',
+] as const;
 
 /** Spec v0.1.2 page-frontmatter notice slot. Agents post here on user pages. */
 export interface PageNotice {
@@ -25,63 +42,86 @@ export interface PageNotice {
   posted_at?: string;
 }
 
-export interface Frontmatter {
-  // ── Substrate-internal fields (legacy + ongoing) ────────────────────────
-  entity_id: string;
-  entity: string;
-  type: string;
-  scope: string;
-  epistemic: EpistemicLabel;
-  sensitive: boolean;
-  /** Observation IDs the page is grounded in (substrate-internal). */
+/**
+ * The **published** L2 page frontmatter — spec §9's "Page frontmatter" field set, which is
+ * `schemas/v0.5.0/page-frontmatter.schema.json` verbatim. This interface is a *contract*: it
+ * carries page vocabulary only, and every field here has a counterpart in the schema. The
+ * compiler's own bookkeeping lives in `PageEnvelope`, rendered into the page's cached region
+ * (see `src/layer2/envelope.ts`) — it is not part of this structure (ADR-0013 → D2).
+ */
+export type Frontmatter = {
+  title: string;
+  page_id: string;
+  category: PageCategory;
+  author: 'agent' | 'user';
+  /** ClaimIds the page cites (locked at endorsement on user-authored pages). */
   sources: string[];
-  /** ClaimIds the page synthesises. The spec calls this `sources`; we keep
-   *  `claim_ids` for back-compat and ALSO project to spec `sources_claim_ids`
-   *  for the wire-shaped output. */
-  claim_ids: string[];
-  compiled_at: string;
-  compiled_by: string;
-  model?: string;
-  prompt_hash?: string;
-  source_hashes?: string[];
-  confidence: number;
-  supersedes: string[];
-  /** Entity IDs of related pages. */
-  related: string[];
-  exports?: ExportRule[];
-
-  // ── Spec v1.5.4.2 fields (PR-6 / A5) ────────────────────────────────────
-  /** Page category — drives wiki/<category>/ directory. */
-  category?: PageCategory;
-  /** Authorship: agent (substrate-compiled) or user (endorsed/directly authored). */
-  author?: 'agent' | 'user';
-  /** ClaimIds the page cites. Endorsement cascade targets these. */
-  sources_claim_ids?: string[];
-  /** Agent-added corroborating ClaimIds. Spec calls these `supporting_claims`. */
-  supporting_claims?: string[];
-  /** Notice slot for agent annotations on user-authored pages. */
-  notices?: PageNotice[];
-  /** PageId — slug-derived. */
-  page_id?: string;
-  /** Human title; defaults to entity canonical_name. */
-  title?: string;
-  /** Compact summary; defaults to oneliner. */
-  summary?: string;
+  /** ClaimIds an agent added as corroboration after endorsement. */
+  supporting_claims: string[];
+  /** Page creation date, `YYYY-MM-DD`. */
+  created: string;
+  /** Last-update date, `YYYY-MM-DD`. */
+  updated: string;
+  scope: string;
+  confidence: ConfidenceBucket;
+  epistemic_tag: EpistemicTag;
+  summary: string;
   /** Lowercase-hyphenated tags. */
   tags?: string[];
   /** Aliases (alternate page names). */
   aliases?: string[];
-  /** Last-update timestamp; equals compiled_at on creation. */
-  updated?: string;
-  /** Durable endorsement metadata for operation recovery. */
+  /** Notice slot for agent annotations on user-authored pages. */
+  notices?: PageNotice[];
+};
+
+/**
+ * The compile/endorsement envelope — implementation mechanics, **not** protocol vocabulary
+ * (ADR-0013 → D2). It is rendered into the page's Evidence Timeline region, a derived cached
+ * render that §9 already makes agent-managed and rebuildable, so nothing authoritative depends
+ * on it: entity and sensitivity are derived from L0/L1, and the timeline may be deleted at
+ * no cost to canonical state.
+ */
+export type PageEnvelope = {
+  /** When this cached render was produced. */
+  compiled_at: string;
+  compiled_by: string;
+  entity_id: string;
+  /** Entity canonical name (the page's subject). */
+  entity: string;
+  /** Entity type in the substrate's own vocabulary. */
+  type: string;
+  /** Compiled projection of L1 sensitivity; read gating derives the authoritative value from L1. */
+  sensitive: boolean;
+  /** Observation ids this page is grounded in (the pre-fix `sources` field). */
+  source_observation_ids: string[];
+  model?: string;
+  supersedes: string[];
+  /** Entity ids of related pages. */
+  related: string[];
+  /** Durable endorsement metadata for operation recovery (written by ENDORSE). */
   endorsement_operation_id?: string;
   endorsed_by?: string;
   endorsed_at?: string;
+};
+
+/**
+ * A page as it exists on disk. `frontmatter` is typed loosely on purpose: pages written before
+ * ADR-0013 → D2 landed carry the legacy envelope fields inline, and the reader has to accept
+ * both shapes (see `readPageFile` in `./envelope.js`).
+ */
+export interface PageFile {
+  frontmatter: Record<string, unknown>;
+  /** Envelope from the cached region — or reconstructed from a legacy page's frontmatter. */
+  envelope: PageEnvelope | null;
+  body: string;
+  /** True when the frontmatter still carries pre-fix fields (needs rewriting on next write). */
+  legacy: boolean;
 }
 
 export interface CompiledPage {
   path: string;
   frontmatter: Frontmatter;
+  envelope: PageEnvelope;
   oneliner: string;
   paragraph: string;
   fullPage: string;
@@ -136,6 +176,17 @@ export interface CompileTelemetry {
    * runs separately (compile queue worker).
    */
   synthesis_deferred?: boolean;
+  /**
+   * Replay marker: true when this call did no work at all because its
+   * `operation_id` had already committed, so `claims_created` /
+   * `pages_compiled` above are the RECORDED counts of the run that did
+   * (protocol v0.5.0, "Idempotency and commit identity"). Every count here
+   * is then 0 because this call measured nothing, and `freshness` is
+   * omitted rather than filled with a current-state read — mixing a live
+   * reading into a recorded result is exactly what this flag exists to rule
+   * out. See `docs/adr/0018-reflect-replay-returns-the-recorded-result.md`.
+   */
+  replayed?: boolean;
 }
 
 /** State-based freshness counts over the raw-observation FTS window. */
@@ -144,3 +195,6 @@ export interface FreshnessCounts {
   extracted: number;
   failed: number;
 }
+
+/** Re-exported so layer-2 callers do not reach into layer 1 for the projection inputs. */
+export type { ClaimStatus, EpistemicLabel };

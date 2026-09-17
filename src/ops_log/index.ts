@@ -6,6 +6,8 @@ export { OPERATION_ID_PATTERN, isValidOperationId } from './types.js';
 export type { OpLogEntry, OpType } from './types.js';
 
 export {
+  appendCommittedOpLogEntry,
+  appendCommittedOpLogEntries,
   appendOpLogEntry,
   appendOpLogEntries,
   dayOfTimestamp,
@@ -13,11 +15,12 @@ export {
   readAllOpLogEntries,
   readOpLogDay,
 } from './log.js';
+export type { CommitFence } from './log.js';
 
 export { OpsIndex, openOpsIndex, defaultOpsIndexPath } from './ops_index.js';
 
 export { runCommit, runCommitSync } from './commit.js';
-export type { CommitContext, CommitDescriptor, CommitResult } from './commit.js';
+export type { CommitContext, CommitDescriptor, CommitResult, MutationFence } from './commit.js';
 
 export {
   persistOperationIntent,
@@ -29,6 +32,7 @@ export type {
   EndorseOperationIntent,
   ForgetOperationIntent,
   ForgetScopeOperationIntent,
+  IntentFenceStamp,
   OperationIntent,
   ObservationOperationIntent,
   OperationIntentReadRecord,
@@ -38,4 +42,11 @@ export type {
 } from './intent.js';
 
 export { classifyOrphan, runRecovery } from './recovery.js';
-export type { OrphanArtifact, RecoveryContext, RecoveryReport } from './recovery.js';
+export type {
+  OrphanArtifact,
+  RecoveryContext,
+  RecoveryFence,
+  RecoveryReport,
+  StaleEpochReason,
+  StaleEpochRejection,
+} from './recovery.js';

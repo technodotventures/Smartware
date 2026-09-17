@@ -147,35 +147,147 @@ Four things that will otherwise cost you an afternoon:
    ```ts
    const obs = await memory.observe({ /* … */ });
    if (obs.status === 'duplicate') return;      // same evidence, already in the brain
-   // and/or check the canonical key before minting:
-   //   canonicalKey(subjectId, predicate, scope, validityFrom)
+   // and/or resolve the fact before minting — see §1e:
+   const matches = store.findActiveFactMatches(subjectId, { predicate, scope, object });
    ```
 
-   `canonicalKey` is exported from the package root for exactly this check.
+   `ClaimStore.findActiveFactMatches` and `resolveFactMatches` are exported for exactly this check
+   (§1e). `canonicalKey` is not a substitute for it — see the trap in §1e.
 
 ### 1e. Corroboration, not duplication
 
 Re-observing the same fact must strengthen the claim that already asserts it, not mint a twin.
-Nothing inside Smartware wires identity to the corroboration helper for you — the host owns
-extraction, so the host owns identity. Skipped, every restatement accumulates: measured on a
-pilot, one billing preference restated twelve ways produced **14 recall results for 2 distinct
-facts**, and recall quality degrades the longer the product runs.
+Skipped, every restatement accumulates: measured on a pilot, one billing preference restated twelve
+ways produced **14 recall results for 2 distinct facts**, and recall quality degrades the longer the
+product runs.
+
+Smartware ships the identity rule **for this write path**, so you do not have to reimplement it
+there. Resolve the fact — the subject, predicate, scope and object value — rather than the canonical
+key:
 
 ```js
-import { canonicalKey } from 'smartware';
-import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
+import { resolveFactMatches } from 'smartware/layer1/corroboration';
 
-const existing = store.findByCanonicalKey(subjectId, predicate, scope, validityFrom);
-if (existing) {
-  addCorroborationEvidence(existing.id, observation.id, store);  // dedupes, recomputes confidence
-  syncSearchFromClaims(store, searchIndex, scope);                // recall must see the new confidence
+const matches = store.findActiveFactMatches(subjectId, { predicate, scope, object });
+if (matches.length > 0) {
+  const res = resolveFactMatches({ store, matches, observationId: observation.id });
+  // res = { claimId, ambiguous_matches, ambiguity_resolved, superseded_claims,
+  //         supporting_evidence, confidence }
+  syncSearchFromClaims(store, searchIndex, scope);   // recall must see the union
 } else {
-  store.insertClaim({ /* ...a new claim... */ });
+  store.insertClaim({ /* ...a new claim... */ });     // nothing asserts this fact yet
+  syncSearchFromClaims(store, searchIndex, scope);
 }
 ```
 
-`canonicalKey(subjectId, predicate, scope, validityFrom)` is the identity the store looks claims
-up by — the same value your `insertClaim` put in `validity.from`.
+`findActiveFactMatches(subjectId, { predicate, scope, object })` returns **every** active claim
+asserting that fact (same subject, predicate, scope and object value, `validity.to === null`), in
+survivor order — so `matches[0]` is the survivor even if you only need the id.
+
+`resolveFactMatches` then applies one rule, in both directions:
+
+- **One match is corroboration.** The new observation is more evidence for the claim that already
+  asserts the fact; its id is added to `supporting_evidence` and confidence is recomputed.
+- **Several matches is ambiguity, and it is resolved — never picked.** When a store already holds
+  two active claims for one fact, the survivor is the **lexicographically smallest claim id**. Claim
+  ids are ULIDs (time-ordered), so that means *earliest minted wins*, independent of the row order
+  the store happens to return.
+- **Evidence is unioned into the survivor before the losers are demoted.** A duplicate is the same
+  fact observed again, so dropping its observations would lose provenance the brain already has.
+- **Losers are demoted, never deleted** — `status: 'superseded'`, `superseded_by: <survivor>`,
+  timestamped. They stay auditable on disk and leave the recall-eligible set (`status === 'active'`),
+  which is what stops recall answering the same question twice. The demotion is recorded in the
+  demoted claim's own **canonical version records** (`superseded_by`, `superseded_at`) and the row is
+  re-derived from them, so it survives a compile-path row sync and a full canonical replay — it is
+  not a projection-only fact. **Every flow that touches the claim afterwards carries it forward**: a
+  user `REVISE` (whose result reports `superseded_by`, because the revision changes metadata and not
+  the asserted fact — so the claim stays out of the recall-eligible set), `FORGET`'s tombstone,
+  `REVIVE`'s restore, the endorsement cascade, consolidation's input tombstones, scope offboarding
+  and retention expiry. Nothing in beta *releases* a mechanical demotion; §10 names the boundary that
+  remains.
+- **The decision is reported.** `ambiguous_matches` and `superseded_claims` come back to the caller
+  instead of a choice being made silently.
+
+Measured end to end on a brain seeded with the pre-fix duplicate shape: recall answered **2 results
+for one fact** before resolution and **1** after, with the duplicate superseded and its evidence
+unioned into the survivor. `scripts/saas-integration-smoke.mjs` reproduces that against the
+published package surface. The rule and the reasoning behind it are recorded in
+[ADR-0003](../adr/0003-claim-fact-identity.md).
+
+**Which surface this rule governs — read this if you also run the compile path.** The identity above
+is the rule for **the host write path**: the moment you decide whether an extracted fact restates a
+claim you already hold. Smartware carries a **second, different key over the same `claims` rows**:
+the structured claim fingerprint
+(`computeStructuredClaimFingerprint` — `subject_name`, `predicate`, `object`, `scope` **and**
+`claim_type`), which `reflect.auto` uses for autonomous-creation idempotency (spec §193/§238). It is
+a *creation key*, not a fact verdict: the two rules still disagree in both measured directions, so
+do not read one as evidence about the other.
+
+- Two active rows asserting one fact that differ only in `claim_type` (say `'preference'` vs
+  `'finding'`) have **different** fingerprints and **the same** fact identity —
+  `findActiveFactMatches` returns **2** and resolves them into one. A host that leaves `claim_type`
+  unset lives here: `reflect.auto` defaults it to `'hypothesis'`, `ClaimStore` to `'finding'`.
+- Two rows whose text values differ only in case (`'Quarterly'` vs `'quarterly'`) have the **same**
+  fingerprint and **different** fact identities (fact identity does not case-fold a `text` value) —
+  one claim to a Rule-B consumer, two facts to the write path.
+
+**The creation path no longer mints that twin.** Before creating a claim, the autonomous path
+(`reflect.auto`) consults fact identity: when the store already holds the fact as an active claim it
+attaches the observation as corroboration (extending `derived_from`) instead of creating a second
+one — same protection rule as above, and against a protected (`epistemic_owner: user`) claim it
+writes nothing at all. A **demoted** duplicate is not an exception: when the fingerprint key
+matches a duplicate §1e already resolved, the observation is still routed to the fact's surviving
+claim — the demoted claim is never extended with evidence the recall surface cannot show (the
+receipt names the matched demotion, `fact_identity_matches[].fingerprint_matched_demoted`; and if
+no active claim asserts the fact, the matched claim receives the observation so the evidence is
+preserved rather than dropped). That closes the *creation* path: it does not retro-repair a store
+that already holds duplicates (the §1e sweep above converges those), and it does not make the two
+rules one rule.
+
+So a host running both surfaces must not assume the two agree: a Rule-B consumer can report
+differently from the write path on the same rows, and duplicates that predate the creation-side fix
+stay until a §1e write or sweep converges them. Nothing is silently wrong — `resolveFactMatches`
+reports what it merged — but do not build policy on the assumption that one key answers both
+questions. The relationship, its measured cases, its limits and its reversal trigger are recorded
+in [ADR-0005](../adr/0005-protocol-claim-identity.md); the write-path contract itself stays
+[ADR-0003](../adr/0003-claim-fact-identity.md). Both are pinned by tests
+(`test/layer1/fact-identity.test.ts`, `test/protocol/reflect-auto-fact-identity.test.ts`).
+
+**Do not do this** — it is what this guide used to teach:
+
+```js
+// WRONG: `getClaimsBySubject` has no ORDER BY, so this hands back whichever duplicate row SQLite
+// happens to return first. The survivor becomes row-order dependent, nothing reports that a choice
+// was made, the losers keep their evidence, and recall keeps answering twice for one fact.
+const existing = store.getClaimsBySubject(subjectId, 'active')
+  .find(c => c.predicate === predicate && c.scope === scope
+          && c.object.value === value && c.validity.to === null);
+```
+
+**The canonical key is not the fact identity.** `canonicalKey(subjectId, predicate, scope,
+validityFrom)` includes `validity_from` as an **exact string**. If your extractor stamps a fresh
+`new Date().toISOString()` on every write, no two writes ever produce the same key,
+`findByCanonicalKey` *silently never fires*, and you get duplicate accumulation back with the recipe
+apparently followed. Use the key only when `validity_from` is derived from the fact's own validity
+start (coarse enough to be stable). When the fact carries no date — the usual case for a preference
+or a decision extracted from a message — the fact *is* the identity:
+`findActiveFactMatches` + `resolveFactMatches` above. `scripts/saas-integration-smoke.mjs` asserts
+that two rows for one fact carry two different canonical keys.
+
+**Repairing a store that already accumulated duplicates.** The recipe above runs on the write path,
+so a brain built before this rule existed keeps its duplicates until the next write touching that
+fact. To converge one, sweep it — resolve every fact that has more than one active claim, with no
+new observation, so nothing is added to `supporting_evidence` that was not observed:
+
+```js
+for (const claim of store.getActiveClaims(scope)) {
+  const matches = store.findActiveFactMatches(claim.subject_id, {
+    predicate: claim.predicate, scope: claim.scope, object: claim.object,
+  });
+  if (matches.length > 1) resolveFactMatches({ store, matches });   // no observationId
+}
+syncSearchFromClaims(store, searchIndex, scope);                    // drop the demoted rows
+```
 
 **Confidence is derived, not stored input.** `addCorroborationEvidence` recomputes it from the
 claim's own fields (epistemic, evidence, recency, extraction), so a value you hand-set when
@@ -189,19 +301,6 @@ import { computeConfidence } from 'smartware/layer1/confidence';
 const claim = { /* ...fields... */ };
 claim.confidence = computeConfidence(claim);   // don't hand-set what the library will recompute
 store.insertClaim(claim);
-```
-
-The trap below applies with it: identity includes `validity_from` as an **exact string**. If your extractor stamps a
-fresh `new Date().toISOString()` on every write, no two writes ever produce the same key and
-corroboration *silently never fires* — you get duplicate accumulation back, with the recipe
-apparently followed. Either derive `validity_from` from the fact's own validity start (coarse
-enough to be stable), or, when the fact carries no date, resolve to the active claim asserting the
-same object instead:
-
-```js
-const existing = store.getClaimsBySubject(subjectId, 'active')
-  .find(c => c.predicate === predicate && c.scope === scope
-          && c.object.value === value && c.validity.to === null);
 ```
 
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
@@ -405,7 +504,7 @@ await memory.forgetScope({
 npm ci
 npm run build        # tsc → dist/
 npm run verify:schemas
-npm test             # 446 tests across 64 files, no skips
+npm test             # 497 tests across 70 files, no skips
 npm pack             # → smartware-0.7.0.tgz
 ```
 
@@ -415,10 +514,12 @@ tenant config example), README, and LICENSE. The `exports` map in
 `package.json` is the stable public surface:
 
 ```
-"."            → dist/core.js   (SmartwareCore)
+"."            → dist/core.js   (SmartwareCore, knownTime/nullTime/canonicalKey)
 "./mcp"        → dist/mcp.js    (createSmartwareMcpServer)
 "./render"     → dist/render/provenance.js
 "./layer0|1|3" → dist/layer*/…   (advanced escape hatches)
+"./layer1/corroboration" → addCorroborationEvidence, resolveFactMatches (§1e)
+"./layer1/confidence"    → computeConfidence (still exported — confidence is derived)
 "./schemas/v0.4.2/*" and "./schemas/v0.5.0/*"
 ```
 
@@ -433,12 +534,31 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 446 tests / 64 files, no skips. The Coffee-specific suites:
+- `npm test` — 512 tests / 71 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
-  indexes, erasure vs offboarding semantics, provenance integrity), and
-  `test/render/provenance-rendering.test.ts` (33 exact-string tests).
+  indexes, erasure vs offboarding semantics, provenance integrity),
+  `test/render/provenance-rendering.test.ts` (33 exact-string tests),
+  `test/layer1/fact-identity.test.ts` (22 tests: the §1e identity contract —
+  every duplicate found, earliest-minted survivor in both insertion orders,
+  evidence unioned, losers demoted not deleted, sweep without a new observation —
+  plus 3 tests pinning the *crossing* between fact identity and
+  `computeStructuredClaimFingerprint`, decided in ADR-0005),
+  `test/layer1/demotion-durability.test.ts` (12 tests: the §1e demotion is recorded
+  in canonical version records and reconstructed by a compile-path row sync and a
+  full canonical replay, live and replayed projections agreeing on the
+  recall-eligible set, including through every flow that hand-builds a version
+  record — REVISE, FORGET → REVIVE, the endorsement cascade, consolidation's input
+  tombstones, scope offboarding, retention expiry), and
+  `test/protocol/reflect-auto-fact-identity.test.ts` (5 tests: the autonomous path
+  consults fact identity before creating — corroboration instead of a duplicate,
+  protection respected, the fingerprint control, creation unchanged when no
+  claim holds the fact, and a fingerprint match on a **demoted** duplicate routed
+  to the surviving claim rather than extended onto the hidden duplicate).
+- `npm run verify:saas` — public-API smoke on the packaged surface, including the
+  §1e duplicate contract end to end: 2 recall results for one fact → 1 after
+  resolution, duplicate superseded with its evidence unioned.
 - `npm run benchmark:retrieval-kernel` — 9/9 scenarios, Hit@1 1.0, MRR 1.0,
   zero forbidden hits.
 - `npm run benchmark:retrieval-activation-contract` — expects **HOLD**; the
@@ -458,6 +578,28 @@ on the exact version you ship:
   universal sudden-power-loss durability.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts
   remain available for manual review.
+- Duplicate-claim convergence is a **write-path or sweep** action, not a background
+  guarantee. The autonomous path no longer mints a claim for a fact the store already
+  holds (it attaches corroboration — `§1e`), but a store that **already** holds two
+  active claims for one fact keeps both until a write touching that fact runs
+  `resolveFactMatches`, or a host sweeps the scope (`§1e`). Identity is
+  `(subject, predicate, scope, object value)` — two rows asserting the same fact in
+  **different scopes** are never merged, so scope isolation always wins over
+  deduplication.
+- Demotion durability has **one** boundary left. A demotion written by a library version before the
+  durability fix was projection-only and is not reconstructible from canonical data. From that fix
+  on, the demotion lives in the demoted claim's own version records and **every** flow carries it
+  forward — user `REVISE` (which reports `superseded_by` on its result, because it changes metadata
+  and not the asserted fact), the `FORGET` tombstone, `REVIVE`'s restore from the snapshot, the
+  endorsement cascade, consolidation's input tombstones, scope offboarding and retention expiry. So
+  a claim demoted as a duplicate stays out of the recall-eligible set through all of them, including
+  a later `REVIVE`. **Releasing** a mechanical demotion needs a new, explicitly user-only vocabulary
+  ("re-pick the survivor" — the loser cannot win, because the next write touching that fact would
+  re-demote it); until it ships, a demoted duplicate also stays demoted if the survivor is itself
+  forgotten, and the fact is then audit-visible only. Reasoning:
+  [`ADR-0003`](../adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built version
+  records*. Pinned by `test/layer1/demotion-durability.test.ts` plus the FORGET.SCOPE and retention
+  suites.
 - Passing schemas + behavioral invariants is **not** exhaustive
   requirement-by-requirement conformance to Specification v1.6.16.
 
@@ -471,9 +613,14 @@ Two host-triggered lifecycle surfaces, both owner/staff-gated and receipt-backed
 - **Retention expiry** — `memory.expireRetention({ actor, scope, operation_id?, as_of? })`
   (MCP `smartware_expire_retention`). Optional `retention` config (additive; absent ⇒
   `forever`, today's behavior). Tombstones elapsed `duration`-policy observations and
-  retracts their sole-evidence claims, with one `retention.expire` ops entry. Idempotent;
-  run it on a host scheduler (like `drainCompileQueue`). Physical storage reclaim is
-  `forgetScope({ reason: 'erasure' })` — there is no separate record-level purge.
+  retracts their sole-evidence claims, committing exactly ONE `retention.expire` ops entry
+  per sweep: the caller's `operation_id` when supplied — and then a retry with the same id
+  replays the recorded counts instead of sweeping again — otherwise one the substrate mints
+  for that sweep, returned as `operation_id` in the result and carried by every artifact the
+  sweep wrote (ADR-0013). Idempotent by effect: a re-run finds no new expired records, and a
+  bare retry commits its own zero-count entry. Run it on a host scheduler (like
+  `drainCompileQueue`). Physical storage reclaim is `forgetScope({ reason: 'erasure' })` —
+  there is no separate record-level purge.
 - **Consolidation** — `memory.consolidate({ actor, claim_ids[], summary, subject_name,
   predicate, scope, operation_id })` (MCP `smartware_consolidate`, user-only). Collapses
   2+ active claims into one reviewed current-understanding claim whose `derived_from` is
@@ -482,6 +629,8 @@ Two host-triggered lifecycle surfaces, both owner/staff-gated and receipt-backed
 ## References
 
 - Specification v1.6.16: `docs/spec/smartware-spec-v1.6.16.md`
+- Claim fact identity (ADR-0003): `docs/adr/0003-claim-fact-identity.md`
+- Protocol claim identity vs the autonomous-creation key (ADR-0005): `docs/adr/0005-protocol-claim-identity.md`
 - Protocol v0.5.0: `docs/protocol/smartware-protocol-v0.5.0.md` (v0.4.2 retained)
 - Schemas v0.5.0: `schemas/v0.5.0/`
 - Config-shape proof: `scripts/verify-config-shape.mjs`

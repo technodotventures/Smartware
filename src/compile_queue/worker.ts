@@ -24,7 +24,7 @@ import type { Observation } from '../layer0/types.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { Claim } from '../layer1/types.js';
 import type { SearchIndex } from '../layer3/search.js';
-import type { SmartwareConfig } from '../config.js';
+import { substrateActorId, type SmartwareConfig } from '../config.js';
 import { defaultFingerprintIndexPath, openFingerprintIndex, type FingerprintIndex } from './fingerprint.js';
 import { CompileQueue, defaultCompileQueuePath } from './queue.js';
 import { nextOperationId } from './ids.js';
@@ -40,6 +40,7 @@ import {
   openOpsIndex,
   readAllOpLogEntries,
   type CommitContext,
+  type MutationFence,
   type OpLogEntry,
   type OpsIndex,
 } from '../ops_log/index.js';
@@ -59,6 +60,8 @@ export interface CompileWorkerContext {
   searchIndex: SearchIndex;
   config: SmartwareConfig;
   opsDir?: string;
+  /** Storage-level fencing (ADR-0010); absent = unfenced caller. */
+  fence?: MutationFence | null;
   queue: CompileQueue;
   fingerprintIndex: FingerprintIndex;
 }
@@ -73,8 +76,15 @@ export interface CompileBatchResult {
   failed_observation_ids: string[];
 }
 
+/**
+ * The substrate ActorId this worker's autonomous writes carry.
+ *
+ * Kept as the compile-queue barrel's public name; mints through the one
+ * canonical helper (`substrateActorId`, src/config.ts) so the queue, the
+ * synchronous REFLECT handler and dream write the same identity.
+ */
 export function podActorId(config: SmartwareConfig): string {
-  return `substrate:${config.instance_id.replace('smartware_', '')}`;
+  return substrateActorId(config);
 }
 
 /** Body projection used by the shared production function. */
@@ -114,7 +124,9 @@ export async function runCompileBatch(
   }
 
   const actorId = podActorId(ctx.config);
-  const commitCtx: CommitContext | undefined = ctx.opsDir ? { opsDir: ctx.opsDir } : undefined;
+  const commitCtx: CommitContext | undefined = ctx.opsDir
+    ? { opsDir: ctx.opsDir, fence: ctx.fence ?? null }
+    : undefined;
   const pendingRecords: ActiveClaimVersion[] = [];
   const pendingOpEntries: OpLogEntry[] = [];
   const produce = opts.produce ?? produceObservationClaims;
@@ -168,6 +180,11 @@ export async function runCompileBatch(
       pendingOpEntries.push(reflectReceipt(obs, actorId, production.outcome, {
         candidates_found: production.candidates_found,
         claim_versions_written: production.records.length,
+        // Same audit detail as the synchronous handler: a fact-identity decision that
+        // suppressed a creation must be visible on the receipt (F1 / ADR-0005 D7).
+        ...(production.fact_identity.length > 0
+          ? { fact_identity_matches: production.fact_identity }
+          : {}),
       }));
       processedCount++;
     } catch (error) {

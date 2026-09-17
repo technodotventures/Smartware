@@ -8,7 +8,7 @@ import { assignIntegrity, computeHash } from '../layer0/integrity.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
-import type { SmartwareConfig } from '../config.js';
+import { POD_SELF_SCOPE, type SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, requireRegisteredActor, ProtocolError } from '../auth/middleware.js';
 import { TERMINAL_STATES } from '../layer0/types.js';
@@ -16,13 +16,14 @@ import {
   readLatestVersion,
   snapshotAt,
   appendClaimVersion,
+  carryDemotion,
   readClaimHistory,
   type ActiveClaimVersion,
   type ForgottenClaimVersion,
 } from '../layer1/jsonl.js';
 import { revalidateOnRevive } from '../layer1/effective_current.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   persistOperationIntent,
   readAllOpLogEntries,
@@ -185,6 +186,7 @@ export async function handleForget(
         evidenceDir,
         ...(storeDataDir ? { claimsDir: storeDataDir } : {}),
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -207,7 +209,11 @@ export async function handleForget(
       throw new ProtocolError('terminal_state', `Observation '${target.id}' is already in terminal state '${effectiveStatus}'`);
     }
     const obsRow = layer0.getDB().prepare('SELECT scope FROM observations WHERE id = ?').get(target.id) as { scope: string } | undefined;
-    scope = obsRow?.scope ?? 'personal';
+    // A missing index row cannot happen on the path above (the effective-status
+    // lookup throws `not_found` first, and `observations.scope` is NOT NULL);
+    // if it ever did, fall back to the pod's own lane rather than the pre-fix
+    // literal `personal` (kanban t_e6fce49a).
+    scope = obsRow?.scope ?? POD_SELF_SCOPE;
   } else {
     const claim = store.getClaim(target.id);
     if (!claim) {
@@ -295,7 +301,10 @@ export async function handleForget(
   if (target.type === 'claim' && storeDataDir) {
     const latest = readLatestVersion(storeDataDir, target.id);
     if (latest && latest.state === 'active') {
-      forgottenVersion = {
+      // Spec §11: the forgotten version carries forward all non-content metadata. A mechanical
+      // demotion is non-content metadata about this claim (ADR-0003), so it is carried — the
+      // tombstone must not read as an event that lifts a duplicate back into recall.
+      forgottenVersion = carryDemotion({
         claim_id: latest.claim_id,
         version: latest.version + 1,
         state: 'forgotten',
@@ -319,13 +328,14 @@ export async function handleForget(
         tags: latest.tags,
         supersedes: latest.version,
         endorsement_source: latest.endorsement_source,
-      };
+      }, latest);
     }
   }
 
   let intent: ForgetOperationIntent | null = null;
   if (params.operation_id && commitCtx) {
     const claimRecordHash = forgottenVersion ? computePayloadHash(forgottenVersion) : undefined;
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     intent = {
       version: 1,
       operation_id: params.operation_id,
@@ -333,6 +343,7 @@ export async function handleForget(
       op: 'forget',
       payload_hash: payloadHash,
       prepared_at: now,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'forget',
         audit: {
@@ -383,7 +394,7 @@ export async function handleForget(
   await replayCatchUp(evidenceDir, store, layer0, config);
 
   if (params.operation_id && commitCtx && intent) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: now,
@@ -399,7 +410,7 @@ export async function handleForget(
         claims_retracted: intent.result.claims_retracted,
         claims_reduced: intent.result.claims_reduced,
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   }
@@ -521,6 +532,7 @@ export async function handleRevive(
         evidenceDir: '',
         claimsDir: dataDir,
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -568,7 +580,7 @@ export async function handleRevive(
     return r;
   });
 
-  const revived: ActiveClaimVersion = {
+  const revived: ActiveClaimVersion = carryDemotion({
     claim_id: claimId,
     version: newVersion,
     state: 'active',
@@ -592,10 +604,11 @@ export async function handleRevive(
     revived_via: params.tombstone_id,
     endorsement_source: lastActive.endorsement_source,
     semantic: lastActive.semantic,
-  };
+  }, lastActive);
 
   if (commitCtx) {
     const recordHash = computePayloadHash(revived);
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     const intent: ReviveOperationIntent = {
       version: 1,
       operation_id: params.operation_id,
@@ -603,6 +616,7 @@ export async function handleRevive(
       op: 'revive',
       payload_hash: payloadHash,
       prepared_at: preparedAt,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'l1',
         claim_id: revived.claim_id,
@@ -625,7 +639,7 @@ export async function handleRevive(
     commitHooks?.afterIntent?.(intent);
     appendClaimVersion(dataDir, revived);
     commitHooks?.afterClaimVersion?.(revived);
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: preparedAt,
@@ -638,7 +652,7 @@ export async function handleRevive(
         invalidated_edges: invalidatedEdges,
         record_hash: recordHash,
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   } else {

@@ -9,14 +9,27 @@
 // This is deliberately NOT a new protocol verb: it composes the existing
 // tombstone + forget semantics with a `retention_expiry` reason, exactly like
 // `drainCompileQueue` is a host concern over the existing compile primitives.
+//
+// Commit identity (ADR-0013). The sweep always commits under an OperationId —
+// the caller's when one is supplied, otherwise one the substrate mints for this
+// invocation (`op_<ulid>`, the convention of the sibling host-triggered writers
+// `session.start`/`session.end` and of the dream phases) — and always appends
+// exactly one `retention.expire` entry carrying that id with the exact counts.
+// This is not decoration: `schemas/v0.5.0/claim.schema.json` requires an
+// `OperationId` on every claim version, so a sweep that stamped one on a
+// forgotten record without ever committing it would place its own canonical
+// writes in the orphan class `ops_log/recovery.ts` reserves for anomalies that
+// need manual review. A caller-supplied id means what it means everywhere else:
+// a retry with the same id replays the recorded counts instead of sweeping again.
 
 import type { Observation, Actor } from '../layer0/types.js';
+import { ulid } from 'ulid';
 import { appendObservation, readAll } from '../layer0/log.js';
 import { assignIntegrity } from '../layer0/integrity.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
-import type { SmartwareConfig } from '../config.js';
+import { isScopeHeld, loadConfig, type SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { readLatestVersion, appendClaimVersion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
@@ -54,7 +67,14 @@ export interface ExpireRetentionResult {
   scope: string;
   observations_expired: number;
   claims_retracted: number;
-  operation_id?: string;
+  /**
+   * The OperationId this sweep committed under: the caller's when supplied,
+   * otherwise the one the substrate minted for this invocation (ADR-0013). It is
+   * the `operation_id` of the single `retention.expire` entry this sweep writes.
+   */
+  operation_id: string;
+  /** Set when the sweep was skipped by an open legal hold (ADR-0009). */
+  skipped_reason?: 'legal_hold';
 }
 
 export interface RetentionDeps {
@@ -68,8 +88,9 @@ export interface RetentionDeps {
 
 function buildTombstoneMutation(
   target: Observation,
-  params: ExpireRetentionParams,
+  operationId: string,
   operationActorId: string,
+  actor: Actor,
   seq: number,
   prevHash: string | null,
   observedAt: string,
@@ -82,23 +103,24 @@ function buildTombstoneMutation(
       target: { type: 'observation', id: targetId },
       mode: 'tombstone',
       reason: 'retention_expiry',
-      operation_id: params.operation_id ?? null,
+      operation_id: operationId,
       sequence: seq,
       observed_at: observedAt,
     })}`,
     version: SMARTWARE_VERSION,
-    ...(params.operation_id ? { operation_id: params.operation_id, actor_id: operationActorId } : {}),
+    operation_id: operationId,
+    actor_id: operationActorId,
     type: 'tombstone',
     status: 'accepted',
     source: {
       app: 'mcp-client',
       app_version: SMARTWARE_VERSION,
       source_id: null,
-      actor: params.actor,
+      actor,
       captured_at: observedAt,
       observed_at: observedAt,
     },
-    scope: params.scope,
+    scope: target.scope,
     visibility: 'private',
     content: {
       format: 'application/json',
@@ -140,6 +162,15 @@ export async function handleExpireRetention(
     throw new ProtocolError('invalid_parameter', `Invalid as_of '${params.as_of}'`);
   }
 
+  // ADR-0013: the sweep always commits under an OperationId. When the caller
+  // supplies one it is the idempotency key (looked up below). When it does not,
+  // the substrate mints one for this invocation so that the audit entry and every
+  // artifact the sweep writes share one committed identity. Minted rather than
+  // derived from the payload: it identifies this sweep's commit, not a replayable
+  // request — a re-run without an id is idempotent by effect (already-tombstoned
+  // observations and already-forgotten claims are skipped), not by replay.
+  const sweepOperationId = params.operation_id ?? `op_${ulid()}`;
+
   // Idempotency: a prior sweep with this operation_id is already recorded.
   if (params.operation_id) {
     const prior = [...readAllOpLogEntries(deps.opsDir)]
@@ -152,6 +183,34 @@ export async function handleExpireRetention(
         operation_id: params.operation_id,
       };
     }
+  }
+
+  // ── Legal hold (ADR-0009): expiry never fires under a hold. The skip is
+  //    explicit and receipted — nothing is tombstoned, including evidence
+  //    written into the scope after the hold opened. Consulted after the
+  //    operation_id replay above so a sweep that already committed still
+  //    replays its recorded result.
+  if (isScopeHeld(loadConfig(deps.dataDir), params.scope)) {
+    appendOpLogEntry(deps.opsDir, {
+      operation_id: sweepOperationId,
+      actor_id: operationActorId,
+      timestamp: new Date().toISOString(),
+      op: 'retention.expire',
+      details: {
+        scope: params.scope,
+        observations_expired: 0,
+        claims_retracted: 0,
+        as_of: asOf.toISOString(),
+        skipped: 'legal_hold',
+      },
+    });
+    return {
+      scope: params.scope,
+      observations_expired: 0,
+      claims_retracted: 0,
+      operation_id: sweepOperationId,
+      skipped_reason: 'legal_hold',
+    };
   }
 
   const expired: Observation[] = [];
@@ -176,7 +235,7 @@ export async function handleExpireRetention(
 
     // Tombstone the observation (drives effective_status → tombstoned).
     seq += 1;
-    const mutation = buildTombstoneMutation(target, params, operationActorId, seq, prevHash, now);
+    const mutation = buildTombstoneMutation(target, sweepOperationId, operationActorId, params.actor, seq, prevHash, now);
     const withIntegrity = assignIntegrity(mutation, deps.config.writer_id, seq, prevHash);
     appendObservation(deps.evidenceDir, withIntegrity);
     deps.layer0.insertOrSkip(withIntegrity);
@@ -208,7 +267,9 @@ export async function handleExpireRetention(
         relations: latest.relations,
         created_at: latest.created_at,
         version_at: now,
-        operation_id: params.operation_id ?? `op_${computePayloadHash({ sweep: 'expire', claim: claim.id, seq })}`,
+        // ADR-0013: the same committed id as the sweep's ops entry, so the
+        // forgotten version is never an uncommitted-id artifact.
+        operation_id: sweepOperationId,
         actor_id: params.actor.id,
         tags: latest.tags,
         supersedes: latest.version,
@@ -224,25 +285,27 @@ export async function handleExpireRetention(
     await replayCatchUp(deps.evidenceDir, deps.store, deps.layer0, deps.config);
   }
 
-  if (params.operation_id) {
-    appendOpLogEntry(deps.opsDir, {
-      operation_id: params.operation_id,
-      actor_id: operationActorId,
-      timestamp: now,
-      op: 'retention.expire',
-      details: {
-        scope: params.scope,
-        observations_expired: expired.length,
-        claims_retracted: claimsRetracted,
-        as_of: asOf.toISOString(),
-      },
-    });
-  }
+  // ADR-0013: exactly one entry per sweep, always — the sweep's commit signal.
+  // Written even when nothing was expired: the sweep ran (the same rule spec
+  // §dream states for a clean, no-op phase), and a caller-supplied id needs its
+  // entry present for the next call to replay rather than re-sweep.
+  appendOpLogEntry(deps.opsDir, {
+    operation_id: sweepOperationId,
+    actor_id: operationActorId,
+    timestamp: now,
+    op: 'retention.expire',
+    details: {
+      scope: params.scope,
+      observations_expired: expired.length,
+      claims_retracted: claimsRetracted,
+      as_of: asOf.toISOString(),
+    },
+  });
 
   return {
     scope: params.scope,
     observations_expired: expired.length,
     claims_retracted: claimsRetracted,
-    operation_id: params.operation_id,
+    operation_id: sweepOperationId,
   };
 }

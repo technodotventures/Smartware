@@ -4,7 +4,7 @@ import type { Observation, Actor } from '../layer0/types.js';
 import { appendObservation } from '../layer0/log.js';
 import { assignIntegrity } from '../layer0/integrity.js';
 import type { Layer0Index } from '../layer0/index.js';
-import type { SmartwareConfig } from '../config.js';
+import { POD_SELF_SCOPE, type SmartwareConfig } from '../config.js';
 import { revokeGrant } from '../auth/grants.js';
 import { requireOwner, ProtocolError } from '../auth/middleware.js';
 import { SMARTWARE_VERSION } from '../version.js';
@@ -60,7 +60,10 @@ export async function handleRevoke(
       captured_at: now,
       observed_at: now,
     },
-    scope: 'personal',
+    // The pod's own lane, same as GRANT: a substrate audit record about a
+    // consent change, not host content (pre-fix literal `personal` — kanban
+    // t_e6fce49a).
+    scope: POD_SELF_SCOPE,
     visibility: 'private',
     content: {
       format: 'application/json',

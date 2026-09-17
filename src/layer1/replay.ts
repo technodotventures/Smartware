@@ -11,8 +11,8 @@ import { compatibilityValidity, inferredTime, knownTime, nullTime } from './type
 import type { SmartwareConfig } from '../config.js';
 import { resolveEntity } from './entities.js';
 import { computeConfidence } from './confidence.js';
-import { detectConflict, applySemanticConflict, applyTemporalSupersession } from './conflicts.js';
-import { addCorroborationEvidence, removeEvidenceFromClaims } from './corroboration.js';
+import { admitClaim } from './conflicts.js';
+import { removeEvidenceFromClaims } from './corroboration.js';
 
 const COMPILER_VERSION = '0.6.1';
 const YIELD_EVERY = 50;
@@ -188,26 +188,10 @@ function handleClaimExtracted(obs: Observation, store: ClaimStore, config?: Smar
         contested_by: [],
       };
 
-      const conflict = detectConflict(draftClaim, store);
-      if (conflict.type === 'corroboration' && conflict.existingClaim) {
-        addCorroborationEvidence(conflict.existingClaim.id, parentObsId, store);
-      } else if (conflict.type === 'semantic_conflict' && conflict.existingClaim) {
-        draftClaim.confidence = computeConfidence(draftClaim);
-        store.insertClaim(draftClaim);
-        applySemanticConflict(conflict.existingClaim.id, draftClaim.id, store);
-      } else if (conflict.type === 'temporal_supersession' && conflict.existingClaim) {
-        draftClaim.confidence = computeConfidence(draftClaim);
-        store.insertClaim(draftClaim);
-        applyTemporalSupersession(
-          conflict.existingClaim.id,
-          draftClaim.id,
-          store,
-          draftClaim.t_ingested,
-        );
-      } else {
-        draftClaim.confidence = computeConfidence(draftClaim);
-        store.insertClaim(draftClaim);
-      }
+      // One policy for every write path. Extraction replay and host-side claim
+      // persistence both go through admitClaim, so replay cannot drift from the
+      // admission semantics hosts get (corroborate / contest / supersede).
+      admitClaim(draftClaim, store);
     } catch (error) {
       console.warn(`[replay] Skipped malformed claim in event ${obs.id}:`, error);
     }

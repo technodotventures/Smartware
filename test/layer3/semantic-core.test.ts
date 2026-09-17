@@ -118,6 +118,7 @@ describe('SmartwareCore semantic document boundary', () => {
         scope: 'workspace/default',
       })).toThrow(/does not allow reads/);
 
+      // P0-7: no grant row at all ⇒ `actor_unregistered` (see requireGrant).
       expect(() => core.prepareSemanticDocuments({
         actor: {
           type: 'agent',
@@ -125,7 +126,7 @@ describe('SmartwareCore semantic document boundary', () => {
           display_name: 'Unregistered',
         },
         scope: 'workspace/default',
-      })).toThrow(/does not have 'query' permission/);
+      })).toThrow(/is not registered with this Pod/);
     } finally {
       core.close();
     }

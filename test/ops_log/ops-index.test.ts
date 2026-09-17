@@ -53,7 +53,7 @@ describe('OpsIndex rebuild equivalence', () => {
   it('rebuildIndex reproduces the canonical log in order (multi-day, details round-trip)', () => {
     const entries = [
       makeEntry('observe', '2026-04-01T09:00:00Z', { payload_hash: 'a'.repeat(64), observation_id: 'obs_1' }),
-      makeEntry('recall', '2026-04-01T10:30:00Z', { query: 'x' }),
+      makeEntry('forget.scope', '2026-04-01T10:30:00Z', { scope: 'client:acme#1', reason: 'offboarding' }),
       makeEntry('reflect.explicit', '2026-04-02T08:00:00Z', { scope: 'workspace', claims_created: 2 }),
       makeEntry('reflect.auto', '2026-04-02T11:00:00Z', { observation_id: 'obs_2' }),
     ];
@@ -104,7 +104,7 @@ describe('OpsIndex lookups', () => {
 
   it('getManyByOperationIds returns only the requested present entries', () => {
     const a = makeEntry('observe', '2026-04-01T09:00:00Z');
-    const b = makeEntry('recall', '2026-04-02T09:00:00Z', { query: 'y' });
+    const b = makeEntry('forget.scope', '2026-04-02T09:00:00Z', { scope: 'client:acme#2', reason: 'erasure' });
     appendOpLogEntry(opsDir, a);
     appendOpLogEntry(opsDir, b);
 
@@ -144,7 +144,7 @@ describe('OpsIndex incremental catch-up', () => {
     expect(index.count()).toBe(1);
 
     // Append two more entries (a new day + same-day append) and re-catch-up.
-    const b = makeEntry('recall', '2026-04-01T11:00:00Z');
+    const b = makeEntry('forget.scope', '2026-04-01T11:00:00Z');
     const c = makeEntry('forget', '2026-04-02T09:00:00Z');
     appendOpLogEntry(opsDir, b);
     appendOpLogEntry(opsDir, c);
@@ -162,7 +162,7 @@ describe('OpsIndex incremental catch-up', () => {
 
   it('catchUp repairs a rewritten day file (same-day truncation/rewrite)', () => {
     const a = makeEntry('observe', '2026-04-01T09:00:00Z');
-    const b = makeEntry('recall', '2026-04-01T10:00:00Z');
+    const b = makeEntry('forget.scope', '2026-04-01T10:00:00Z');
     appendOpLogEntry(opsDir, a);
     appendOpLogEntry(opsDir, b);
 
@@ -182,7 +182,7 @@ describe('OpsIndex incremental catch-up', () => {
 
   it('catchUp purges entries of a day file that disappears', () => {
     const a = makeEntry('observe', '2026-04-01T09:00:00Z');
-    const b = makeEntry('recall', '2026-04-02T09:00:00Z');
+    const b = makeEntry('forget.scope', '2026-04-02T09:00:00Z');
     appendOpLogEntry(opsDir, a);
     appendOpLogEntry(opsDir, b);
 

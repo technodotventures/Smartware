@@ -6,10 +6,11 @@ import type { SmartwareConfig } from '../config.js';
 import type { ScopeRegistry } from '../scopes/registry.js';
 import type { Actor } from '../layer0/types.js';
 import type { ConfidenceBucket, EpistemicTag } from '../layer1/types.js';
+import { epistemicToTag } from '../layer1/types.js';
 import { assembleContext, type QueryFilters, type AssembledContext } from '../layer4/assembly.js';
 import type { ScoredResult } from '../layer4/scoring.js';
 import type { TemporalConstraint } from '../layer3/temporal.js';
-import { ProtocolError } from '../auth/middleware.js';
+import { ProtocolError, requireGrant } from '../auth/middleware.js';
 import type { SessionStore } from '../session/store.js';
 import { requireSessionCapability, resolveActorFromSession } from './session.js';
 
@@ -49,6 +50,8 @@ export interface QueryResult {
       predicate: string;
       object: unknown;
       epistemic: string;
+      /** Spec-conformant epistemic tag (fact/inference/opinion/stale/contested). */
+      epistemic_tag: EpistemicTag;
       confidence: number;
       status: string;
       observation_ids: string[];
@@ -56,8 +59,23 @@ export interface QueryResult {
       invalid_at: string | null;
       recorded_at: string | null;
       invalidated_at: string | null;
+      /** Set when this claim was superseded by a later, explicitly admitted fact. */
+      superseded_by: string | null;
+      /** Claims this one is in unresolved disagreement with (contested pairs/triples). */
+      contested_by: string[];
     };
   }>;
+  /**
+   * Raw hits the scope's derived claim/page lane returned BEFORE the
+   * authorization/lifecycle eligibility filters run (`assembleContext`).
+   * The lane is derived and updated incrementally, and some rows are
+   * deliberately kept through a lifecycle change (FORGET's claim-FTS rows;
+   * the retention sweep's mirror of them — see forget_scope.ts:519-537), so
+   * these counters can differ from a freshly rebuilt lane by exactly those
+   * kept rows even though `results` is rebuild-equivalent. `filtered_out`
+   * counts hits the eligibility filters (authorized snapshot, temporal,
+   * entity-type) dropped.
+   */
   total_found: number;
   filtered_out: number;
   query_scope: string;
@@ -110,6 +128,12 @@ export async function handleQuery(
     actorId = resolved.actor_id;
   }
 
+  // §7 ACCESS enforcement at the protocol boundary: RECALL was the one lane
+  // that answered an unauthorized scope with an empty result instead of a
+  // denial — indistinguishable from "no memory" for the host, and a gap P0-7
+  // closes. (The authorized snapshot below still filters independently.)
+  requireGrant(actorId, 'query', params.scope, config);
+
   const filters: QueryFilters = {
     minConfidence,
     epistemic: params.epistemic,
@@ -146,6 +170,7 @@ export async function handleQuery(
           predicate: r.claim.predicate,
           object: r.claim.object,
           epistemic: r.claim.epistemic,
+          epistemic_tag: epistemicToTag(r.claim.epistemic, r.claim.status),
           confidence: r.claim.confidence,
           status: r.claim.status,
           observation_ids: [...r.claim.supporting_evidence],
@@ -153,6 +178,8 @@ export async function handleQuery(
           invalid_at: r.claim.t_valid_to.value,
           recorded_at: r.claim.t_ingested.value,
           invalidated_at: r.claim.t_invalidated.value,
+          superseded_by: r.claim.superseded_by,
+          contested_by: [...r.claim.contested_by],
         }
       : undefined,
   }));

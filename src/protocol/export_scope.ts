@@ -9,7 +9,11 @@
 //     in the operation closure and (b) forget.scope audit markers for the
 //     target (they live in the POD scope by design and reference the scope id).
 //   - Content = canonical records only. Derived indexes (FTS, vector, pages,
-//     ops-index SQLite, compile queue) are regenerable and excluded.
+//     ops-index SQLite, compile queue) are regenerable and excluded. Scope-level
+//     mutation markers (forget.scope audit records, pod scope) travel WITH a
+//     retained-scope package: they reference the scope id and are its replay
+//     evidence, so a restored offboarded scope comes back tombstoned. A
+//     post-erasure package stays empty (deletion certificate only).
 //   - Post-erasure export of an erased scope: empty package + deletion
 //     certificate reference (marker obs id + operation_id) — the erasure
 //     proof is portable. (The raw evidence-log records of an erased scope
@@ -44,7 +48,25 @@ import { ensurePrivateDirectory, writePrivateFile } from '../storage/private-fs.
 export const EXPORT_ID_PATTERN = /^exp_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 export const EXPORT_PROTOCOL_VERSION = 'v0.5.0';
-export const EXPORT_SCHEMA_VERSION = 'v0.5.0';
+
+/**
+ * The schema set that covers the bytes this package ships — the v0.5.0 wire
+ * contract's records PLUS the L0 evidence record schema, which the v0.5.0 set
+ * does not describe (`observation.schema.json` is the observation object on the
+ * wire; it rejects the record envelope by construction — ADR-0013). The v0.5.1
+ * set is the v0.5.0 set plus `observation-record.schema.json`, additively: no
+ * v0.5.0 schema byte moves, and this manifest names the set that actually
+ * covers `observations.jsonl` / `evidence.jsonl` (kanban t_f1157ed4).
+ */
+export const EXPORT_SCHEMA_VERSION = 'v0.5.1';
+
+/**
+ * The `$id` of the L0 evidence record schema — the validator for the record
+ * bytes in `observations.jsonl` and `evidence.jsonl`. Named explicitly in the
+ * manifest so a consumer does not have to infer it from the set version.
+ */
+export const EXPORT_RECORD_SCHEMA =
+  'https://smartware.dev/schemas/v0.5.1/observation-record.schema.json';
 
 const CONTENT_FILES = [
   'observations',
@@ -82,6 +104,12 @@ export interface DeletionCertificate {
 export interface ExportManifest {
   protocol: string;
   schemas: string;
+  /**
+   * `$id` of the schema that validates `observations.jsonl` / `evidence.jsonl`.
+   * Named explicitly because those files carry the L0 record, which the wire
+   * schema set does not describe (ADR-0013).
+   */
+  record_schema: string;
   export_id: string;
   scope: string;
   exported_at: string;
@@ -217,6 +245,24 @@ export async function handleExportScope(
     ? []
     : allObservations.filter(obs => obs.scope === params.scope);
 
+  // Scope-level mutation markers for the target (forget.scope audit records).
+  // They live in the POD scope by design and reference the scope id, so the
+  // contract lists them as the ONE permitted cross-scope content record
+  // (§10c.4). They TRAVEL with a retained-scope package: they are the replay
+  // evidence that makes a restored offboarded scope come back tombstoned
+  // instead of resurrecting raw evidence in the raw window. A post-erasure
+  // package stays empty — the deletion certificate is the reference.
+  const scopeMarkerRecords = eraseMarker
+    ? []
+    : allObservations.filter(obs => {
+        if (obs.type !== 'erasure') return false;
+        const body = (typeof obs.content.body === 'object' && obs.content.body) as Record<string, unknown> | null;
+        return body?.['target_kind'] === 'scope' && body['scope'] === params.scope;
+      });
+  const scopedObservationRecords = eraseMarker
+    ? []
+    : [...observationRecords, ...scopeMarkerRecords];
+
   const claimRecords = [
     ...iterAllClaimVersions(dataDir),
   ].filter(record => record.scope === params.scope);
@@ -243,7 +289,7 @@ export async function handleExportScope(
   // Operation closure: every ops entry referenced by the exported records +
   // every forget.scope audit entry for the target (cross-scope by design).
   const referencedOpIds = new Set<string>();
-  for (const obs of observationRecords) if (obs.operation_id) referencedOpIds.add(obs.operation_id);
+  for (const obs of scopedObservationRecords) if (obs.operation_id) referencedOpIds.add(obs.operation_id);
   for (const record of claimRecords) referencedOpIds.add(record.operation_id);
   for (const obs of evidenceRecords) if (obs.operation_id) referencedOpIds.add(obs.operation_id);
   const operationRecords = [...readAllOpLogEntries(opsDir)].filter(entry =>
@@ -257,7 +303,7 @@ export async function handleExportScope(
   ensurePrivateDirectory(packageDir);
 
   const fileRecords: Record<ExportContentFile, unknown[]> = {
-    observations: observationRecords,
+    observations: scopedObservationRecords,
     claims: claimRecords,
     evidence: evidenceRecords,
     operations: operationRecords,
@@ -266,7 +312,7 @@ export async function handleExportScope(
 
   const digests: Record<string, string> = {};
   const counts: ExportCounts = {
-    observations: observationRecords.length,
+    observations: scopedObservationRecords.length,
     claims: claimRecords.length,
     evidence: evidenceRecords.length,
     operations: operationRecords.length,
@@ -282,6 +328,7 @@ export async function handleExportScope(
   const manifest: ExportManifest = {
     protocol: EXPORT_PROTOCOL_VERSION,
     schemas: EXPORT_SCHEMA_VERSION,
+    record_schema: EXPORT_RECORD_SCHEMA,
     export_id: exportId,
     scope: params.scope,
     exported_at: new Date().toISOString(),

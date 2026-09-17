@@ -16,12 +16,14 @@ import type {
   RelationKind,
   RelationProvenance,
 } from './types.js';
+import type { TypedValue } from '../layer0/types.js';
 import {
   compatibilityValidity,
   confidenceToBucket,
   epistemicToTag,
   inferredTime,
   knownTime,
+  normaliseValue,
   nullTime,
   statusToState,
 } from './types.js';
@@ -30,6 +32,26 @@ import { computeStructuredClaimFingerprint } from './fingerprint.js';
 import { resolveEntity } from './entities.js';
 import { dirname } from 'node:path';
 import { ensurePrivateDirectory, ensurePrivateFile } from '../storage/private-fs.js';
+
+/**
+ * OperationId stamped on an L1 record written by a legacy/migration path that carries no
+ * OperationId of its own — an `insertClaim` caller that omits `operation_id` (pre-A3 rows, hosts
+ * that mint none). Its ActorId counterpart is `substrate:legacy` (see the JSONL append below).
+ *
+ * The value MUST satisfy the contract the library publishes:
+ * `schemas/v0.5.0/common.schema.json#/$defs/OperationId` is `^op_[0-9A-HJKMNP-TV-Z]{26}$` —
+ * Crockford base32, which excludes I, L, O and U. This is an all-zero ULID body with the `A3` tail
+ * that marks the PR-4/A3 legacy-backfill convention: the same value `tombstone-backfill.ts` stamps
+ * on backfilled tombstones (`LEGACY_OPERATION_ID` there, alongside `substrate:legacy-migration`),
+ * so one value identifies every record the library had to write without a real OperationId, and it
+ * is distinguishable from any real one by construction.
+ *
+ * History: the placeholder used here was `op_LEGACY00000000000000000000`, whose `L` that pattern
+ * rejects (measured on kanban t_9e124fe6, fixed by t_85817375). Records written before the fix
+ * still carry it; readers should treat both values as "no real OperationId" rather than trusting
+ * the shape.
+ */
+export const LEGACY_OPERATION_ID = 'op_000000000000000000000000A3';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS entities (
@@ -392,7 +414,18 @@ export class ClaimStore {
     // Spec-conformant fields default to spec-compliant values when the
     // caller hasn't supplied them. Legacy callers continue to work; new
     // emitters (PR-5+) populate explicitly.
-    const state: ClaimState = claim.state ?? statusToState(claim.status);
+    //
+    // `state` is the one field that is NOT a caller input: it is this record envelope's projection
+    // of `status`, and deriving it here is what keeps a claim's row and its canonical line telling
+    // the same story. `statusToState` is total and many-to-one (`retracted` → `forgotten`,
+    // everything else → `active`), and `claimVersionVals` rebuilds `status` from a record's `state`
+    // — so a caller-supplied `state` that contradicts the `status` beside it describes a row that
+    // disagrees with its own canonical line, and silently discards whichever of the two the caller
+    // meant. It did exactly that on the replay correction path: `handleCorrection` (`reason:
+    // 'wrong'` / `'extraction_error'`) mutates `status` on a claim it read back with `getClaim`,
+    // whose explicit `state` is stale by construction, so the retraction never reached the log
+    // (measured, kanban t_ef77c695 → ADR-0016). Callers that set both consistently see no change.
+    const state: ClaimState = statusToState(claim.status);
     const author: ClaimAuthor = claim.author ?? 'agent';
     const epistemicOwner: ClaimAuthor = claim.epistemic_owner ?? author;
     const claimType: ClaimType = claim.claim_type ?? 'finding';
@@ -481,7 +514,7 @@ export class ClaimStore {
         ? claim.object.value
         : JSON.stringify(claim.object.value);
       const version = this.nextVersionFor(claim.id);
-      const opId = operationId ?? 'op_LEGACY00000000000000000000';
+      const opId = operationId ?? LEGACY_OPERATION_ID;
       const actId = actorId ?? 'substrate:legacy';
       const fp = computeStructuredClaimFingerprint(
         claim.subject_name,
@@ -508,6 +541,23 @@ export class ClaimStore {
         operation_id: opId,
         actor_id: actId,
         tags: [],
+        // Spec §6 defines `supersedes` as "the prior version number this version replaces", and the
+        // published record contract requires it for version > 1 (`claim.schema.json`: `if version >= 2
+        // then required supersedes`). Every other writer of the canonical surface sets it — FORGET,
+        // retention, consolidation, FORGET.SCOPE and REVISE all hand-build `supersedes: latest.version`
+        // — while this one derived the number (from `nextVersionFor`) and then dropped it, so every
+        // version ≥ 2 record it appended failed the contract (measured kanban t_3ba3ee39).
+        // A version-1 record names nothing: a claim can be *born* forgotten on the legacy/migration
+        // and `replay.ts` retraction paths, and there is no prior version to point at — which is why
+        // `claim.schema.json`'s forgotten branch does not require this field (ADR-0014).
+        ...(version > 1 ? { supersedes: version - 1 } : {}),
+        // A demotion rides the canonical record, not just the derived row: without this,
+        // re-materialising the record (compile-path sync) or replaying the log restores the
+        // duplicate to the recall-eligible set. `t_invalidated` is the demotion commit time
+        // when the caller stamped one; otherwise the record's own commit time stands in.
+        ...(claim.status === 'superseded' && claim.superseded_by != null
+          ? { superseded_by: claim.superseded_by, superseded_at: claim.t_invalidated.value ?? versionAt }
+          : {}),
       };
       const record: ClaimVersionRecord = state === 'active'
         ? {
@@ -625,7 +675,13 @@ export class ClaimStore {
     const semantic = v.state === 'active' ? v.semantic : undefined;
     const confNum = v.confidence === 'high' ? 0.9 : v.confidence === 'medium' ? 0.5 : 0.2;
     const epist = v.epistemic_tag === 'fact' ? 'user_confirmed' : 'inferred';
-    const status = v.state === 'active' ? 'active' : 'retracted';
+    // Derived from the canonical record, never from the row being replaced: the row is
+    // rebuild-equivalent only if this derivation is a pure function of the record. A demoted
+    // duplicate carries `superseded_by`/`superseded_at` on its own version records, so a
+    // compile-path sync or a replay reconstructs the demotion instead of restoring the row.
+    const supersededBy = v.state === 'active' ? (v.superseded_by ?? null) : null;
+    const supersededAt = supersededBy ? (v.superseded_at ?? v.version_at) : null;
+    const status = v.state === 'active' ? (supersededBy ? 'superseded' : 'active') : 'retracted';
     const now = v.created_at;
     const existingEntity = existing ? this.getEntity(existing.subject_id) : undefined;
     const entityName = semantic?.subject_name
@@ -667,7 +723,7 @@ export class ClaimStore {
       v.claim_id, entityId, entityName, predicate, object.type, JSON.stringify(object.value),
       v.scope, validityFrom, validityTo,
       now, 'known', null,
-      null, 'null', null,
+      supersededAt, supersededAt ? 'known' : 'null', null,
       tValidFromValue, tValidFromState, tValidFromBasis,
       tValidToValue, tValidToState, tValidToBasis,
       existing?.source_event_id ?? v.derived_from[0] ?? '',
@@ -675,7 +731,7 @@ export class ClaimStore {
       JSON.stringify(v.derived_from), extraction?.method ?? 'deterministic',
       extraction?.model ?? null, extraction?.compiler_version ?? '0.6.1',
       extraction?.prompt_hash ?? null, extraction?.extracted_at ?? now, status, epist, confNum, sensitive,
-      existing?.superseded_by ?? null, JSON.stringify(existing?.contested_by ?? []),
+      supersededBy, JSON.stringify(existing?.contested_by ?? []),
       v.state, v.author, v.epistemic_owner, v.claim_type, v.claim_role,
       v.version_at, v.created_at, v.operation_id, v.actor_id, JSON.stringify(v.relations),
     ];
@@ -760,6 +816,23 @@ export class ClaimStore {
     return rows.map(row => this.rowToClaim(row));
   }
 
+  findActiveFactMatches(
+    subjectId: string,
+    fact: { predicate: string; scope: string; object: TypedValue },
+  ): Claim[] {
+    const wanted = normaliseValue(fact.object);
+    return this.getClaimsBySubject(subjectId, 'active')
+      .filter(claim =>
+        claim.predicate === fact.predicate
+        && claim.scope === fact.scope
+        && claim.validity.to === null
+        && normaliseValue(claim.object) === wanted)
+      // Survivor order: claim ids are ULIDs (time-ordered), so the smallest id is the
+      // earliest-minted claim. Returning the list in that order means `matches[0]` is the
+      // survivor even for a caller that ignores the rest.
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
   getActiveClaims(scope?: string): Claim[] {
     const sql = scope
       ? "SELECT * FROM claims WHERE status IN ('active', 'stale') AND scope = ?"
@@ -813,16 +886,36 @@ export class ClaimStore {
     }
   }
 
-  updateClaimStatus(id: string, status: ClaimStatus, supersededBy?: string, invalidatedAt?: ClaimTimeValue): void {
+  updateClaimStatus(
+    id: string,
+    status: ClaimStatus,
+    supersededBy?: string,
+    invalidatedAt?: ClaimTimeValue,
+    /**
+     * Event-valid closure: when a claim is superseded by one whose validity
+     * starts later, its own valid window ends at that start (only applied when
+     * the window is still open — an already-closed window is history).
+     */
+    validTo?: ClaimTimeValue,
+  ): void {
     const claim = this.getClaim(id);
     if (!claim) return;
     claim.status = status;
     claim.state = statusToState(status);
-    if (supersededBy !== undefined) {
-      claim.superseded_by = supersededBy;
+    if (status === 'superseded') {
+      if (supersededBy !== undefined) {
+        claim.superseded_by = supersededBy;
+      }
+    } else {
+      // `superseded_by` only means something while the claim is superseded; leaving a stale
+      // pointer behind is the same defect class as a demotion that exists only in the row.
+      claim.superseded_by = null;
     }
     if (invalidatedAt) {
       claim.t_invalidated = invalidatedAt;
+    }
+    if (validTo && claim.t_valid_to.state === 'null') {
+      claim.t_valid_to = validTo;
     }
     claim.validity = compatibilityValidity(claim.t_valid_from, claim.t_valid_to, claim.t_ingested);
     this.insertClaim(claim);

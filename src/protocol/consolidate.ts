@@ -18,6 +18,7 @@ import type {
 } from '../layer1/types.js';
 import {
   appendClaimVersion,
+  carryDemotion,
   readLatestVersion,
   type ActiveClaimVersion,
   type ForgottenClaimVersion,
@@ -27,7 +28,7 @@ import type { ClaimStore } from '../layer1/store.js';
 import type { SmartwareConfig } from '../config.js';
 import { requireRegisteredActor, ProtocolError } from '../auth/middleware.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   readAllOpLogEntries,
   type CommitContext,
@@ -157,7 +158,10 @@ export async function handleConsolidate(
 
   // Tombstone each input (forgotten version supersedes its latest active).
   for (const input of inputs) {
-    const forgotten: ForgottenClaimVersion = {
+    // An input may itself be a mechanically demoted duplicate (it is `state: active`, spec §6), and
+    // the tombstone carries that forward — ADR-0003. The consolidated claim below is a NEW claim and
+    // inherits no demotion state.
+    const forgotten: ForgottenClaimVersion = carryDemotion({
       claim_id: input.claim_id,
       version: input.version + 1,
       state: 'forgotten',
@@ -181,13 +185,13 @@ export async function handleConsolidate(
       tags: input.tags,
       supersedes: input.version,
       endorsement_source: input.endorsement_source,
-    };
+    }, input);
     appendClaimVersion(dataDir, forgotten);
     store.syncFromJsonlVersion(forgotten);
   }
 
   if (commitCtx) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: now,
@@ -200,7 +204,7 @@ export async function handleConsolidate(
         scope: params.scope,
         reason: params.reason ?? '',
       },
-    });
+    }, commitCtx.fence);
   }
 
   return {

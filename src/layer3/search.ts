@@ -2,6 +2,7 @@
 
 import Database from 'better-sqlite3';
 import type { CompiledPage, FreshnessCounts } from '../layer2/types.js';
+import { stripEnvelopeBlock } from '../layer2/envelope.js';
 import type { Claim, Entity } from '../layer1/types.js';
 import type { ClaimStore } from '../layer1/store.js';
 import { dirname } from 'node:path';
@@ -60,6 +61,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS observation_search_index USING fts5(
   captured_at UNINDEXED,
   source_app UNINDEXED,
   source_id UNINDEXED,
+  source_ref UNINDEXED,
   sensitive UNINDEXED,
   status UNINDEXED,
   freshness UNINDEXED,
@@ -108,6 +110,8 @@ export interface ObservationSearchResult {
   captured_at: string;
   source_app: string;
   source_id: string | null;
+  /** Registered source id this evidence came from (null on legacy records). */
+  source_ref: string | null;
   sensitive: boolean;
   /** Effective status at index time (accepted/quarantined/tombstoned/...). */
   status: string;
@@ -135,6 +139,7 @@ export interface ObsIndexRow {
   captured_at: string;
   source_app: string;
   source_id: string | null;
+  source_ref: string | null;
   sensitive: boolean;
   status: string;
   freshness: ObservationFreshness;
@@ -163,6 +168,7 @@ export function observationToIndexRow(
     captured_at: obs.source.captured_at,
     source_app: obs.source.app,
     source_id: obs.source.source_id ?? null,
+    source_ref: obs.source.source_ref ?? null,
     sensitive: obs.policy.sensitive,
     status: opts.status ?? obs.status,
     freshness: opts.freshness ?? 'unverified',
@@ -206,9 +212,10 @@ export class SearchIndex {
     this.db.exec(CLAIM_FTS_SCHEMA);
     // Derived-shape migration: the observation FTS is wipe-and-rebuildable
     // from the evidence JSONL, so a stale shape (an earlier dev build without
-    // the metadata columns / meta table) is dropped and recreated. Data loss
-    // is impossible — syncObservationsFromEvidence rebuilds at open.
-    if (obsFtsSql && !obsFtsSql.sql.includes('obs_id UNINDEXED')) {
+    // the metadata columns / meta table, or without `source_ref`) is dropped
+    // and recreated. Data loss is impossible — syncObservationsFromEvidence
+    // rebuilds at open.
+    if (obsFtsSql && !obsFtsSql.sql.includes('source_ref UNINDEXED')) {
       this.db.exec('DROP TABLE IF EXISTS observation_search_index');
       this.db.exec('DROP TABLE IF EXISTS observation_meta');
       this.db.exec('DROP TABLE IF EXISTS observation_freshness');
@@ -220,13 +227,15 @@ export class SearchIndex {
 
   /** Index or re-index a compiled page */
   indexPage(page: CompiledPage): void {
-    const { entity_id, entity, scope } = page.frontmatter;
+    const { entity_id, entity } = page.envelope;
+    const { scope } = page.frontmatter;
 
     // Index only the page BODY, not the YAML frontmatter. Frontmatter fields
     // (type, scope, epistemic, model, ids, dates) are metadata, not content —
     // indexing them pollutes full-text search (e.g. "person" matching every
-    // `type: person` page and cross-contaminating results).
-    const body = page.raw.replace(/^---\n[\s\S]*?\n---\n/, '');
+    // `type: person` page and cross-contaminating results). The derived
+    // envelope block inside the body is machine metadata for the same reason.
+    const body = stripEnvelopeBlock(page.raw.replace(/^---\n[\s\S]*?\n---\n/, ''));
 
     // Delete old entry
     this.db.prepare("DELETE FROM search_index WHERE entity_id = ?").run(entity_id);
@@ -314,9 +323,23 @@ export class SearchIndex {
     }
   }
 
-  /** Count indexed pages */
+  /**
+   * Count entity/topic FTS rows.
+   *
+   * One row per entity indexed as a topic (with its active claims' text), plus
+   * one row per active claim whose entity was not indexed as a topic. This is
+   * NOT a page count (pages are Layer 2 — `countWikiPages`), NOT the
+   * claim-granular lane (`countClaims`), and NOT the raw-observation lane
+   * (`countObservations`). Written down because the old STATUS field labelled
+   * this number `indexed` and read as "everything is indexed".
+   */
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) as c FROM search_index').get() as { c: number }).c;
+  }
+
+  /** Count rows in the claim-granular FTS lane (`claim_search_index`). */
+  countClaims(): number {
+    return (this.db.prepare('SELECT COUNT(*) as c FROM claim_search_index').get() as { c: number }).c;
   }
 
   // ── Observation raw-search index (v0.5.0, spec §10a) ──────────────────────
@@ -454,8 +477,8 @@ export class SearchIndex {
       ??= this.db.prepare(`
       INSERT INTO observation_search_index
         (obs_id, scope, type, actor_id, observed_at, captured_at,
-         source_app, source_id, sensitive, status, freshness, content)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         source_app, source_id, source_ref, sensitive, status, freshness, content)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const inserted = insert.run(
       obs.obs_id,
@@ -466,6 +489,7 @@ export class SearchIndex {
       obs.captured_at,
       obs.source_app,
       obs.source_id,
+      obs.source_ref,
       obs.sensitive ? 1 : 0,
       obs.status,
       obs.freshness,
@@ -527,7 +551,7 @@ export class SearchIndex {
     try {
       rows = this.db.prepare(`
         SELECT o.obs_id, o.type, o.scope, o.actor_id, o.observed_at, o.captured_at,
-               o.source_app, o.source_id, o.sensitive, o.status,
+               o.source_app, o.source_id, o.source_ref, o.sensitive, o.status,
                COALESCE(m.freshness, 'unverified') as freshness, o.content, o.rank
         FROM observation_search_index o
         LEFT JOIN observation_meta m ON m.obs_id = o.obs_id
@@ -548,6 +572,7 @@ export class SearchIndex {
       captured_at: row.captured_at as string,
       source_app: row.source_app as string,
       source_id: row.source_id as string | null,
+      source_ref: (row.source_ref as string | null) ?? null,
       sensitive: Boolean(row.sensitive),
       status: row.status as string,
       freshness: row.freshness as ObservationFreshness,
@@ -752,13 +777,19 @@ export class SearchIndex {
  */
 export function syncSearchFromClaims(store: ClaimStore, searchIndex: SearchIndex, scope?: string): number {
   const entities = store.getAllEntities(scope);
-  const allActive = store.getActiveClaims(scope);
-  searchIndex.replaceClaimIndex(allActive, scope);
+  // Statuses that stay in the working index. A contested claim is unresolved,
+  // not non-current: dropping it from the index is what made recall answer a
+  // disagreement with silence (P0-2). Superseded/retracted claims are history —
+  // they stay out of the working index and are reached through explicit
+  // history/as-of reads (which scan the authorized snapshot directly).
+  const indexable = store.getAllClaims(scope)
+    .filter(claim => claim.status !== 'superseded' && claim.status !== 'retracted');
+  searchIndex.replaceClaimIndex(indexable, scope);
   let indexed = 0;
   const indexedEntityIds = new Set<string>();
 
   for (const entity of entities) {
-    const claims = allActive
+    const claims = indexable
       .filter(c => c.subject_id === entity.id && c.status === 'active');
     if (claims.length === 0) {
       // All claims retracted/superseded/stale — drop the entity from the index
@@ -773,7 +804,7 @@ export function syncSearchFromClaims(store: ClaimStore, searchIndex: SearchIndex
     indexed++;
   }
 
-  for (const claim of allActive) {
+  for (const claim of indexable) {
     if (indexedEntityIds.has(claim.subject_id)) continue;
     if (claim.status !== 'active') continue;
 

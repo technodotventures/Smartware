@@ -100,7 +100,7 @@ flowchart TD
     Q2 -->|No| Q3{Goal state}
     Q3 -->|Reversible - maybe returns| OFF[Offboarding F2]
     Q3 -->|Gone forever - trust break or legal erasure| ERA[Erasure F3]
-    HOLD --> HRELEASE{Hold released? owner attestation}
+    HOLD --> HRELEASE{Hold released? owner act hold.release}
     HRELEASE -->|Yes| ERA
     HRELEASE -->|Still pending| HOLD
 ```
@@ -121,15 +121,15 @@ After offboarding: client scope data is out of recall (zero results), grants rev
 | Step | Owner action | Substrate | Outcome |
 |------|--------------|-----------|---------|
 | 1 | Owner gate | `requireOwner` | — |
-| 2 | Attestation: "no pending dispute / request verified / hold released" | recorded in the ops entry | the evidence-for-the-dispute went through the hold lane instead |
+| 2 | Hold release: "no pending dispute / request verified / hold released" | `hold.release { statement }` (owner-only, receipted; ADR-0009) | the hold opens at offboarding; while open, `FORGET.SCOPE{erasure}` is refused (`legal_hold_open`). Release is what lifts it |
 | 3 | Snapshot? (default YES; DSR lane: NO) | `smartware_export_scope` | export_id linked in the erasure ops entry |
-| 4 | Confirm irreversible (client left permanently; no legal right retained) | `FORGET.SCOPE{reason:erasure}` | physical purge every lane; scope entry removed; `#1` permanently retired |
+| 4 | Confirm irreversible (client left permanently; no legal right retained) | `FORGET.SCOPE{reason:erasure}` | physical purge every lane; scope entry removed; `#1` permanently retired; optional `attestation` string still recorded (payload identity) |
 | 5 | Receipt = **deletion certificate** | audit marker (operation_id + exact counts + hash chain) | owner can produce proof-of-erasure forever |
 
 **Post-erasure facts (verified by conformance t_58b66030):** zero recall results in every lane *and against a rebuilt index*; `#1` marker non-reusable; a returning client gets `#2` and inherits nothing.
 
 ### Why erasure never fires under dispute
-Erasure deletes the evidence needed to defend. The hold lane keeps the data (tombstoned, out of recall, grants revoked) and holds the snapshot. When the hold releases (owner attestation), erasure runs — or the business re-engages via F4.
+Erasure deletes the evidence needed to defend. The hold lane keeps the data (tombstoned, out of recall, grants revoked) and holds the snapshot — and since ADR-0009 the substrate itself enforces the gate: offboarding **opens a legal hold**, erasure on an open hold is **refused** (`legal_hold_open`), and the retention sweep **skips** held scopes. When the owner releases the hold (`hold.release`, a receipted act), erasure runs — or the business re-engages via F4.
 
 ---
 
@@ -185,7 +185,7 @@ Render shape: `learned from ⟨source type⟩ ⟨date⟩; corrected ⟨date⟩` 
 | Substrate | FORGET.SCOPE (erasure/offboarding), owner_pointer, same-commit revocation, non-reusable markers, audits | SHIPPED v0.5.0 (G2) | tech-head | none |
 | Substrate | `smartware_export_scope` + manifest | **SHIPPED (G3.1)** — owner-only, one-scope boundary, canonical package + manifest, idempotent per operation_id, export-before-erasure link (`details.export_id`) | tech-head | none — can ship before Coffee window |
 | Substrate | import/restore verb (portability round-trip) | CONTRACT defined (re-import-equivalence acceptance test) | tech-head | G4 — after export impl |
-| Substrate | explicit legal-hold marker | v1 = composition (offboarding + export + attestation); explicit marker = G4 decision | @user / tech-head | G4 |
+| Substrate | explicit legal-hold marker | **BUILT (ADR-0009, 2026-09-15 — pre-production gate, card t_463c1ff9): `config.holds` + audited `hold.release`** — offboarding opens the hold; erasure refused (`legal_hold_open`); sweep skips (`skipped: legal_hold`); release is the receipted owner act | tech-head | none — Coffee F3 calls `hold.release` at the attestation step |
 | Coffee | F1–F5 UX (gates, receipts, pointer builder, attribution) | DESIGNED; unimplemented (Coffee repo) | Coffee team | Coffee release window — **@user dates** |
 | Coffee | client data-rights request intake (owner-mediated v1) | DESIGNED | Coffee team | Coffee window |
 
@@ -193,7 +193,7 @@ Render shape: `learned from ⟨source type⟩ ⟨date⟩; corrected ⟨date⟩` 
 1. Coffee release window (plan G3: "no dates until Coffee's window is known").
 2. Which flows ship in the launch cut vs after — recommendation: F2/F3/F5 (zero new substrate work; F3 needs the export tool for its default lane), F1 as the substrate tool before window (cheapest, unblocks everything).
 3. Does G3.1 (`smartware_export_scope`) ship substrate-side now? Recommended YES — it has no Coffee dependency and F1/F3 both consume it.
-4. Legal-hold: explicit substrate marker (G4) vs v1 composition (offboarding + export + owner attestation). Composition is sufficient; recommend explicit marker only if a dispute actually happens before Coffee grows.
+4. Legal-hold: **CLOSED 2026-09-15 — the substrate marker ships (ADR-0009, pre-production gate)**. Offboarding opens the hold; erasure is refused while it is open; the sweep skips held scopes; the owner releases it with `hold.release` (receipted). Coffee F3 calls release at the attestation step; scopes offboarded before the marker have no hold entry and erase as before.
 
 ---
 
@@ -207,3 +207,4 @@ Render shape: `learned from ⟨source type⟩ ⟨date⟩; corrected ⟨date⟩` 
 | Zero-results-every-lane + marker non-reuse, asserted against rebuilt indexes | conformance t_58b66030 (`test/conformance/v050-rebuild-forget-provenance.test.ts`, 14 tests) |
 | Exact-id grants; `client:*` / `client:acme#*` never match; #2 never authorizes #1 | t_400a42f8 (`scripts/verify-config-shape.mjs`); spec §10b.2, §10b.5 |
 | Observation shape (scope field), claim versions (scope), ops entry (`details` only) | `src/layer0/types.ts:74`, `src/layer1/jsonl.ts`, `src/ops_log/types.ts:33` |
+| Legal-hold marker (ADR-0009): offboarding opens the hold in the same commit; erasure refused (`legal_hold_open`, operation_id unconsumed); sweep skips held scopes (post-hold evidence preserved); release is owner-only, receipted, idempotent per required operation_id; replay re-publishes a lost config release | [ADR-0009](../adr/0009-explicit-legal-hold-marker.md); `config.holds` (`src/config.ts`); `src/protocol/hold_release.ts` (`handleHoldRelease`); MCP tool `smartware_hold_release`; `test/conformance/r_legal_hold_composition.test.ts` (R1–R6) + `q_lifecycle_composition` C8 |

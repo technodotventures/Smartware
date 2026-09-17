@@ -42,31 +42,45 @@ beforeEach(() => {
   };
   registry = new ScopeRegistry(config);
 
-  // Index a test page
+  // Index a test page. The page is built in the published vocabulary (spec §9 ==
+  // `page-frontmatter.schema.json`), with the compile envelope in its own structure — the
+  // frontmatter no longer carries `entity_id`/`compiled_at` (ADR-0013 → D2).
   const page: CompiledPage = {
     path: '/fake/path/alice.md',
     frontmatter: {
+      title: 'Alice Johnson',
+      page_id: 'page_alice-johnson',
+      category: 'entity',
+      author: 'agent',
+      sources: [],
+      supporting_claims: [],
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      scope: 'personal',
+      confidence: 'high',
+      epistemic_tag: 'inference',
+      summary: 'Alice Johnson: senior engineer',
+    },
+    envelope: {
+      compiled_at: '2024-01-01T00:00:00Z',
+      compiled_by: 'test',
       entity_id: `entity_${ulid()}`,
       entity: 'Alice Johnson',
       type: 'person',
-      scope: 'personal',
-      epistemic: 'observed',
       sensitive: false,
-      sources: [],
-      claim_ids: [],
-      compiled_at: new Date().toISOString(),
-      compiled_by: 'test',
-      confidence: 0.8,
+      source_observation_ids: [],
       supersedes: [],
       related: [],
     },
     oneliner: 'Alice Johnson: senior engineer',
     paragraph: 'Alice Johnson is a senior engineer working on Smartware.',
     fullPage: '## Alice Johnson\n\nAlice Johnson is a senior engineer.',
-    raw: 'entity_id: ' + `entity_${ulid()}` + '\nAlice Johnson is a senior engineer.',
+    raw: '',
   };
-  // Set the correct entity_id in raw so it can be parsed
-  page.raw = `---\nentity_id: ${page.frontmatter.entity_id}\nentity: Alice Johnson\ntype: person\nscope: personal\nepistemic: observed\nsensitive: false\nsources: []\nclaim_ids: []\ncompiled_at: 2024-01-01T00:00:00Z\ncompiled_by: test\nconfidence: 0.8\nsupersedes: []\nrelated: []\n---\n\nAlice Johnson is a senior engineer.\n`;
+  page.raw = `---\ntitle: Alice Johnson\npage_id: page_alice-johnson\ncategory: entity\nauthor: agent\n`
+    + 'sources: []\nsupporting_claims: []\ncreated: 2026-01-01\nupdated: 2026-01-01\nscope: personal\n'
+    + 'confidence: high\nepistemic_tag: inference\nsummary: "Alice Johnson: senior engineer"\n'
+    + '---\n\nAlice Johnson is a senior engineer.\n';
   searchIndex.indexPage(page);
 });
 

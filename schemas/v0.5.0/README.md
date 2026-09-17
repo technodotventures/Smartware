@@ -12,6 +12,58 @@ retained under `schemas/v0.4.2` and remains valid for five-verb conformance
 claims (see the protocol contract's change history — a migration note, not a
 break).
 
+A companion set, [`schemas/v0.5.1`](../v0.5.1/README.md), is this set **plus one
+additive schema** — `observation-record.schema.json`, the L0 evidence record that
+this set does not describe (see *Which schema covers which surface* below). No
+file in this set moves for it, and v0.5.0 conformance claims are unaffected.
+
+## What `claim.schema.json` describes
+
+`claim.schema.json` describes the **L1 claim version record** — one line on the
+canonical L1 JSONL surface (spec §5 "L1 — Claim Store", §6 "The Claim Model"),
+which is the record the reference implementation appends. Its required set is the
+spec §6 required set; beyond it the schema enumerates the record-envelope fields
+the implementation carries: the forget-specific fields, the demotion/release
+warrants, and the optional extraction materialization block (`semantic`).
+
+The block is optional (records written before v0.6 omit it), carries no
+independent epistemic authority — `confidence` / `epistemic_tag` remain the
+canonical values (spec §6 → *Implementation note*) — and is not a wire field: no
+protocol request or response carries it, and nothing in it is required. It is
+enumerated so that a record the implementation writes is accepted by the contract
+it publishes; the alternative (declaring the L1 line a deliberately unvalidated
+superset of the spec §6 version) was rejected. The decision, its consequences and
+the measured divergences it does **not** cover: [ADR-0011](../../docs/adr/0011-claim-record-materialization-block.md).
+
+## Scope vocabulary (closed at v0.5.0; host-registered lanes are not `Scope` values)
+
+`common.schema.json` `$defs/Scope` enumerates the **protocol's** lane vocabulary:
+`self`, `workspace`, `project:<slug>`, `agent:<slug>`, `client:<id>`,
+`client:<id>#n`. It admits no host-lane form.
+
+A host may register further lane ids in its own scope registry
+(`SmartwareCore.ensureScopes`), and the reference implementation's pod-profile
+helper does exactly that with `pod/<pod>/<lane>` ids. Those are
+**host-registered lanes**: legitimate registry ids and live product scope ids,
+but not v0.5.0 `Scope` values. A canonical record whose `scope` is a
+host-registered lane is outside this vocabulary, and therefore outside the
+v0.5.0 schema-conformance claim — the contract's conformance boundary requires
+schema validity on every canonical write. A host that needs v0.5.0
+schema-conformant records writes protocol-native lanes. The decision (and the
+recommendation to define a host-lane form in a later protocol revision) is
+[ADR-0015](../../docs/adr/0015-host-registered-lanes-and-the-substrate-actor-id.md);
+`test/schemas-v0.5.0.test.ts` pins the closed vocabulary and
+`test/layer1/pod-profile-conformance.test.ts` pins what the writers emit.
+
+`supersedes` is required of every version > 1, in every state (its own
+`allOf` branch, matching the property's description). It is **not** required on a
+version-1 record, including a version-1 *forgotten* record: a claim can be born
+forgotten — a legacy/migration row, or a retraction of a claim that has no
+canonical version of its own — and there is no prior version for it to name.
+[ADR-0014](../adr/0014-forgotten-version-supersedes.md) settled both halves of
+that (the writer now names the prior version it replaces; the forgotten branch
+stopped requiring a field the writer had no valid value for).
+
 Changes vs v0.4.2 (schema-surface only):
 
 - `common.schema.json` `$defs/Scope` widened to admit `client:<id>` and
@@ -25,6 +77,48 @@ Changes vs v0.4.2 (schema-surface only):
 `integrity-manifest-entry.schema.json` describes an optional post-beta surface.
 Its presence does not make the integrity manifest a beta requirement.
 
+## Which schema covers which surface
+
+Three surfaces are easy to confuse. An integrator validating Smartware records should
+use the schema named here and no other (ADR-0013, kanban `t_0920aa1d`):
+
+| surface | what it is | what validates it |
+|---|---|---|
+| `observation.schema.json` | **the observation object on the wire** — the OBSERVE payload (`content`, `source` identifier string, `scope`, `metadata{timestamp, actor, informed_by, tags}`, `idempotency_key`) plus the server-stamped `observation_id`, `operation_id`, `actor_id` | itself |
+| `<data_dir>/evidence/<date>.jsonl` (one line per observation) | **the L0 record** — the append-only storage envelope. It carries the wire payload's information under different names (`id`, `source.app`, `source.observed_at`, `source.actor`) **plus** canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` tamper-evidence chain | `observation-record.schema.json` in the **v0.5.1 set** — **not in this set** (v0.5.0 is frozen; the record schema is additive, see the gap below) |
+| `page-frontmatter.schema.json` | **L2 page frontmatter** (spec §9) for `wiki/<category>/<slug>.md` | itself |
+
+**Known gaps, disclosed rather than silently relaxed** (both carded with measured
+evidence; the measurement is `test/layer0/l0-record-wire-boundary.test.ts` and the
+rationale is ADR-0013):
+
+1. **The L0 record shape is not in this set — it is published in v0.5.1.**
+   `observation.schema.json` (this set) describes the observation object on the wire and rejects the
+   evidence line by construction (4 `required`, 9 `additionalProperties`, `/source:type`); the record
+   has its own schema, `schemas/v0.5.1/observation-record.schema.json`, which is the validator for
+   `<data_dir>/evidence/<date>.jsonl` **and for the byte-identical copies `EXPORT.SCOPE` ships in
+   `observations.jsonl` / `evidence.jsonl`**. It ships additively (no v0.5.0 byte moves) and an export
+   package's manifest names it explicitly (`"schemas": "v0.5.1"` + `"record_schema"`), so the
+   portability claim matches the bytes.
+2. **The reference implementation's compiled page frontmatter does not yet validate
+   against `page-frontmatter.schema.json`.** The compiler emits the L2 page with a
+   legacy internal envelope and a different vocabulary (`category` plural,
+   `confidence` numeric, `epistemic` for `epistemic_tag`, observation ids under
+   `sources`); the schema's field set is the normative one, and spec §9 prints the same field set
+   (`tags`, `aliases` and `notices` optional). The writer fix is carded. `page-frontmatter.schema.json`
+   is the contract
+   for that artifact — do not read the implementation's current output as an
+   alternative contract.
+
+`tombstone-frontmatter.schema.json` covers `wiki/tombstones/*.md` and
+`profile-frontmatter.schema.json` covers `wiki/profiles/*.md`; the page schema's
+`category` enum deliberately excludes `tombstone` and `profile` for that reason.
+Spec §9 prints the **wider union** in its single "Page frontmatter" block —
+`category: concept | entity | decision | synthesis | profile | tombstone` — so an
+integrator following that block literally routes `profile` and `tombstone` pages to
+`profile-frontmatter.schema.json` / `tombstone-frontmatter.schema.json`, not to
+`page-frontmatter.schema.json`, which rejects those two values with `/category:enum`.
+
 Canonical relation schemas intentionally reject `origin: model` and
 `origin: reviewed`: model output is a derived candidate, and delegated reviewed
 admission is post-beta. In beta, epistemic edges are user-admitted; autonomous
@@ -33,7 +127,11 @@ invariants are unchanged in v0.5.0.
 
 The repository schema test compiles every file with AJV 2020 and exercises
 positive and negative fixtures for claim protection, relation admission,
-REVISE, context bundles, the widened Scope pattern, and FORGET.SCOPE requests.
+REVISE, context bundles, the widened Scope pattern, FORGET.SCOPE requests, the
+claim record's extraction materialization block (optional, closed, and
+required-field-complete when present), and the forgotten-version `supersedes`
+rule (version 1 free, version > 1 required, forget-specific fields still
+mandatory).
 
 ## Delivery-planning profile
 

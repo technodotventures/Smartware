@@ -1,0 +1,337 @@
+{
+  "$id": "https://smartware.dev/schemas/v0.5.1/observation-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "L0 evidence record",
+  "description": "The append-only L0 record — one line of <data_dir>/evidence/<date>.jsonl (spec §5 'L0 — Observation Log'), and the bytes EXPORT.SCOPE ships in observations.jsonl / evidence.jsonl. It is NOT the observation object on the wire: `observation.schema.json` (v0.5.0) describes the contract's OBSERVE payload plus the server-stamped identity, where `source` is an identifier string and `content` may be a bare string. Here `source` is the nested provenance object, `content` is always {format, body}, and the record additionally carries canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` chain that is the L0 tamper-evidence surface. The schema is closed and enumerates the record the reference writer appends (ADR-0013, kanban t_f1157ed4).",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "type",
+    "status",
+    "source",
+    "scope",
+    "visibility",
+    "content",
+    "provenance",
+    "policy",
+    "integrity"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "../v0.5.0/common.schema.json#/$defs/ObservationId"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The substrate version that wrote the record (src/version.ts's SMARTWARE_VERSION at write time, e.g. '0.7.0'). Historical records keep the version that wrote them; the schema pins the shape of the string, not the current release."
+    },
+    "operation_id": {
+      "$ref": "../v0.5.0/common.schema.json#/$defs/OperationId"
+    },
+    "actor_id": {
+      "$ref": "../v0.5.0/common.schema.json#/$defs/ActorId"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "message",
+        "file",
+        "meeting",
+        "preference",
+        "decision",
+        "tool_output",
+        "claim_extracted",
+        "correction",
+        "tombstone",
+        "redaction",
+        "compaction",
+        "feedback",
+        "consent_change",
+        "quarantine_review",
+        "system",
+        "agent_run_started",
+        "agent_run_completed",
+        "agent_action_proposed",
+        "agent_action_approved",
+        "agent_action_rejected",
+        "workflow_run_started",
+        "workflow_run_completed",
+        "task_created",
+        "task_completed",
+        "meeting_brief_created",
+        "followup_drafted",
+        "erasure"
+      ],
+      "description": "The observation type the writer stamped (src/layer0/types.ts — ObservationType). Not every value is written by the v0.5.0 verbs: `consent_change` (grant/revoke), `quarantine_review`, `correction`, `tombstone`/`redaction` (FORGET) and `erasure` (the FORGET.SCOPE audit marker) come from the lifecycle surfaces, and the agent/workflow/task kinds are declared for host writers."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "quarantined"
+      ],
+      "description": "The status the record was written with. Effective status (tombstoned / redacted / rejected / erased) is computed by the derived index from later mutation records and is NOT stored on this line."
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "app",
+        "app_version",
+        "source_id",
+        "actor",
+        "captured_at",
+        "observed_at"
+      ],
+      "properties": {
+        "app": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The app that submitted the observation (e.g. 'mcp-client', 'smartware')."
+        },
+        "app_version": {
+          "type": "string",
+          "description": "The submitting app's own version — not necessarily the substrate's version in `version`."
+        },
+        "source_id": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The source's own item id, when it has one. Drives legacy source-level dedup."
+        },
+        "actor": {
+          "type": "object",
+          "required": [
+            "type",
+            "id",
+            "display_name"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "person",
+                "agent",
+                "system"
+              ]
+            },
+            "id": {
+              "$ref": "../v0.5.0/common.schema.json#/$defs/ActorId"
+            },
+            "display_name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "captured_at": {
+          "$ref": "../v0.5.0/common.schema.json#/$defs/Iso8601",
+          "description": "When the substrate captured the record (server-stamped)."
+        },
+        "observed_at": {
+          "$ref": "../v0.5.0/common.schema.json#/$defs/Iso8601",
+          "description": "When the observation happened (caller-supplied or captured time)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "$ref": "../v0.5.0/common.schema.json#/$defs/Scope",
+      "description": "The lane the record was written in. This is the shared Scope vocabulary (ADR-0015): host-registered lanes (e.g. `pod/<pod>/<lane>`) and any id the vocabulary does not admit are outside this set's conformance claim, not silently widened here."
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "private",
+        "scope",
+        "workspace",
+        "public"
+      ]
+    },
+    "content": {
+      "type": "object",
+      "required": [
+        "format",
+        "body"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "text/markdown",
+            "text/plain",
+            "application/json"
+          ],
+          "description": "The declared content format. A format outside this enum is outside the writer's declared input contract (the MCP surface enforces the same three values) and therefore outside this set."
+        },
+        "body": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            },
+            {
+              "type": "array"
+            }
+          ],
+          "description": "The content itself — a string, or the structured object the app submitted (e.g. an attachment descriptor). Its internal shape is app-owned and deliberately not enumerated."
+        }
+      },
+      "additionalProperties": false
+    },
+    "claims": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "Deprecated pre-v1.6.16 pre-extracted claim block. OBSERVE writes L0 only — a non-empty value is rejected with `invalid_parameter` before any write (protocol v0.5.0: 'never accepts or creates claims'), so the reference writer emits this key empty or omits it. Enumerated because the writer can carry an empty array; a record carrying claim entries is a pre-v1.6.16 artifact and is outside this set's accepted shape."
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "parent_ids",
+        "supersedes",
+        "context"
+      ],
+      "properties": {
+        "parent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The records this one is derived from or targets (observation, claim or source-event ids, by writer)."
+        },
+        "informed_by": {
+          "type": "array",
+          "items": {
+            "$ref": "../v0.5.0/common.schema.json#/$defs/ObservationId"
+          },
+          "description": "Context-fencing provenance: observations that informed this one. Provenance, not supporting evidence. The reference OBSERVE writer always emits the key (empty when unused); the lifecycle writers omit it."
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "context": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "idempotency": {
+      "description": "The source-level dedup key this record consumed, with the payload hash it was bound to; `null` when the write carried no idempotency key. Optional because the lifecycle writers (grant, revoke, quarantine review) do not emit the key at all, while OBSERVE and every mutation record emits it (as `null` when unused).",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "actor_id",
+            "key",
+            "payload_hash"
+          ],
+          "properties": {
+            "actor_id": {
+              "$ref": "../v0.5.0/common.schema.json#/$defs/ActorId"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "payload_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 over the canonical observation payload (which is also the `id` suffix)."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "retention",
+        "retention_duration",
+        "sensitive",
+        "pii_detected"
+      ],
+      "properties": {
+        "retention": {
+          "type": "string",
+          "enum": [
+            "forever",
+            "duration",
+            "until_revoked"
+          ]
+        },
+        "retention_duration": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The ISO-8601 duration the writer resolved for `duration` retention (e.g. \"P90D\"); null for `forever`/`until_revoked`."
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "pii_detected": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "integrity": {
+      "type": "object",
+      "required": [
+        "hash",
+        "writer_id",
+        "sequence",
+        "previous_hash"
+      ],
+      "properties": {
+        "hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "SHA-256 over the record excluding `integrity.hash` itself, but INCLUDING `previous_hash`, `sequence` and `writer_id` — so deleting a record and re-pointing the next record's `previous_hash` past it breaks the chain (src/layer0/integrity.ts)."
+        },
+        "writer_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The writing instance (config.writer_id). The chain is per-writer."
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-writer chain position (1-based)."
+        },
+        "previous_hash": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The previous record's `hash` for this writer, or null for the chain's first record."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

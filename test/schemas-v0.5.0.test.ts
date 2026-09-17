@@ -6,6 +6,8 @@ import Ajv2020, { type AnySchema, type ValidateFunction } from 'ajv/dist/2020.js
 import addFormats from 'ajv-formats';
 import { describe, test } from 'vitest';
 
+import { OP_TYPES } from '../src/ops_log/types.js';
+
 const schemaDir = path.join(process.cwd(), 'schemas', 'v0.5.0');
 const schemaFiles = readdirSync(schemaDir)
   .filter(file => file.endsWith('.schema.json'))
@@ -41,6 +43,7 @@ const ULID_A = '0'.repeat(26);
 const ULID_B = '1'.repeat(26);
 const CLAIM_A = `claim_${ULID_A}`;
 const CLAIM_B = `claim_${ULID_B}`;
+const TOMBSTONE_A = `tomb_${ULID_A}`;
 const OPERATION_A = `op_${ULID_A}`;
 const OBSERVATION_A = `obs_${'a'.repeat(16)}`;
 const RELATION_A = `rel_${ULID_A}`;
@@ -187,6 +190,32 @@ describe('Smartware v0.5.0 schemas', () => {
     assert.equal(observe({ ...validObs, scope: 'client:acme#0' }), false);
   });
 
+  test('Scope vocabulary is closed at v0.5.0: host-registered lanes are not Scope values (ADR-0015)', () => {
+    const ajv = createAjv();
+    const claim = validator(ajv, 'claim.schema.json');
+    const common = ajv.getSchema('https://smartware.dev/schemas/v0.5.0/common.schema.json#/$defs/Scope');
+    assert.ok(common, 'Scope $def registered');
+
+    // The reference implementation's pod-profile helper (`createPodProfile`) registers
+    // `pod/<pod>/<lane>` ids as HOST-REGISTERED lanes: legitimate scope-registry ids and live
+    // product scope ids, but not v0.5.0 `Scope` values. The published vocabulary admits no
+    // host-lane form, so a record whose scope is one of them is outside the schema's Scope
+    // vocabulary and outside the v0.5.0 schema-conformance claim. Decided in ADR-0015 (with the
+    // substrate ActorId aligned to the published pattern); the record-level pin is
+    // test/layer1/pod-profile-conformance.test.ts. If a later revision admits host lanes, this
+    // fixture and the README qualification change in that revision's own change.
+    const hostLanes = [
+      'pod/founder/workspace',
+      'pod/founder/personal',
+      'pod/founder/apps/coffee',
+      'pod/founder/workspaces/team-a',
+    ];
+    for (const scope of hostLanes) {
+      assert.equal(common(scope), false, `Scope should reject host lane ${scope}`);
+      assert.equal(claim(activeClaim(scope)), false, `claim with scope ${scope} should fail`);
+    }
+  });
+
   test('operation-log-entry op enum gains forget.scope', () => {
     const ajv = createAjv();
     const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
@@ -210,6 +239,78 @@ describe('Smartware v0.5.0 schemas', () => {
     };
     assert.equal(opsEntry(forgetScopeEntry), true, JSON.stringify(opsEntry.errors));
     assert.equal(opsEntry({ ...forgetScopeEntry, op: 'forget.scope.evil' }), false);
+  });
+
+  test('operation-log-entry op enum gains hold.release (ADR-0009)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    const holdReleaseEntry = {
+      operation_id: OPERATION_A,
+      actor_id: 'user:ava',
+      timestamp: NOW,
+      op: 'hold.release',
+      details: {
+        payload_hash: 'abc123',
+        scope: 'client:gate#1',
+        released_at: NOW,
+        released_by: 'user:ava',
+        statement: 'no pending dispute / hold released',
+      },
+    };
+    assert.equal(opsEntry(holdReleaseEntry), true, JSON.stringify(opsEntry.errors));
+    assert.equal(opsEntry({ ...holdReleaseEntry, op: 'hold.release.evil' }), false);
+  });
+
+  test('operation-log-entry op enum lists every op the substrate writes (t_7a64ded2)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    // These three have been written since before the v0.5.0 cut but were never
+    // listed, so their receipts failed validation against the published set —
+    // including the hold gate's own sweep-skip receipt (`retention.expire`).
+    for (const op of ['consolidate', 'reflect.explicit', 'retention.expire']) {
+      const entry = {
+        operation_id: OPERATION_A,
+        actor_id: 'user:ava',
+        timestamp: NOW,
+        op,
+        details: { scope: 'client:gate#1', payload_hash: 'abc123' },
+      };
+      assert.equal(opsEntry(entry), true, `${op}: ${JSON.stringify(opsEntry.errors)}`);
+    }
+    assert.equal(opsEntry({
+      operation_id: OPERATION_A,
+      actor_id: 'user:ava',
+      timestamp: NOW,
+      op: 'consolidate.evil',
+      details: {},
+    }), false);
+  });
+
+  test('every writer-surface OpType validates against the published op enum (t_0e3989eb)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    // The writer surface may not admit an op the published v0.5.0 contract
+    // rejects: that would be a typed-in path to unvalidatable receipts
+    // (t_fa18b2bf F-2). The enum may be a superset — ops reserved for
+    // surfaces this implementation does not write yet — so this pins
+    // `OP_TYPES ⊆ enum`, not equality.
+    for (const op of OP_TYPES) {
+      const entry = {
+        operation_id: OPERATION_A,
+        actor_id: 'user:ava',
+        timestamp: NOW,
+        op,
+        details: {},
+      };
+      assert.equal(
+        opsEntry(entry),
+        true,
+        `writer op '${op}' must validate against the published op enum: ${JSON.stringify(opsEntry.errors)}`,
+      );
+    }
   });
 
   test('forget-scope-request: reason semantics and owner pointer rules', () => {
@@ -249,5 +350,281 @@ describe('Smartware v0.5.0 schemas', () => {
     //    so authority remains a handler rule; spellings that ARE scopes pass).
     // 7. additional properties are rejected (payload is closed).
     assert.equal(forgetScope({ ...base, extra: true }), false);
+  });
+
+  test('REVISE repick_survivor: the release form and the demotion record fields', () => {
+    const ajv = createAjv();
+    const revise = validator(ajv, 'revise-request.schema.json');
+    const claim = validator(ajv, 'claim.schema.json');
+
+    // A re-pick names the demoted duplicate and nothing else: it is a user epistemic judgment,
+    // and the surface keeps it a single action (protocol v0.5.0).
+    const repick = {
+      target: CLAIM_A,
+      expected_base_version: 2,
+      repick_survivor: true,
+      reason: 'the duplicate is the copy that should surface.',
+      actor_id: 'user:owner',
+      operation_id: OPERATION_A,
+    };
+    assert.equal(revise(repick), true, JSON.stringify(revise.errors));
+
+    // Not an action on its own, and not combinable with one in beta.
+    assert.equal(revise({ ...repick, repick_survivor: false }), false);
+    assert.equal(revise({ ...repick, set_confidence: 'high' }), false);
+    assert.equal(revise({ ...repick, adopt_body: true }), false);
+    // ...while an inert `repick_survivor: false` may sit beside a normal action.
+    assert.equal(revise({
+      target: CLAIM_A,
+      expected_base_version: 2,
+      set_confidence: 'high',
+      repick_survivor: false,
+      reason: 'raise the confidence.',
+      actor_id: 'user:owner',
+      operation_id: OPERATION_A,
+    }), true, JSON.stringify(revise.errors));
+
+    // The demotion record envelope: a user-demoted duplicate and a released (reinstated) version.
+    assert.equal(claim({
+      ...activeClaim(),
+      version: 2,
+      supersedes: 1,
+      superseded_by: CLAIM_B,
+      superseded_at: NOW,
+      superseded_by_origin: 'user',
+    }), true, JSON.stringify(claim.errors));
+    assert.equal(claim({
+      ...activeClaim(),
+      version: 2,
+      supersedes: 1,
+      reinstated_by: 'user',
+    }), true, JSON.stringify(claim.errors));
+    // Both fields are warrants, not free text.
+    assert.equal(claim({ ...activeClaim(), superseded_by_origin: 'model' }), false);
+    assert.equal(claim({ ...activeClaim(), reinstated_by: 'agent' }), false);
+  });
+
+  test('claim.schema.json enumerates the extraction materialization block the L1 record writer appends', () => {
+    const ajv = createAjv();
+    const claim = validator(ajv, 'claim.schema.json');
+
+    // Control: a version without the block is fully conformant — the block is optional, and every
+    // record written before v0.6 omits it.
+    assert.equal(claim(activeClaim()), true, JSON.stringify(claim.errors));
+
+    // The block the record writer appends on an active version (`ClaimSemanticMaterialization`,
+    // fixed by kanban t_229601e4): the structured extraction beside the admitted, reduced fields.
+    const semantic = {
+      subject_name: 'Graphiti API',
+      subject_type: 'tool',
+      predicate: 'status_is',
+      object: { type: 'enum', value: 'deployed' },
+      t_valid_from: { value: NOW, state: 'inferred', basis: 'source_observed_at' },
+      t_valid_to: { value: null, state: 'null' },
+      extracted_epistemic: 'observed',
+      extracted_confidence: 0.85,
+      sensitive: false,
+      extraction: {
+        method: 'deterministic',
+        model: null,
+        compiler_version: '0.6.1',
+        prompt_hash: null,
+        extracted_at: NOW,
+      },
+    };
+    assert.equal(claim({ ...activeClaim(), semantic }), true, JSON.stringify(claim.errors));
+
+    // The block preserves the raw values the admitted fields reduce: an extraction confidence that
+    // is not on the bucket grid (the record writer copies the caller's number verbatim) and a
+    // label stronger than the claim's bounded tag both stay valid.
+    assert.equal(claim({
+      ...activeClaim(),
+      confidence: 'high',
+      epistemic_tag: 'fact',
+      semantic: { ...semantic, extracted_confidence: 1.5, extracted_epistemic: 'user_confirmed' },
+    }), true, JSON.stringify(claim.errors));
+
+    // Closed block: an unenumerated subfield is rejected rather than silently carried.
+    assert.equal(claim({ ...activeClaim(), semantic: { ...semantic, invented_field: true } }), false);
+    // ...and every subfield is required once the block is present.
+    const { predicate: _predicate, ...withoutPredicate } = semantic;
+    assert.equal(claim({ ...activeClaim(), semantic: withoutPredicate }), false);
+    // The typed value and the valid-time shape are closed too.
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, object: { type: 'tool', value: 'deployed' } },
+    }), false);
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_to: { value: NOW, state: 'unknown' } },
+    }), false);
+    // A pass-through extraction date without a time is tolerated (the LLM path copies the model's
+    // `validity.from`), but a non-string valid-time value is not.
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_from: { value: '2026-01-05', state: 'known' } },
+    }), true, JSON.stringify(claim.errors));
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_from: { value: 20260105, state: 'known' } },
+    }), false);
+    assert.equal(claim({
+      ...activeClaim(),
+      semantic: { ...semantic, t_valid_from: { value: NOW, state: 'known', basis: 7 } },
+    }), false, 'the valid-time basis is a string label, not free data');
+  });
+
+  test('tombstone-frontmatter: the snapshot carries the claim record envelope', () => {
+    const ajv = createAjv();
+    const tombstone = validator(ajv, 'tombstone-frontmatter.schema.json');
+
+    const tombstoneFor = (snapshot: Record<string, unknown>) => ({
+      tombstone_id: TOMBSTONE_A,
+      claim_id: CLAIM_A,
+      forgotten_at: NOW,
+      forgotten_by: 'user:owner',
+      operation_id: OPERATION_A,
+      reason: 'the client asked us to stop keeping this.',
+      snapshot,
+      blast_radius_summary: {
+        pages_affected: 0,
+        agent_blocks_marked: 0,
+        user_pages_notified: 0,
+      },
+      affected_pages: [],
+    });
+
+    // Control: a snapshot of an ordinary active version — the envelope fields absent, not
+    // merely falsy — still validates. The fields are additive; nothing written before this
+    // change stops validating.
+    assert.equal(tombstone(tombstoneFor(activeClaim())), true, JSON.stringify(tombstone.errors));
+
+    // 1. A demoted duplicate can be forgotten: the snapshot keeps the demotion pair, so the
+    //    forgotten version is still reconstructible from the tombstone alone.
+    assert.equal(tombstone(tombstoneFor({
+      ...activeClaim(),
+      superseded_by: CLAIM_B,
+      superseded_at: NOW,
+    })), true, JSON.stringify(tombstone.errors));
+
+    // 2. ...and a user-warranted demotion keeps its warrant (REVISE repick_survivor).
+    assert.equal(tombstone(tombstoneFor({
+      ...activeClaim(),
+      superseded_by: CLAIM_B,
+      superseded_at: NOW,
+      superseded_by_origin: 'user',
+    })), true, JSON.stringify(tombstone.errors));
+
+    // 3. A version that released a demotion keeps its audit-only marker.
+    assert.equal(tombstone(tombstoneFor({
+      ...activeClaim(),
+      version: 2,
+      supersedes: 1,
+      reinstated_by: 'user',
+    })), true, JSON.stringify(tombstone.errors));
+
+    // 4. Both warrants are closed enums, not free text — a tombstone cannot launder a
+    //    mechanical ('model') demotion into a user warrant, or vice versa.
+    assert.equal(tombstone(tombstoneFor({ ...activeClaim(), superseded_by_origin: 'model' })), false);
+    assert.equal(tombstone(tombstoneFor({ ...activeClaim(), reinstated_by: 'agent' })), false);
+
+    // 5. The snapshot block stays closed: an unenumerated field is still rejected.
+    assert.equal(tombstone(tombstoneFor({ ...activeClaim(), invented_field: true })), false);
+  });
+
+  test('tombstone-frontmatter snapshot mirrors the claim schema envelope field-for-field', () => {
+    const readSchema = (file: string): Record<string, unknown> =>
+      JSON.parse(readFileSync(path.join(schemaDir, file), 'utf8')) as Record<string, unknown>;
+    const claimProperties = readSchema('claim.schema.json').properties as Record<string, unknown>;
+    const tombstoneProperties = readSchema('tombstone-frontmatter.schema.json')
+      .properties as Record<string, unknown>;
+    const snapshotProperties = (tombstoneProperties.snapshot as Record<string, unknown>)
+      .properties as Record<string, unknown>;
+
+    // Same definitions, same descriptions: the snapshot is a claim version, so the two blocks
+    // must not drift apart as the envelope grows. `semantic` is deliberately not in this list: the
+    // snapshot's promise is the claim schema's *required* fields, the block is optional, and the
+    // block's shape is not mirrored into the recovery artifact (ADR-0011 → *Explicitly not decided
+    // here*).
+    for (const field of ['superseded_by', 'superseded_at', 'superseded_by_origin', 'reinstated_by']) {
+      assert.ok(claimProperties[field], `claim.schema.json does not define ${field}`);
+      assert.deepEqual(
+        snapshotProperties[field],
+        claimProperties[field],
+        `${field} must mirror claim.schema.json`,
+      );
+    }
+
+    // Every field the claim schema requires is enumerated (the block's own promise), and the
+    // forget-only fields stay out (the snapshot is of an active version).
+    const claimRequired = readSchema('claim.schema.json').required as string[];
+    for (const field of claimRequired) {
+      assert.ok(snapshotProperties[field], `snapshot does not enumerate required field ${field}`);
+    }
+    for (const field of ['tombstone_id', 'forgotten_at', 'forgotten_by']) {
+      assert.equal(snapshotProperties[field], undefined);
+    }
+  });
+
+  test('claim.schema.json: a forgotten version names the version it replaces only when there is one', () => {
+    // ADR-0014. The forgotten branch used to require `supersedes` unconditionally, which made a
+    // version-1 forgotten record unrepresentable — but a claim can be *born* forgotten: the legacy /
+    // migration shape (`status: 'retracted'`, no prior canonical line) is what `ClaimStore.insertClaim`
+    // appends on the retraction paths, what `src/layer1/tombstone-backfill.ts` reads, and what LC-04
+    // reconstruction rebuilds from a backfilled tombstone. Measured on kanban t_3ba3ee39: the writer
+    // has no valid value to write there (`supersedes: 0` violates `minimum: 1`), so the branch, not the
+    // writer, was the wrong side. The version rule is untouched: every version > 1 still names its
+    // predecessor, in every state.
+    const ajv = createAjv();
+    const claim = validator(ajv, 'claim.schema.json');
+    const readClaimSchema = (): Record<string, any> =>
+      JSON.parse(readFileSync(path.join(schemaDir, 'claim.schema.json'), 'utf8')) as Record<string, any>;
+
+    const forgottenOf = (version: number, extra: Record<string, unknown> = {}) => ({
+      ...activeClaim(),
+      version,
+      state: 'forgotten',
+      tombstone_id: TOMBSTONE_A,
+      forgotten_at: NOW,
+      forgotten_by: 'user:owner',
+      ...extra,
+    });
+    const withoutContent = (record: Record<string, unknown>) => {
+      const { content: _content, ...rest } = record;
+      return rest;
+    };
+
+    // 1. A version-1 forgotten record is conformant with and without the field...
+    assert.equal(claim(withoutContent(forgottenOf(1))), true, JSON.stringify(claim.errors));
+    assert.equal(claim(withoutContent(forgottenOf(1, { supersedes: 1 }))), true,
+      JSON.stringify(claim.errors));
+    // ...and the field keeps its published domain when it is present: `supersedes: 0` is not a way to
+    // satisfy the old requirement, which is why the writer could not have fixed this half.
+    assert.equal(claim(withoutContent(forgottenOf(1, { supersedes: 0 }))), false);
+
+    // 2. Every version > 1 still requires it — forgotten or not (the third branch).
+    assert.equal(claim(withoutContent(forgottenOf(2))), false,
+      'a v2 forgotten record must name the version it replaced');
+    assert.equal(claim(withoutContent(forgottenOf(2, { supersedes: 1 }))), true,
+      JSON.stringify(claim.errors));
+    assert.equal(claim({ ...activeClaim(), version: 2 }), false, 'a v2 active record must name it too');
+    assert.equal(claim({ ...activeClaim(), version: 2, supersedes: 1 }), true,
+      JSON.stringify(claim.errors));
+
+    // 3. The branch relaxed exactly one entry: the forget-specific fields stay required, and the
+    //    published property description still states the version rule the branches enforce.
+    const branches = readClaimSchema().allOf as Array<Record<string, any>>;
+    const forgottenBranch = branches.find(
+      branch => branch.if?.properties?.state?.const === 'forgotten')!;
+    assert.ok(forgottenBranch, 'the forgotten branch must still exist');
+    assert.deepEqual(forgottenBranch.then.required, ['tombstone_id', 'forgotten_at', 'forgotten_by']);
+    for (const field of ['tombstone_id', 'forgotten_at', 'forgotten_by']) {
+      const incomplete = withoutContent(forgottenOf(1));
+      delete (incomplete as Record<string, unknown>)[field];
+      assert.equal(claim(incomplete), false, `${field} must stay required on a forgotten version`);
+    }
+    const described = (readClaimSchema().properties as Record<string, any>)
+      .supersedes.description as string;
+    assert.match(described, /Required for version > 1/);
   });
 });

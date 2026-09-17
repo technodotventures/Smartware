@@ -49,17 +49,19 @@ import { computePayloadHash } from '../layer0/idempotency.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SearchIndex } from '../layer3/search.js';
+import { observationToIndexRow } from '../layer3/search.js';
 import type { SmartwareConfig } from '../config.js';
-import { loadConfig, saveConfig } from '../config.js';
+import { loadConfig, saveConfig, isScopeHeld } from '../config.js';
 import {
   appendClaimVersions,
+  carryDemotion,
   iterAllClaimVersions,
   purgeClaimVersionsByScope,
   readLatestVersion,
   type ForgottenClaimVersion,
 } from '../layer1/jsonl.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   persistOperationIntent,
   readAllOpLogEntries,
@@ -84,6 +86,14 @@ export interface ForgetScopeParams {
   operation_id?: string;
   /** Owner-approved non-PII pointer (offboarding only) — carried into `#2`. */
   owner_pointer?: string;
+  /**
+   * Owner attestation for an erasure that ends a dispute/legal hold (§10c.3):
+   * the Coffee flow requires the owner to state why erasure may run now
+   * ("no pending dispute / verified request / hold released"), and the substrate
+   * records it in the ops entry. Erasure-lane only; additive (a DSR erasure
+   * without a hold needs no attestation and stays byte-identical to v0.5.0).
+   */
+  attestation?: string | null;
   /**
    * Export-before-erasure binding (§10c.4): the export package produced by
    * smartware_export_scope for this scope. Erasure-lane only; surfaced in
@@ -139,8 +149,10 @@ function scopePayload(params: ForgetScopeParams): Record<string, unknown> {
     owner_pointer: params.owner_pointer ?? null,
   };
   // Additive-only: the payload stays byte-identical for v0.5.0 calls without
-  // export_id (idempotent retry of an existing operation must keep matching).
+  // export_id / attestation (idempotent retry of an existing operation must
+  // keep matching).
   if (params.export_id) payload.export_id = params.export_id;
+  if (params.attestation) payload.attestation = params.attestation;
   return payload;
 }
 
@@ -217,6 +229,16 @@ export async function handleForgetScope(
     }
     if (!EXPORT_ID_PATTERN.test(params.export_id)) {
       throw new ProtocolError('invalid_parameter', `Invalid export_id '${params.export_id}'`);
+    }
+  }
+  if (params.attestation != null) {
+    // Hold-release attestation (§10c.3): erasure-lane only, and it must SAY
+    // something — an empty string is not an attestation, it is a bug.
+    if (params.reason !== 'erasure') {
+      throw new ProtocolError('invalid_parameter', 'attestation is only valid for reason=erasure');
+    }
+    if (typeof params.attestation !== 'string' || params.attestation.trim().length === 0) {
+      throw new ProtocolError('invalid_parameter', 'attestation must be a non-empty string');
     }
   }
   if (params.operation_id && !OPERATION_ID_PATTERN.test(params.operation_id)) {
@@ -301,6 +323,7 @@ export async function handleForgetScope(
         evidenceDir,
         claimsDir: dataDir,
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -308,6 +331,18 @@ export async function handleForgetScope(
         throw new ProtocolError('conflict', `operation_id '${params.operation_id}' requires manual recovery review`);
       }
     }
+  }
+
+  // ── Legal hold (ADR-0009): erasure does not run while the scope is held.
+  //    Checked AFTER idempotent replay + intent recovery (a committed erasure
+  //    still replays; an interrupted intent is never abandoned mid-purge) and
+  //    BEFORE planning, so a refusal mutates nothing and leaves the
+  //    operation_id unconsumed — retryable once the hold is released.
+  if (params.reason === 'erasure' && isScopeHeld(loadConfig(dataDir), params.scope)) {
+    throw new ProtocolError(
+      'legal_hold_open',
+      `Scope '${params.scope}' has an open legal hold (ADR-0009) — release it (hold.release) before erasure`,
+    );
   }
 
   // ── Plan: count everything BEFORE any mutation (counts fidelity, §10).
@@ -406,6 +441,7 @@ export async function handleForgetScope(
   // ── Intent (durable WAL) BEFORE any mutation, matching handleForget.
   let intent: ForgetScopeOperationIntent | null = null;
   if (params.operation_id && commitCtx) {
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     intent = {
       version: 1,
       operation_id: params.operation_id,
@@ -413,6 +449,7 @@ export async function handleForgetScope(
       op: 'forget.scope',
       payload_hash: payloadHash,
       prepared_at: now,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'forget.scope',
         audit: {
@@ -485,7 +522,7 @@ export async function handleForgetScope(
     for (const claimId of activeJsonlClaims) {
       const latest = readLatestVersion(dataDir, claimId);
       if (!latest || latest.state !== 'active') continue;
-      versions.push({
+      versions.push(carryDemotion({
         claim_id: latest.claim_id,
         version: latest.version + 1,
         state: 'forgotten',
@@ -509,7 +546,7 @@ export async function handleForgetScope(
         tags: latest.tags,
         supersedes: latest.version,
         endorsement_source: latest.endorsement_source,
-      });
+      }, latest));
     }
     if (versions.length > 0) {
       appendClaimVersions(dataDir, versions);
@@ -520,11 +557,20 @@ export async function handleForgetScope(
     // retry after a crash (idempotent DELETE), matching per-observation
     // forget semantics and wipe-and-rebuild (syncObservationsFromEvidence
     // excludes terminal states). Claim FTS rows + entity pages are kept:
-    // the authorized snapshot filters forgotten claims at query time, and
-    // keeping the rows is what makes REVIVE fully reversible — a revived
-    // claim becomes searchable again without waiting for a reindex
-    // (handleRevive does not re-index, and rebuild equivalence is
-    // maintained by the same snapshot filter, not by row presence).
+    // the authorized snapshot filters forgotten claims at query time, so what
+    // recall SERVES is rebuild-equivalent — the same result set a rebuilt lane
+    // serves — without touching the lane. What the counters report is NOT
+    // equal: the kept row still matches its query live (counted in
+    // `total_found`, dropped by the snapshot into `filtered_out`), while a
+    // rebuilt lane never holds it (`syncSearchFromClaims` drops non-indexable
+    // claims; a forgotten version materialises as retracted). The difference is
+    // exactly the kept rows, it is measured (kanban t_8779781f; retention's
+    // sweep keeps its rows the same way), and it is deliberate — deleting the
+    // rows here would move the work, not correctness. REVIVE's "searchable
+    // again without waiting for a reindex" no longer rests on this keep:
+    // `core.revive` re-syncs the revived claim's scope (kanban t_12c79071), so
+    // the guarantee survives an intervening write; the keep is the read-time
+    // filter's single gate.
     searchIndex.removeObservationsByScope(params.scope);
   }
 
@@ -542,6 +588,25 @@ export async function handleForgetScope(
     config.scopes = config.scopes.filter(entry => entry.id !== params.scope);
     scopeEntryRemoved = config.scopes.length < before;
   }
+  if (params.reason === 'offboarding') {
+    // ── The hold lane IS the hold open (ADR-0009): the same commit that
+    //    tombstones the scope records its preservation duty, so a dispute can
+    //    never leave erasure unrefused by forgetting to set a flag. Re-running
+    //    the lane after a release opens a NEW hold (a new duty); a committed
+    //    replay returns early above and never re-mutates.
+    const holds = config.holds ?? {};
+    holds[params.scope] = {
+      scope: params.scope,
+      opened_at: now,
+      opened_by: params.actor.id,
+      operation_id: params.operation_id ?? null,
+      released_at: null,
+      released_by: null,
+      release_operation_id: null,
+      release_statement: null,
+    };
+    config.holds = holds;
+  }
   saveConfig(dataDir, config);
 
   // ── L0 audit marker: written LAST, after every mutation. If the process
@@ -553,11 +618,21 @@ export async function handleForgetScope(
   appendObservation(evidenceDir, withIntegrity);
   layer0.insertOrSkip(withIntegrity);
   layer0.applyMutationEvent(withIntegrity);
+  // The audit marker is an accepted Layer-0 observation in the pod scope, and a
+  // rebuilt index holds it — `syncObservationsFromEvidence` indexes every
+  // accepted observation. Without this line the live raw-observation lane is
+  // missing the marker until the next rebuild, so health's projection check
+  // reports drift (and the Coffee-trial SLO breaches) after EVERY FORGET.SCOPE.
+  // Index it here, with the marker's effective status, so live == rebuilt.
+  const markerEffectiveStatus = layer0.getEffectiveStatus(withIntegrity.id) ?? withIntegrity.status;
+  if (markerEffectiveStatus === 'accepted') {
+    searchIndex.indexObservation(observationToIndexRow(withIntegrity, { status: markerEffectiveStatus }));
+  }
   commitHooks?.afterAuditObservation?.(withIntegrity);
 
   // ── ONE ops-log entry carrying the exact counts.
   if (params.operation_id && commitCtx && intent) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: now,
@@ -575,8 +650,10 @@ export async function handleForgetScope(
         derived_summaries_flagged: derivedSummariesFlagged,
         vector_entries_removed: vectorEntriesRemoved,
         export_id: params.export_id ?? null,
+        attestation: params.attestation ?? null,
+        hold_opened: params.reason === 'offboarding',
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   }
