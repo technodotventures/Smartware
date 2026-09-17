@@ -23,11 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # node 24 (npm 11.6+) is required for OIDC trusted publishing. Node 22's
+      # npm 10.x cannot perform the OIDC exchange, so it sends setup-node's
+      # placeholder NODE_AUTH_TOKEN instead and the registry rejects the publish
+      # with a 404. See docs.npmjs.com/trusted-publishers.
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: npm
+          package-manager-cache: false   # never cache in release builds
 
       - run: npm ci
 
