@@ -437,6 +437,63 @@ export async function produceObservationClaims(
   };
 }
 
+/**
+ * The prior result of a REFLECT, reconstructed from the committed
+ * `reflect.explicit` entry that recorded it — protocol v0.5.0, "Idempotency
+ * and commit identity": the same OperationId plus an identical canonical
+ * payload returns the PRIOR RESULT. The entry is appended only after the
+ * compile has finished, so it is the durable record of a run that committed;
+ * its counts are that run's counts.
+ *
+ * Every count this returns comes from the entry, so the result is
+ * self-consistent — never a recorded count next to a freshly measured one
+ * (the mixed `claims_created` / `pages_compiled` result this replaces,
+ * `t_efa8d5a8`). Every telemetry count is 0 because THIS call produced
+ * nothing, and `freshness` is omitted rather than filled with a current-state
+ * read, for the same reason. `synthesis_deferred` is carried over when the
+ * recorded run deferred L2 synthesis, because that is what its prior result
+ * carried. The audit list and `git_sha` are not part of the entry, so a
+ * replayed result carries neither; the durable audit trail of the operation
+ * is the operations-log entry itself.
+ *
+ * Both counts have been recorded on every `reflect.explicit` entry written by
+ * every build in this tree (measured: the writer has emitted them since the
+ * initial commit `d8a2126`), so the guard below is fail-closed rather than a
+ * live path: an entry carrying no counts must not be reported as a 0/0 run.
+ */
+function replayedReflectResult(entry: OpLogEntry): CompileHandlerResult {
+  const claimsCreated = entry.details?.['claims_created'];
+  const pagesCompiled = entry.details?.['pages_compiled'];
+  if (typeof claimsCreated !== 'number' || typeof pagesCompiled !== 'number') {
+    throw new ProtocolError('conflict', `operation_id '${entry.operation_id}' has no replayable REFLECT result`);
+  }
+  const telemetry: CompileHandlerResult['telemetry'] = {
+    observations_processed: 0,
+    claims_extracted_per_observation: {},
+    observations_with_zero_claims: [],
+    entity_merges: [],
+    entities_created_new: [],
+    layer3_indexed_count: 0,
+    duration_ms: 0,
+    timed_out: false,
+    stage_durations_ms: {},
+    llm_extraction_attempted: 0,
+    llm_extraction_failed: 0,
+    llm_extraction_skipped_sensitive: 0,
+    llm_synthesis_attempted: 0,
+    llm_synthesis_failed: 0,
+    llm_synthesis_skipped_sensitive: 0,
+    replayed: true,
+  };
+  if (entry.details?.['synthesis_deferred'] === true) telemetry.synthesis_deferred = true;
+  return {
+    pages_compiled: pagesCompiled,
+    claims_created: claimsCreated,
+    audit: [],
+    telemetry,
+  };
+}
+
 export async function handleCompile(
   params: CompileParams,
   evidenceDir: string,
@@ -502,6 +559,20 @@ export async function handleCompile(
     || parentEntry.actor_id !== params.actor.id
     || parentEntry.details?.['payload_hash'] !== parentPayloadHash)) {
     throw new ProtocolError('conflict', `operation_id '${params.operation_id}' was already used with a different payload`);
+  }
+  // A matched operation_id IS the prior result (protocol v0.5.0, "Idempotency
+  // and commit identity"), so the replay stops here. Continuing into the
+  // compile below re-ran claim production, L2 synthesis, L3 indexing and
+  // `reflect.auto` receipts while returning the entry's recorded
+  // `claims_created` next to a freshly measured `pages_compiled` — a result
+  // that described two different runs at once, and writes a retry did not ask
+  // for (`t_efa8d5a8`). Crash recovery is unaffected: this entry is appended
+  // only AFTER the compile returns, so an interrupted run has no entry to
+  // match and its retry compiles legitimately (fresh behaviour needs a fresh
+  // operation_id — see `docs/adr/0018-reflect-replay-returns-the-recorded-result.md`).
+  if (parentEntry) {
+    opsIndex?.close();
+    return replayedReflectResult(parentEntry);
   }
 
   let reflectionStats: ReflectAutoStats = {
@@ -606,9 +677,7 @@ export async function handleCompile(
 
     const handlerResult: CompileHandlerResult = {
       pages_compiled: 0,
-      claims_created: typeof parentEntry?.details?.['claims_created'] === 'number'
-        ? parentEntry.details['claims_created']
-        : reflectionStats.claimsCreated,
+      claims_created: reflectionStats.claimsCreated,
       audit: [],
       telemetry: {
         observations_processed: 0,
@@ -630,7 +699,7 @@ export async function handleCompile(
         synthesis_deferred: true,
       },
     };
-    if (params.operation_id && commitCtx && !parentEntry) {
+    if (params.operation_id && commitCtx) {
       appendOpLogEntry(commitCtx.opsDir, {
         operation_id: params.operation_id,
         actor_id: params.actor.id,
@@ -679,7 +748,7 @@ export async function handleCompile(
     llm_extraction_failed: reflectionStats.llmFailed,
     llm_extraction_skipped_sensitive: reflectionStats.llmSkippedSensitive,
   };
-  if (params.operation_id && commitCtx && !parentEntry) {
+  if (params.operation_id && commitCtx) {
     appendOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
@@ -696,9 +765,7 @@ export async function handleCompile(
 
   const handlerResult: CompileHandlerResult = {
     pages_compiled: compiled.pages.length,
-    claims_created: typeof parentEntry?.details?.['claims_created'] === 'number'
-      ? parentEntry.details['claims_created']
-      : reflectionStats.claimsCreated,
+    claims_created: reflectionStats.claimsCreated,
     git_sha: compiled.gitSha,
     audit: compiled.audit,
     telemetry,
