@@ -43,6 +43,14 @@ replayed (a host- or second-writer-written `claim_extracted`, a foreign
 touched, so in-process recall equals what a fresh open serves after those verbs
 — including for events another writer introduced mid-session.
 
+REVISE re-syncs the revised claim's scope in the handler itself: the verb
+appends a claim version through the store and writes no index, so without that
+re-sync the process that performed the revision answers without the revised
+claim while every restart serves it. Because the repair sits in the handler
+instead of a wrapper, both dispatcher surfaces inherit it — the `SmartwareCore`
+wrappers (and the `smartware` MCP binary built on them) and the direct-handler
+MCP server in `src/index.ts`.
+
 ## Semantic and hybrid retrieval
 
 Semantic retrieval is an opt-in Layer 3 capability. A host supplies an
