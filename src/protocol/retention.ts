@@ -170,7 +170,7 @@ export async function handleExpireRetention(
   //    still replays its recorded result.
   if (isScopeHeld(loadConfig(deps.dataDir), params.scope)) {
     if (params.operation_id) {
-      appendOpLogEntry(deps.opsDir, {
+      appendCommittedOpLogEntry(deps.opsDir, {
         operation_id: params.operation_id,
         actor_id: operationActorId,
         timestamp: now,
