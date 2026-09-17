@@ -49,37 +49,54 @@ sources/ingestion/federated-read suite landed: **515 tests across 71 files**,
 build clean (`tsc`), same schema and kernel results. Re-measured a fourth time
 2026-09-14 after the export-restore return path landed (ADR-0006):
 **520 tests across 72 files**, build clean (`tsc`), same schema and kernel
-results. Re-measured a fifth time 2026-09-14 after the lifecycle-composition
-suite landed (`test/conformance/q_lifecycle_composition.test.ts`, t_ad51d0e2):
-**529 tests across 73 files**, build clean (`tsc`), 31 schema files verified,
-`verify:saas` pass — same kernel and conformance results. Re-measured a sixth
-time 2026-09-14 after the legal-hold composition suite landed and the hold
-decision was recorded (`test/conformance/r_legal_hold_composition.test.ts`,
-t_c5c999ba → ADR-0008): **532 tests across 74 files**, build clean (`tsc`),
-31 schema files verified, `verify:saas` pass — same kernel and conformance
-results. Re-measured a seventh time 2026-09-15 after the explicit legal-hold
-marker landed (ADR-0009, card t_463c1ff9; the legal-hold suite rewritten to
-R1–R4 and the ops-log schema op enum extended with `hold.release`):
-**534 tests across 74 files**, build clean (`tsc`), 31 schema files verified,
-`verify:saas` pass — same kernel and conformance results. Re-measured an eighth
-time 2026-09-15 after the legal-hold verification findings were fixed (card
-t_7a64ded2: release requires `operation_id`, a release replay converges the
-released *duty*, `saveConfig` writes atomically with fsync, and the v0.5.0
-ops-log enum completed with `consolidate` / `reflect.explicit` /
-`retention.expire`): **541 tests across 75 files**, build clean (`tsc`), 31
-schema files verified, `verify:saas` pass — same kernel and conformance results.
-Re-measured a ninth time 2026-09-15 after the writer-surface pin landed (card
-t_0e3989eb: `OpType` derives from an exported `OP_TYPES` runtime list, the four
-dead members `recall` / `watch.subscribe` / `watch.event` / `guardian` removed,
-and `test/schemas-v0.5.0.test.ts` now asserts every writer op validates against
-the published `op` enum): **542 tests across 75 files**, build clean (`tsc`), 31
-schema files verified, `verify:saas` pass — same kernel and conformance results.
+results. Re-measured a fifth time 2026-09-15 after the host health contract and
+Coffee-trial SLOs landed (ADR-0008): **550 tests across 77 files**, build clean
+(`tsc`), same schema and kernel results.
+
+Verified 2026-09-16 on Node v26.5.1 for the **correction path, composed onto the Coffee release
+candidate** (`fix/b1-correction-durability` off `wt/t_9740ae98` @ `e937fab`, kanban `t_8ddfa350`,
+ADR-0016 — two `src/` changes: `ClaimStore.insertClaim` derives the canonical record's `state` from
+`status`, and `SmartwareCore.correct` re-syncs the claim-FTS index after the mutation, the way
+`consolidate` already did): **551 tests across 77 files**, `tsc` clean, `verify:schemas` 31 schema
+files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-adapter` 53/53, and **`verify:coffee-gate`
+85/85** against the packed artifact (`smartware-0.7.0.tgz` sha256
+`874a898b8f944a40701cd1478a5a17e6662811383e4d60c763ad7b6b60c22db7`). The gate grew by six checks
+(79 → 85): 3f gains its positive half (the corrected value must be *served*, not merely "not the wrong
+one" — the missing half that let this defect through), and 3j–3o drill write → CORRECT → restart as a
+new adapter instance → the same question from a **second process**: exactly one row, the corrected value,
+the retracted claim's latest canonical version not `active`, and no canonical record appended by the
+restarts. Both halves are separately load-bearing under mutation (reverting the `state` derivation fails
+3l/3m/3n; reverting the index re-sync fails 3f/3k). Measured before the composition at `e937fab`: recall
+`[]` after CORRECT, and a fresh process serving **both** the corrected and the corrected-away value as
+`active`, with the retracted claim canonicalised as `v1 active` + `v2 active`. Not composed with this
+change and still open: the lane's unit test `test/layer1/replay-correction-state.test.ts` (four of its
+assertions pin `supersedes`, the `semantic` enum, the Crockford OperationId and the demotion pointer —
+all carded elsewhere), the writer's `supersedes` pointer and the Crockford legacy OperationId (B2,
+`t_5ef44cc1`).
+
+Verified 2026-09-17 on Node v26.5.1 for the **REVISE half of the same re-sync** (kanban `t_336ba0b9`,
+lane `wip/neo/revise-fts-sync` off `fix/b1-correction-durability` @ `ab9cf2b` — one `src/core.ts`
+change: `revise` re-syncs the claim-FTS index after the mutation, the way `correct` and `consolidate`
+already did): **553 tests across 78 files**, `tsc` clean, `verify:schemas` 31 schema files OK,
+`verify:saas` `SMOKE_OUTCOME=pass`, and **`verify:coffee-gate` 85/85** against the packed artifact
+(`smartware-0.7.0.tgz` sha256
+`d1fc431046400d928e0f7b514eeb71b0d70172e837d1f46eec12769260c0c083`). Measured before the fix through
+the Coffee adapter (`scripts/coffee-revise-restart-probe.mjs`, three legs): recall served **1 row**
+in the process that had just performed a warranted REVISE while a restart and a genuine second
+process over the same brain served **2** — the revised claim was missing from the live claim-FTS
+lane until some later write re-synced the scope. The regression pin is
+`test/protocol/revise-search-sync.test.ts` (RED at `ab9cf2b`: in-process `[replacement]` vs fresh
+open `[original, replacement]`); the gate grew no fixture checks because the fixture has no REVISE
+surface (the Coffee adapter exposes `correctClaim` only). The re-sync is semantics-neutral — the live
+lane is made equal to whatever the store says is indexable — so it holds whether a REVISE leaves a
+superseded target `active` (this base) or still superseded (the demotion carry-forward decision on
+`t_742e31f9`, unmerged).
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **542 tests across 75 files** with no skips
+- The standalone suite passes **520 tests across 72 files** with no skips
   (446/64 at the 2026-09-10 cut).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
@@ -104,38 +121,6 @@ schema files verified, `verify:saas` pass — same kernel and conformance result
   markers; (d) provenance integrity — every recall hit resolves its source
   observation + ops entry, superseded claims never satisfy recall/get, and
   multi-version history is order-correct, including on rebuilt state.
-- The legal-hold marker suite
-  (`test/conformance/r_legal_hold_composition.test.ts`, 7 tests, rewritten
-  2026-09-15, t_463c1ff9 → [ADR-0009](adr/0009-explicit-legal-hold-marker.md),
-  R5–R7 added by the verification follow-up t_7a64ded2;
-  supersedes the ADR-0008 composition pins, whose R2/R3 were the assertions the
-  marker had to change) is the executable half of the marker decision: with an
-  **elapsed time-bound** observation in a scope that took the hold lane, (R1)
-  the hold lane opens the hold in the same commit (`config.holds`, ops receipt
-  `hold_opened: true`) and the sweep **skips** the held scope explicitly —
-  nothing expires, no bytes are written, post-hold evidence stays `accepted`,
-  and the skip is receipted (`details.skipped: 'legal_hold'`, and that receipt
-  validates against the published v0.5.0 ops-log schema); (R2) erasure on
-  the held scope is **refused** (`legal_hold_open`, no mutation, the
-  `operation_id` is not consumed) and release is the audited owner act —
-  receipt + config + one `hold.release` ops entry (naming the duty it lifted,
-  `hold_operation_id`), idempotent per `operation_id`, `conflict` on a
-  different payload, `no_open_hold` when nothing is open, owner-only; (R3)
-  release lifts the gate (the sweep resumes; erasure runs with its
-  attestation/export receipts; the release record survives the scope; a
-  terminal erasure still replays by `operation_id`); (R4) backward
-  compatibility and payload identity — a never-held scope erases as before,
-  fresh configs carry no hold state, and the v0.5.0 payload-hash formula is
-  unchanged (replaying a committed hold lane does not re-open a released hold);
-  (R5) a release replay **converges** a lost config write (the ops entry is
-  canonical — a same-key retry re-publishes the recorded release rather than
-  answering "released" while the scope still reads OPEN); (R6) release
-  **requires** `operation_id` — a keyless or malformed key is refused
-  `invalid_parameter` before any mutation, so no unaudited release path exists;
-  (R7) convergence is **duty-scoped** — a stale replay of an old release never
-  lifts a hold opened afterwards (a new duty per §2).
-  (C8 of the lifecycle-composition suite now runs the same dispute flow:
-  offboarding + snapshot → refused erasure → `hold.release` → erasure.)
 - The Coffee company-brain e2e suite (`test/conformance/coffee-company-brain.test.ts`,
   3 tests) proves the multi-actor product flow on the real core (spec §10b/§10c/§25):
   one business = one tenant; owner admin; clients as scopes under `workspace`
@@ -366,6 +351,30 @@ recorded in `fencingState()`, zero acknowledged writes after the handoff). Laten
 regression distinguishable from run-to-run variance. The remaining
 limit is explicit: a pause *inside* a mutation after its boundary check can still leave partial
 artifacts (never an ops-log commit); storage-level fencing is the follow-on (ADR-0007).
+
+## Consumer-visible change — host health contract and Coffee-trial SLOs (2026-09-15, unreleased)
+
+A host can now operate a brain from machine-readable status instead of logs, and
+the misleading single `layer3.indexed` number is gone. **No protocol or schema
+surface changed** (the five verbs, the RECALL family and FORGET.SCOPE are
+untouched); this is a new embedded `SmartwareCore` method (`health`), one new
+MCP tool (`smartware_health`) and a shape change to the generated `STATUS`
+projection. Decision record:
+[ADR-0008](adr/0008-host-facing-health-contract.md); field-by-field definitions
+in [integration/observability.md](integration/observability.md).
+
+| surface | before | now |
+|---|---|---|
+| `STATUS.layer3` | one `indexed` number counting only the entity/topic FTS lane, reading as "everything is indexed" | four named lanes: `entity_index_rows`, `claim_index_rows`, `observation_index_rows`, `observations_by_freshness` |
+| `core.health({ actor, backup_dir? })` / MCP `smartware_health` | — | lease `role`/holder/epoch-age with `ttl_owner: 'host'`, brain-open state, compile queue depth/oldest-pending age/failures, ingestion cursor lag per `(source, scope)` stream, lane-explicit counts, drift records (`wiki_manifest`, `observation_fts`), denied-access counts by code and entry point, retention/forget receipts (numeric details only), storage bytes by area, backup freshness, recall/write latency histograms with upper-bound p50/p95/p99, recovery events, and the Coffee-trial SLO verdict |
+| authority | owner-only everything | owner sees the whole brain; a read-granted actor sees its readable scopes' counts; an actor with no `read` anywhere is `insufficient_permission`; unregistered is `actor_unregistered` |
+| content | n/a | the report is counts, states, ids and time — no field can carry tenant content (asserted on the serialized report) |
+| SLOs | — | `COFFEE_TRIAL_SLO` with three-state verdicts: `pass` / `breach` / `unknown`; overall `breach` > `unknown` > `ok`, so an unmeasured trial is never reported as `ok` |
+
+The metrics store (`<dataDir>/indices/metrics.db`: denials, latency histograms,
+recovery events) is **operational state**, not canonical memory: deleting it
+loses history and nothing else, and a report after such a wipe says so by
+absence rather than rendering an absent measurement as a pass.
 
 ## Accurate release claim
 

@@ -171,6 +171,29 @@ describe('MCP Server Smoke', () => {
     expect(observeProps).toHaveProperty('source_ref');
   });
 
+  it('registers the health tool and returns the host-facing contract over the real transport', async () => {
+    const textOf = (result: unknown): string =>
+      (result as { content: Array<{ type: string; text: string }> }).content[0]!.text;
+
+    const listed = await client.listTools();
+    const names = listed.tools.map(tool => tool.name);
+    expect(names).toContain('smartware_health');
+
+    const health = listed.tools.find(tool => tool.name === 'smartware_health');
+    expect(health?.inputSchema.required).toEqual(expect.arrayContaining(['actor_id']));
+
+    const result = await client.callTool({ name: 'smartware_health', arguments: { actor_id: ownerId } });
+    expect(result.isError).not.toBe(true);
+    const report = JSON.parse(textOf(result)) as Record<string, unknown>;
+    // The contract survives the transport: ownership, lane counts, drift, the
+    // SLO evaluation — and no owner-only block is omitted for the owner.
+    expect(report.ownership).toMatchObject({ arbitration: 'external', ttl_owner: 'host' });
+    expect(report.brain).toEqual({ open: true });
+    expect(report.counts).toBeDefined();
+    expect(report.drift).toBeDefined();
+    expect(report.slo).toMatchObject({ trial: 'coffee-trial' });
+  });
+
   it('drives a connector sync over the real transport: register, ingest, sync status, federated read', async () => {
     const textOf = (result: unknown): string =>
       (result as { content: Array<{ type: string; text: string }> }).content[0]!.text;

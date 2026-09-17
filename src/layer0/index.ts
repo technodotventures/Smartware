@@ -289,6 +289,13 @@ export class Layer0Index {
     return (this.stmt('SELECT COUNT(*) as c FROM observations WHERE scope = ?').get(scope) as { c: number }).c;
   }
 
+  /** Observations recorded for a scope whose effective status is `accepted`. */
+  countAcceptedByScope(scope: string): number {
+    return (this.stmt(
+      "SELECT COUNT(*) as c FROM observations WHERE scope = ? AND effective_status = 'accepted'",
+    ).get(scope) as { c: number }).c;
+  }
+
   getByScope(scope: string): Array<{ id: string; type: string; captured_at: string; observed_at: string }> {
     return this.stmt(`
       SELECT id, type, captured_at, observed_at FROM observations

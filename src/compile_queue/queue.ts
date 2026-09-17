@@ -161,6 +161,37 @@ export class CompileQueue {
   }
 
   /**
+   * Timing facts for the health surface, derived from the ledger itself.
+   *
+   * `oldest_pending_at` is the `updated_at` of the oldest pending job (when it
+   * was enqueued, or last requeued). `last_completed_at` / `last_failed_at`
+   * are the newest completion timestamps among jobs *currently* in that
+   * terminal state — a retried job leaves the failed population, so
+   * `last_failed_at` falls to null once nothing is failed. Queue age is what
+   * tells an operator a drain has stalled; the timestamps alone do not.
+   */
+  timingStats(): {
+    oldest_pending_at: string | null;
+    last_completed_at: string | null;
+    last_failed_at: string | null;
+  } {
+    const oldest = this.db.prepare(
+      "SELECT MIN(updated_at) as t FROM compile_jobs WHERE status = 'pending'",
+    ).get() as { t: string | null };
+    const completed = this.db.prepare(
+      "SELECT MAX(completed_at) as t FROM compile_jobs WHERE status = 'done'",
+    ).get() as { t: string | null };
+    const failed = this.db.prepare(
+      "SELECT MAX(completed_at) as t FROM compile_jobs WHERE status = 'failed'",
+    ).get() as { t: string | null };
+    return {
+      oldest_pending_at: oldest.t,
+      last_completed_at: completed.t,
+      last_failed_at: failed.t,
+    };
+  }
+
+  /**
    * Drop every job of a scope (FORGET.SCOPE erasure, spec §10): erased
    * observations must never be re-derived by the worker, and the queue is a
    * derived artifact whose source rows are now erased. Returns rows removed.

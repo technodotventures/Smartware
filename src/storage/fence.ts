@@ -71,12 +71,15 @@ export interface FenceRefusal {
 
 export interface FenceStoreState {
   high_water: number;
+  /** When the high-water epoch last advanced (or the store was created). */
+  updated_at: string;
   refusals: number;
   last_refusal: FenceRefusal | null;
 }
 
 interface FenceRow {
   high_water: number;
+  updated_at: string;
   refusals: number;
   last_refusal_at: string | null;
   last_refusal_op: string | null;
@@ -138,6 +141,7 @@ export class FenceStore {
     const row = this.readRow();
     return {
       high_water: row.high_water,
+      updated_at: row.updated_at,
       refusals: row.refusals,
       last_refusal: row.last_refusal_at === null
         ? null
@@ -309,7 +313,7 @@ export class FenceStore {
   private readRow(): FenceRow {
     const row = this.db
       .prepare(
-        'SELECT high_water, refusals, last_refusal_at, last_refusal_op, last_refusal_token, last_refusal_high_water '
+        'SELECT high_water, updated_at, refusals, last_refusal_at, last_refusal_op, last_refusal_token, last_refusal_high_water '
         + 'FROM writer_fence WHERE id = 1',
       )
       .get() as FenceRow | undefined;

@@ -63,12 +63,11 @@ import type { Actor, Observation } from './layer0/types.js';
 import type { ClaimRelation, EpistemicTag } from './layer1/types.js';
 import { epistemicToTag } from './layer1/types.js';
 import { runDefaultDream, type DreamResult } from './dream/phases.js';
-import { runRecovery, type RecoveryReport } from './ops_log/recovery.js';
-import type { MutationFence } from './ops_log/commit.js';
+import { runRecovery } from './ops_log/recovery.js';
 import { ensurePrivateDirectory } from './storage/private-fs.js';
 import { FenceStore } from './storage/fence.js';
 
-import { handleObserve, type ObserveParams, type ObserveResult, type ObserveCommitHooks } from './protocol/observe.js';
+import { handleObserve, type ObserveParams, type ObserveResult } from './protocol/observe.js';
 import {
   handleQuery,
   recallMinimumConfidence,
@@ -88,11 +87,6 @@ import {
   type ForgetScopeParams,
   type ForgetScopeResult,
 } from './protocol/forget_scope.js';
-import {
-  handleHoldRelease,
-  type HoldReleaseParams,
-  type HoldReleaseResult,
-} from './protocol/hold_release.js';
 import {
   handleExportScope,
   type ExportScopeParams,
@@ -118,6 +112,10 @@ import {
   type SessionDescribeResult, type SessionEndResult,
 } from './protocol/session.js';
 import { handleStatus, type StatusResult } from './protocol/status.js';
+import { handleHealth, type HealthParams, type HealthReport } from './protocol/health.js';
+import { MetricsStore, defaultMetricsPath } from './observability/metrics.js';
+import { LatencyRecorder } from './observability/latency.js';
+import { installObservability } from './observability/instrument.js';
 import { handleContext, type ContextParams, type ContextBundle } from './protocol/context.js';
 import { SessionStore } from './session/store.js';
 import { createGrant, getGrantForActor, isOwner, checkGrant } from './auth/grants.js';
@@ -142,12 +140,6 @@ export interface SmartwareCoreOptions {
    * higher epoch. Omit for legacy, unfenced operation.
    */
   fencingToken?: number;
-  /**
-   * Crash-boundary test seam (not for production use): hooks fired inside OBSERVE's commit
-   * sequence (after the intent, after the L0 artifact, after the commit signal). The resilience
-   * gauntlet uses them to pause a process deterministically mid-mutation. No effect when omitted.
-   */
-  commitHooks?: ObserveCommitHooks;
 }
 
 /** Public fencing state of a core writer (ADR-0007). */
@@ -158,6 +150,8 @@ export interface FencingState {
   token: number | null;
   /** The highest epoch this brain has seen. */
   high_water: number;
+  /** When the current epoch was claimed (null when no epoch has been seen). */
+  claimed_at: string | null;
   /** Canonical mutations refused by the guard so far. */
   refusals: number;
   /** The most recent refusal, or null. */
@@ -382,14 +376,14 @@ export class SmartwareCore {
   /** Fencing epoch state (ADR-0007); null token = legacy unfenced writer. */
   private readonly fence: FenceStore;
   private fenceToken: number | null = null;
-  /** The brain's canonical writer identity (config.writer_id) — stamped with the epoch. */
-  private writerId = '';
-  /** Crash-boundary test seam forwarded into OBSERVE (see SmartwareCoreOptions.commitHooks). */
-  private observeHooks: ObserveCommitHooks | null = null;
-  /** Recovery report captured at open (ADR-0010); see lastRecoveryReport(). */
-  private openRecoveryReport: RecoveryReport | null = null;
+  /** Durable operational metrics (refusals, latency, recovery summaries). */
+  private readonly metrics: MetricsStore;
+  /** In-process latency buffer; flushed to `metrics` on report / close. */
+  private readonly latency: LatencyRecorder;
+  /** When this process opened the brain (health: restart detection / uptime). */
+  private readonly openedAt: string = new Date().toISOString();
 
-  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore) {
+  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore, metrics: MetricsStore, latency: LatencyRecorder) {
     this.dataDir = dataDir;
     this.evidenceDir = path.join(dataDir, 'evidence');
     this.wikiDir = path.join(dataDir, 'wiki');
@@ -399,6 +393,8 @@ export class SmartwareCore {
     this.searchIndex = searchIndex;
     this.sessionStore = sessionStore;
     this.fence = fence;
+    this.metrics = metrics;
+    this.latency = latency;
     this.previewStore = new CascadePreviewStore(path.join(dataDir, 'indices', 'previews.db'));
     // Ingestion ledger (batch receipts + stream cursors). Operational state:
     // see the honesty note in src/ingestion/store.ts.
@@ -417,11 +413,10 @@ export class SmartwareCore {
     const searchIndex = new SearchIndex(dbPath);
     const sessionStore = new SessionStore(dbPath);
     const fence = FenceStore.open(dbPath);
+    const metrics = MetricsStore.open(defaultMetricsPath(options.dataDir));
+    const latency = new LatencyRecorder(metrics);
 
-    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence);
-    // Canonical writer identity + the crash-boundary hook seam (ADR-0010 / test harness).
-    core.writerId = loadConfig(options.dataDir).writer_id;
-    core.observeHooks = options.commitHooks ?? null;
+    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence, metrics, latency);
     // ADR-0007: a fenced writer claims its epoch before any recovery or derived-index
     // work. A stale owner fails fast here — it must not run recovery or write anything.
     if (options.fencingToken !== undefined) {
@@ -437,18 +432,29 @@ export class SmartwareCore {
     store.setDataDir(options.dataDir);
     // Finalize only exact intent-backed canonical artifacts before derived
     // indices catch up. Ambiguous operations remain untouched for Dream/manual
-    // review; startup never invents a completion decision. Storage-level fencing
-    // (ADR-0010): uncommitted sets from an epoch behind the high-water mark are
-    // rejected as a set and reported — never finalized, never merged.
+    // review; startup never invents a completion decision.
     const recovery = runRecovery({
       opsDir: core.opsDir,
       evidenceDir: core.evidenceDir,
       claimsDir: core.dataDir,
       wikiDir: core.wikiDir,
       quarantineDir: path.join(core.dataDir, 'quarantine', 'operations'),
-      fence: core.mutationFence(),
     });
-    core.openRecoveryReport = recovery;
+    // The recovery scan is an operational event: record what it found at open so
+    // a host can alert on "this brain has been recovering" without reading logs.
+    // Counts only — no locators, no content (see docs/integration/observability.md).
+    metrics.recordRecovery({
+      at: new Date().toISOString(),
+      opened_at: core.openedAt,
+      committed_operations: recovery.committedOperations,
+      orphans: recovery.orphans.length,
+      pending_operations: recovery.pendingOperations.length,
+      intent_errors: recovery.intentErrors.length,
+      requires_manual_review: recovery.requiresManualReview.length,
+      completed: recovery.completed.length,
+      quarantined: recovery.quarantined.length,
+      aborted: recovery.aborted.length,
+    });
     layer0.catchUp(core.evidenceDir);
     if (recovery.pendingOperations.length === 0) {
       await replayCatchUp(core.evidenceDir, store, layer0);
@@ -499,7 +505,8 @@ export class SmartwareCore {
     // GC once on open so a long-stopped Pod doesn't accumulate stale rows.
     core.previewStore.gc();
 
-    return core;
+    // Host-facing accounting (refusals + latency) is installed at the boundary.
+    return installObservability(core, metrics, latency);
   }
 
   /**
@@ -522,6 +529,7 @@ export class SmartwareCore {
       enabled: state.high_water > 0,
       token: this.fenceToken,
       high_water: state.high_water,
+      claimed_at: state.high_water > 0 ? state.updated_at : null,
       refusals: state.refusals,
       last_refusal: state.last_refusal,
     };
@@ -539,38 +547,6 @@ export class SmartwareCore {
    */
   private fenceGuard(op: string): void {
     this.fence.guard(this.fenceToken, op);
-  }
-
-  /**
-   * The mutation fence adapter (ADR-0010) handed to every canonical writer: the writer-path
-   * commit gate (`stamp` + `guardCommit`) and the recovery dispositions (`highWater`,
-   * `authorization`, `authorizeAtEpoch`) over this brain's fence store.
-   */
-  private mutationFence(): MutationFence {
-    return {
-      stamp: () => (this.fenceToken === null
-        ? null
-        : { epoch: this.fenceToken, writer_id: this.writerId }),
-      guardCommit: (operationIds: string[], op: string) => {
-        const stamp = this.fenceToken === null
-          ? null
-          : { epoch: this.fenceToken, writer_id: this.writerId };
-        this.fence.guardCommit(operationIds, stamp, op);
-      },
-      highWater: () => this.fence.highWater(),
-      authorization: (operationId: string) => this.fence.authorization(operationId),
-      authorizeAtEpoch: (operationIds: string[], epoch: number, writerId: string) =>
-        this.fence.authorizeAtEpoch(operationIds, epoch, writerId),
-    };
-  }
-
-  /**
-   * The recovery report from this writer's open (ADR-0010 surface): how the brain classified
-   * intent-backed state when it last opened, including `staleEpochRejected` — uncommitted sets
-   * from an epoch behind the high-water mark, rejected and never merged. Null before open.
-   */
-  lastRecoveryReport(): RecoveryReport | null {
-    return this.openRecoveryReport;
   }
 
   getConfig(): SmartwareConfig {
@@ -696,7 +672,6 @@ export class SmartwareCore {
 
   async observe(params: ObserveParams): Promise<ObserveResult> {
     this.fenceGuard('observe');
-    const hostHooks = this.observeHooks;
     return handleObserve(
       params,
       this.evidenceDir,
@@ -705,15 +680,9 @@ export class SmartwareCore {
       this.sessionStore,
       this.opsDir,
       {
-        ...(hostHooks ?? {}),
-        afterObservation: obs => {
-          // Sync-raw freshness (spec §10a) + async-compile (spec §9.1), then the host hook
-          // (crash-boundary test seam; may be async — awaited inside handleObserve).
-          this.afterObservationCommitted(obs);
-          return hostHooks?.afterObservation?.(obs);
-        },
+        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1).
+        afterObservation: obs => this.afterObservationCommitted(obs),
       },
-      this.mutationFence(),
     );
   }
 
@@ -1226,7 +1195,7 @@ export class SmartwareCore {
       this.searchIndex,
       this.getConfig(),
       this.dataDir,
-      { opsDir: this.opsDir, fence: this.mutationFence() },
+      { opsDir: this.opsDir },
     );
   }
 
@@ -1253,7 +1222,6 @@ export class SmartwareCore {
       searchIndex: this.searchIndex,
       config: this.getConfig(),
       opsDir: this.opsDir,
-      fence: this.mutationFence(),
       queue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
     };
@@ -1288,7 +1256,7 @@ export class SmartwareCore {
     }
     const substrateId = `substrate:${config.instance_id.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
     return runDefaultDream(
-      { opsDir: this.opsDir, fence: this.mutationFence() },
+      { opsDir: this.opsDir },
       substrateId,
       params.scope,
       {
@@ -1297,7 +1265,6 @@ export class SmartwareCore {
         wikiDir: this.wikiDir,
         quarantineDir: path.join(this.dataDir, 'quarantine', 'operations'),
         reportDir: path.join(this.dataDir, 'derived', 'dream'),
-        fence: this.mutationFence(),
       },
     );
   }
@@ -1459,24 +1426,43 @@ export class SmartwareCore {
   async correct(params: CorrectParams): Promise<CorrectResult> {
     this.fenceGuard('correct');
     const result = await handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
-    // Keep the claim-FTS surface truthful after a correction (mirrors
-    // CONSOLIDATE): handleCorrect appends a NEW claim id via replay, and without
-    // this sync the corrected understanding is invisible to RECALL until the
-    // next rebuild — the correction exists but cannot be read.
-    const affectedScope = this.store.getClaim(result.new_claim_id ?? params.target_claim_id)?.scope;
-    if (affectedScope) syncSearchFromClaims(this.store, this.searchIndex, affectedScope);
+    // Keep the claim-FTS surface truthful, exactly as `consolidate()` does below:
+    // CORRECT retracts the target claim and spawns a replacement, and both halves
+    // live in the derived rows the index is built from. A verb that appends claim
+    // versions without re-syncing leaves the replacement unfindable — a warranted
+    // correction answers *nothing* until some later write re-syncs the scope
+    // (measured through the Coffee adapter, kanban t_8ddfa350; retention replay
+    // hides the retracted side already, so the verdict was an empty result set,
+    // which a user cannot tell apart from data loss).
+    const correctedScope = this.store.getClaim(result.original_claim_id)?.scope;
+    syncSearchFromClaims(this.store, this.searchIndex, correctedScope);
     return result;
   }
 
   async revise(params: ReviseParams): Promise<ReviseResult> {
     this.fenceGuard('revise');
-    return handleReviseSpec(
+    const result = await handleReviseSpec(
       params,
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir, fence: this.mutationFence() },
+      { opsDir: this.opsDir },
     );
+    // Keep the claim-FTS surface truthful, exactly as `correct()` above and
+    // `consolidate()` below do: REVISE appends a claim version through the
+    // store, and the derived rows the index is built from move with it. A verb
+    // that resyncs nothing answers a warranted revision with a claim the search
+    // lane cannot see — the other half of the corrected claim keeps answering,
+    // the revised one does not, until some later write happens to re-sync the
+    // scope (measured through the Coffee adapter, kanban t_336ba0b9: in-process
+    // recall served one row while every restart — the canonical surface —
+    // served two). The re-sync is semantics-neutral on purpose: it makes the
+    // live lane equal whatever the store says is indexable, so it holds
+    // whether a REVISE leaves the target active or (per the demotion
+    // carry-forward decision, t_742e31f9) still superseded.
+    const revisedScope = this.store.getClaim(result.claim_id)?.scope;
+    syncSearchFromClaims(this.store, this.searchIndex, revisedScope);
+    return result;
   }
 
   async forget(params: ForgetParams): Promise<ForgetResult> {
@@ -1487,7 +1473,7 @@ export class SmartwareCore {
       this.layer0,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir, fence: this.mutationFence() },
+      { opsDir: this.opsDir },
     );
     // Keep the raw-search window truthful after mutations: a terminal
     // observation (tombstone/redaction → tombstoned/redacted) must leave the
@@ -1518,25 +1504,10 @@ export class SmartwareCore {
       store: this.store,
       searchIndex: this.searchIndex,
       config,
-      commitCtx: { opsDir: this.opsDir, fence: this.mutationFence() },
+      commitCtx: { opsDir: this.opsDir },
       semanticStore: options.semanticStore ?? null,
       compileQueue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
-    });
-  }
-
-  /**
-   * HOLD.RELEASE (ADR-0009): the audited owner act that lifts a legal hold.
-   * Owner-only; idempotent per operation_id. While a hold is open, erasure is
-   * refused (`legal_hold_open`) and the retention sweep skips the scope; the
-   * release lifts both. It does not revive offboarded state.
-   */
-  async releaseHold(params: HoldReleaseParams): Promise<HoldReleaseResult> {
-    const config = this.getConfig();
-    return handleHoldRelease(params, {
-      dataDir: this.dataDir,
-      opsDir: this.opsDir,
-      config,
     });
   }
 
@@ -1571,14 +1542,9 @@ export class SmartwareCore {
       opsDir: this.opsDir,
       store: this.store,
       config,
-      fence: this.mutationFence(),
     });
     if (result.status === 'restored') {
-      // Full Layer-0 rebuild, not an incremental catch-up: restored records carry
-      // their ORIGINAL sequences, which can sit below this brain's replay
-      // watermark — catch-up would skip them (and their scope-level markers)
-      // silently. The index is a regenerable projection; a restore is rare.
-      this.layer0.rebuildIndex(this.evidenceDir);
+      this.layer0.catchUp(this.evidenceDir);
       this.store.setDataDir(this.dataDir);
       syncSearchFromClaims(this.store, this.searchIndex, result.scope);
       syncObservationsFromEvidence(this.evidenceDir, this.layer0, this.searchIndex);
@@ -1602,7 +1568,6 @@ export class SmartwareCore {
       store: this.store,
       config,
       opsDir: this.opsDir,
-      fence: this.mutationFence(),
     });
   }
 
@@ -1618,7 +1583,7 @@ export class SmartwareCore {
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir, fence: this.mutationFence() },
+      { opsDir: this.opsDir },
     );
     // Keep the claim-FTS surface truthful: the consolidated claim must be
     // findable and the tombstoned inputs must leave the index.
@@ -1647,7 +1612,7 @@ export class SmartwareCore {
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir, fence: this.mutationFence() },
+      { opsDir: this.opsDir },
       this.store.getDB(),
     );
   }
@@ -1660,7 +1625,7 @@ export class SmartwareCore {
       this.store,
       this.previewStore,
       this.getConfig(),
-      { opsDir: this.opsDir, fence: this.mutationFence() },
+      { opsDir: this.opsDir },
     );
   }
 
@@ -1735,6 +1700,40 @@ export class SmartwareCore {
     );
   }
 
+  /**
+   * Host-facing health/metrics report (P1-3). Owner or read-granted actor;
+   * counts, states and ids only — never tenant content. See
+   * `src/protocol/health.ts` and docs/integration/observability.md for the
+   * field definitions.
+   */
+  async health(params: HealthParams): Promise<HealthReport> {
+    const state = this.fencingState();
+    return handleHealth(params, {
+      config: this.getConfig(),
+      layer0: this.layer0,
+      store: this.store,
+      searchIndex: this.searchIndex,
+      wikiDir: this.wikiDir,
+      compileQueue: this.compileQueue,
+      metrics: this.metrics,
+      latency: this.latency,
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      ingestionStatus: () => computeSourceSyncStatus(this.getConfig(), this.ingestionStore),
+      openedAt: this.openedAt,
+      ownership: {
+        arbitration: 'external',
+        enforcement: state.enabled ? 'fencing' : 'none',
+        role: state.token !== null ? 'writer' : (state.enabled ? 'observer' : 'unfenced_writer'),
+        epoch_high_water: state.high_water,
+        epoch_claimed_at: state.claimed_at,
+        presented_token: state.token,
+        refusals: state.refusals,
+        last_refusal: state.last_refusal,
+      },
+    });
+  }
+
   findObservationBySource(app: string, sourceId: string, scope: string): string | null {
     return this.layer0.checkDedup(app, sourceId, scope);
   }
@@ -1747,6 +1746,8 @@ export class SmartwareCore {
     this.compileQueue?.close();
     this.fingerprintIndex?.close();
     this.fence.close();
+    this.latency.close();
+    this.metrics.close();
     this.layer0.close();
     this.store.close();
     this.searchIndex.close();
@@ -1901,5 +1902,6 @@ export * from './protocol/retention.js';
 export * from './protocol/consolidate.js';
 export * from './protocol/session.js';
 export * from './protocol/status.js';
+export * from './protocol/health.js';
 export * from './session/types.js';
 export * from './session/checkpoint.js';

@@ -443,6 +443,38 @@ without a fence) are not epoch-gated; fencing is only as strong as the token iss
 must be monotonic per acquisition, and single-node Redis is not a consensus store. Full detail:
 ADR-0010.
 
+### 1i. Operate it: health, metrics and trial SLOs
+
+Poll `core.health({ actor, backup_dir? })` (or MCP `smartware_health`) instead of scraping
+logs. One report carries the lease state (`ownership.role` / holder epoch + age — the TTL
+stays yours, the brain enforces epochs, not expiry), brain-open state, compile queue
+depth/oldest-pending age/failures, ingestion cursor lag per `(source, scope)` stream,
+lane-explicit counts, drift records, denied-access counts, retention/forget receipts, storage
+bytes by area, backup freshness, recall/write latency histograms and recovery events.
+
+Read the SLO verdict first: `slo.status ∈ ok | breach | unknown`. **`unknown` is not `ok`** —
+it means an objective has no evidence yet (fewer than 20 latency samples, nothing synced, no
+backup directory configured). Alert on `breach`, on any `drift` record, and on
+`ownership.role === 'observer'` for a process that believes it is the writer.
+
+Authority fails closed: the owner sees the whole brain; a read-granted actor sees its readable
+scopes' counts and nothing else. The report is counts, states, ids and time — it cannot carry
+tenant content. Field definitions, the threshold table and the cost per block:
+[docs/integration/observability.md](observability.md); the decision record is
+[ADR-0008](../adr/0008-host-facing-health-contract.md).
+
+### 1i. Coffee reference adapter (a drop-in, executable contract)
+
+The deployment patterns above are assembled into a drop-in adapter with an
+executable local proof: `examples/coffee-adapter/adapter.mjs` (public package
+imports only, no Redis driver, no model credential), the tenant template
+`examples/coffee-adapter/config.template.json`, and
+`npm run verify:coffee-adapter` (53 deterministic checks, no network, no
+sleeps). Read [coffee-adapter.md](coffee-adapter.md) for the ports contract,
+the write/retry/degraded semantics, the migration and rollback staging, and the
+explicit not-yet-proven list. ADR:
+[ADR-0010](../adr/0010-coffee-reference-adapter.md).
+
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
 Coffee's binding shape (spec §10b) — proved by
