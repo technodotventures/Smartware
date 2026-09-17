@@ -63,11 +63,12 @@ import type { Actor, Observation } from './layer0/types.js';
 import type { ClaimRelation, EpistemicTag } from './layer1/types.js';
 import { epistemicToTag } from './layer1/types.js';
 import { runDefaultDream, type DreamResult } from './dream/phases.js';
-import { runRecovery } from './ops_log/recovery.js';
+import { runRecovery, type RecoveryReport } from './ops_log/recovery.js';
+import type { MutationFence } from './ops_log/commit.js';
 import { ensurePrivateDirectory } from './storage/private-fs.js';
 import { FenceStore } from './storage/fence.js';
 
-import { handleObserve, type ObserveParams, type ObserveResult } from './protocol/observe.js';
+import { handleObserve, type ObserveParams, type ObserveResult, type ObserveCommitHooks } from './protocol/observe.js';
 import {
   handleQuery,
   recallMinimumConfidence,
@@ -141,6 +142,8 @@ export interface SmartwareCoreOptions {
    * higher epoch. Omit for legacy, unfenced operation.
    */
   fencingToken?: number;
+  /** Crash-boundary test seam (ADR-0010): fired at intent / observation / commit. */
+  commitHooks?: ObserveCommitHooks;
 }
 
 /** Public fencing state of a core writer (ADR-0007). */
@@ -383,6 +386,12 @@ export class SmartwareCore {
   private readonly latency: LatencyRecorder;
   /** When this process opened the brain (health: restart detection / uptime). */
   private readonly openedAt: string = new Date().toISOString();
+  /** The brain's canonical writer identity (config.writer_id) — stamped with the epoch. */
+  private writerId = '';
+  /** Crash-boundary test seam forwarded into OBSERVE (see SmartwareCoreOptions.commitHooks). */
+  private observeHooks: ObserveCommitHooks | null = null;
+  /** Recovery report captured at open (ADR-0010); see lastRecoveryReport(). */
+  private openRecoveryReport: RecoveryReport | null = null;
 
   private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore, metrics: MetricsStore, latency: LatencyRecorder) {
     this.dataDir = dataDir;
@@ -418,6 +427,9 @@ export class SmartwareCore {
     const latency = new LatencyRecorder(metrics);
 
     const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence, metrics, latency);
+    // Canonical writer identity + the crash-boundary hook seam (ADR-0010 / test harness).
+    core.writerId = loadConfig(options.dataDir).writer_id;
+    core.observeHooks = options.commitHooks ?? null;
     // ADR-0007: a fenced writer claims its epoch before any recovery or derived-index
     // work. A stale owner fails fast here — it must not run recovery or write anything.
     if (options.fencingToken !== undefined) {
@@ -440,7 +452,9 @@ export class SmartwareCore {
       claimsDir: core.dataDir,
       wikiDir: core.wikiDir,
       quarantineDir: path.join(core.dataDir, 'quarantine', 'operations'),
+      fence: core.mutationFence(),
     });
+    core.openRecoveryReport = recovery;
     // The recovery scan is an operational event: record what it found at open so
     // a host can alert on "this brain has been recovering" without reading logs.
     // Counts only — no locators, no content (see docs/integration/observability.md).
@@ -548,6 +562,38 @@ export class SmartwareCore {
    */
   private fenceGuard(op: string): void {
     this.fence.guard(this.fenceToken, op);
+  }
+
+  /**
+   * The storage-level fence (ADR-0010): stamps the ownership epoch into the intent and the
+   * commit signal, and gates the commit against the persisted high-water mark so a stale
+   * writer's partial artifact set is refused at the gate — never finalized, never merged.
+   */
+  private mutationFence(): MutationFence {
+    return {
+      stamp: () => (this.fenceToken === null
+        ? null
+        : { epoch: this.fenceToken, writer_id: this.writerId }),
+      guardCommit: (operationIds: string[], op: string) => {
+        const stamp = this.fenceToken === null
+          ? null
+          : { epoch: this.fenceToken, writer_id: this.writerId };
+        this.fence.guardCommit(operationIds, stamp, op);
+      },
+      highWater: () => this.fence.highWater(),
+      authorization: (operationId: string) => this.fence.authorization(operationId),
+      authorizeAtEpoch: (operationIds: string[], epoch: number, writerId: string) =>
+        this.fence.authorizeAtEpoch(operationIds, epoch, writerId),
+    };
+  }
+
+  /**
+   * The recovery report from this writer's open (ADR-0010 surface): how the brain classified
+   * intent-backed state when it last opened, including `staleEpochRejected` — uncommitted sets
+   * from an epoch behind the high-water mark, rejected and never merged. Null before open.
+   */
+  lastRecoveryReport(): RecoveryReport | null {
+    return this.openRecoveryReport;
   }
 
   getConfig(): SmartwareConfig {
@@ -685,6 +731,7 @@ export class SmartwareCore {
 
   async observe(params: ObserveParams): Promise<ObserveResult> {
     this.fenceGuard('observe');
+    const hostHooks = this.observeHooks;
     return handleObserve(
       params,
       this.evidenceDir,
@@ -693,9 +740,15 @@ export class SmartwareCore {
       this.sessionStore,
       this.opsDir,
       {
-        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1).
-        afterObservation: obs => this.afterObservationCommitted(obs),
+        ...(hostHooks ?? {}),
+        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1), then the host hook
+        // (crash-boundary test seam; may be async — awaited inside handleObserve).
+        afterObservation: obs => {
+          this.afterObservationCommitted(obs);
+          return hostHooks?.afterObservation?.(obs);
+        },
       },
+      this.mutationFence(),
     );
   }
 

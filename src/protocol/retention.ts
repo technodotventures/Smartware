@@ -29,7 +29,7 @@ import { assignIntegrity } from '../layer0/integrity.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
-import type { SmartwareConfig } from '../config.js';
+import { isScopeHeld, loadConfig, type SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { readLatestVersion, appendClaimVersion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
@@ -73,6 +73,8 @@ export interface ExpireRetentionResult {
    * the `operation_id` of the single `retention.expire` entry this sweep writes.
    */
   operation_id: string;
+  /** Set when the sweep was skipped by an open legal hold (ADR-0009). */
+  skipped_reason?: 'legal_hold';
 }
 
 export interface RetentionDeps {
@@ -181,6 +183,34 @@ export async function handleExpireRetention(
         operation_id: params.operation_id,
       };
     }
+  }
+
+  // ── Legal hold (ADR-0009): expiry never fires under a hold. The skip is
+  //    explicit and receipted — nothing is tombstoned, including evidence
+  //    written into the scope after the hold opened. Consulted after the
+  //    operation_id replay above so a sweep that already committed still
+  //    replays its recorded result.
+  if (isScopeHeld(loadConfig(deps.dataDir), params.scope)) {
+    appendOpLogEntry(deps.opsDir, {
+      operation_id: sweepOperationId,
+      actor_id: operationActorId,
+      timestamp: new Date().toISOString(),
+      op: 'retention.expire',
+      details: {
+        scope: params.scope,
+        observations_expired: 0,
+        claims_retracted: 0,
+        as_of: asOf.toISOString(),
+        skipped: 'legal_hold',
+      },
+    });
+    return {
+      scope: params.scope,
+      observations_expired: 0,
+      claims_retracted: 0,
+      operation_id: sweepOperationId,
+      skipped_reason: 'legal_hold',
+    };
   }
 
   const expired: Observation[] = [];

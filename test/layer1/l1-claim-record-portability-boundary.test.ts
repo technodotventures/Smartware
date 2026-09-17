@@ -394,7 +394,7 @@ describe('which schema covers the canonical L1 claim record, and the copy EXPORT
    * so a third divergence cannot hide behind it and this file fails loudly when the fix lands: invert
    * it to an empty list then.
    */
-  test('carded residual (t_3ba3ee39): a version >= 2 or born-forgotten record omits `supersedes`', async () => {
+  test('t_3ba3ee39 CLOSED: `insertClaim` stamps `supersedes` on every version > 1 record', async () => {
     const extra = await newFixture();
     seedSubject(extra);
     const first = claimFor();
@@ -408,11 +408,12 @@ describe('which schema covers the canonical L1 claim record, and the copy EXPORT
     assert.ok(v2, 'the second version was written');
     assert.ok(forgotten, 'the forgotten version was written');
 
-    const CARDED = ['/:if', '/:required:supersedes'];
-    expect({ v2: errorKeys(validate, v2.record) }).toEqual({ v2: CARDED });
-    expect({ forgotten: errorKeys(validate, forgotten.record) }).toEqual({ forgotten: CARDED });
-    // The version rule itself is not in question: once the writer names the version it replaces, the
-    // record validates (asserted on the hand-built shape here, so this stays true after the fix lands).
-    expect(errorKeys(validate, { ...v2.record, supersedes: 1 })).toEqual([]);
+    // The carded residual is closed: `insertClaim` stamps `supersedes: version - 1` on every
+    // version > 1 record (store.ts), so the schema's `if version >= 2` branch is satisfied and the
+    // residual error list is empty. The born-forgotten version-1 record still omits it (replaces nothing).
+    expect({ v2: errorKeys(validate, v2.record) }).toEqual({ v2: [] });
+    expect({ forgotten: errorKeys(validate, forgotten.record) }).toEqual({ forgotten: [] });
+    // The stamped value is the exact prior version number.
+    expect(v2.record.supersedes).toBe(1);
   }, 120_000);
 });

@@ -158,9 +158,8 @@ describe('the retention sweep stamps an OperationId the published contract accep
     // (`ExpireRetentionParams.operation_id` and the MCP tool's are both optional).
     const result = await core.expireRetention({ actor: OWNER, scope: ACME, as_of: AS_OF });
     expect(result.claims_retracted).toBe(1);
-    // The result echoes the caller's id; with none supplied it stays unset — the record-level
-    // stamp below is the writer's, not the operation's.
-    expect(result.operation_id).toBeUndefined();
+    // ADR-0013: the result echoes the minted id — the same id stamped on the record below.
+    expect(result.operation_id).toMatch(publishedOperationIdPattern());
 
     const record = latestLine(claimId);
     console.log('[t_0177d9c3] forgotten record operation_id:', JSON.stringify(record.operation_id));
@@ -201,7 +200,7 @@ describe('the retention sweep stamps an OperationId the published contract accep
     expect(claim(record) as boolean).toBe(true);
   });
 
-  test('a multi-claim sweep mints one valid id per retracted record', async () => {
+  test('a multi-claim sweep mints one valid id shared by every retracted record', async () => {
     const first = await scaffoldExpiredClaim('Acme prefers email');
     assert.ok(core);
     // A second elapsed observation whose sole evidence is a second claim, swept in the same call.
@@ -237,9 +236,9 @@ describe('the retention sweep stamps an OperationId the published contract accep
     const pattern = publishedOperationIdPattern();
     const ids = [latestLine(first.claimId), latestLine(second.id)].map(r => r.operation_id as string);
     for (const id of ids) expect(id).toMatch(pattern);
-    // Per-record minting (the `forget_scope` convention), not one synthetic id reused: no two
-    // records of the same sweep collide, so a later retry cannot replay the wrong one.
-    expect(new Set(ids).size).toBe(2);
+    // ADR-0013: one sweep, one OperationId — every retracted record shares the sweep's committed
+    // id, so the whole sweep replays as one unit on retry.
+    expect(new Set(ids).size).toBe(1);
   });
 
   test('the pre-fix fallback is exactly what the published pattern rejects', () => {
