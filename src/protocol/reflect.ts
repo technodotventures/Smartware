@@ -450,13 +450,20 @@ export async function handleCompile(
   commitHooks?: ReflectCommitHooks,
 ): Promise<CompileHandlerResult> {
   // Omitting scope compiles ALL scopes; only the owner may do that. A non-owner
-  // must name a scope they're granted, else the 'personal' grant check would
+  // must name a scope they're granted, else a grant check on one lane would
   // authorise a compile across every scope.
   if (!params.scope && !isOwner(params.actor.id, config)) {
     throw new ProtocolError('invalid_scope', 'A scope is required to compile; only the owner may compile all scopes.');
   }
-  const targetScope = params.scope ?? 'personal';
-  requireGrant(params.actor.id, 'compile', targetScope, config);
+  // `undefined` IS the "every scope" spelling — the same absence the rest of
+  // this handler and its callees already read (CompileOptions.scope, the
+  // compiler's `if (options.scope && …)` gather guard, reflectAutoCreateClaims'
+  // scope filter, syncSearchFromClaims). Never a lane literal: filtering claim
+  // production by an unregistered lane and then naming that lane in the
+  // operations log is a scope the caller never asked for. An unnamed compile is
+  // owner-gated above, so the grant check applies only to a named lane.
+  const targetScope = params.scope;
+  if (targetScope) requireGrant(params.actor.id, 'compile', targetScope, config);
 
   if (params.operation_id && !OPERATION_ID_PATTERN.test(params.operation_id)) {
     throw new ProtocolError('invalid_parameter', `Invalid operation_id '${params.operation_id}'`);
@@ -567,7 +574,7 @@ export async function handleCompile(
   }
 
   const options: CompileOptions = {
-    scope: params.scope,
+    scope: targetScope,
     entityId: params.entity_id,
     useLLM: params.use_llm ?? false,
     observations: dataDir ? observations : undefined,
@@ -631,7 +638,11 @@ export async function handleCompile(
         op: 'reflect.explicit',
         details: {
           payload_hash: parentPayloadHash,
-          scope: targetScope,
+          // The lane the caller named, or null for an unscoped run — never a
+          // lane literal. `null` is the same spelling `payload_hash` above is
+          // computed over, so the entry stays self-consistent, and it is
+          // distinguishable from a key the writer forgot to emit.
+          scope: targetScope ?? null,
           claims_created: reflectionStats.claimsCreated,
           pages_compiled: 0,
           synthesis_deferred: true,
@@ -676,7 +687,7 @@ export async function handleCompile(
       op: 'reflect.explicit',
       details: {
         payload_hash: parentPayloadHash,
-        scope: targetScope,
+        scope: targetScope ?? null,
         claims_created: reflectionStats.claimsCreated,
         pages_compiled: compiled.pages.length,
       },
@@ -709,7 +720,9 @@ async function reflectAutoCreateClaims(
   dataDir: string,
   layer0: Layer0Index,
   store: ClaimStore,
-  scope: string,
+  /** The lane to compile, or `undefined` for every scope (owner-gated by the
+   *  caller) — the filter below treats absence as "no scope filter". */
+  scope: string | undefined,
   config: SmartwareConfig,
   useLLM: boolean,
   commitCtx?: CommitContext,
