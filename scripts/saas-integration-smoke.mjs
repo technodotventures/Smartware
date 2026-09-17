@@ -3,14 +3,14 @@
 // resolves through package.json "exports", so this file fails to run if any of these
 // paths stop being public. (It previously imported ../dist/... deep paths, which
 // "exports" enforcement blocks for consumers: the example could not be reproduced.)
-import { SmartwareCore, createDefaultConfig, knownTime, nullTime, canonicalKey } from 'smartware';
-import { showAttributionByDefault, attributionLine, whySentence } from 'smartware/render';
-import { ClaimStore } from 'smartware/layer1';
-import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
-import { admitClaim } from 'smartware/layer1/conflicts';
-import { computeConfidence } from 'smartware/layer1/confidence';
-import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
-import { MAX_INGEST_ITEMS } from 'smartware/ingestion';
+import { SmartwareCore, createDefaultConfig, knownTime, nullTime, canonicalKey } from '@technodotventures/smartware';
+import { showAttributionByDefault, attributionLine, whySentence } from '@technodotventures/smartware/render';
+import { ClaimStore } from '@technodotventures/smartware/layer1';
+import { addCorroborationEvidence } from '@technodotventures/smartware/layer1/corroboration';
+import { admitClaim } from '@technodotventures/smartware/layer1/conflicts';
+import { computeConfidence } from '@technodotventures/smartware/layer1/confidence';
+import { SearchIndex, syncSearchFromClaims } from '@technodotventures/smartware/layer3';
+import { MAX_INGEST_ITEMS } from '@technodotventures/smartware/ingestion';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

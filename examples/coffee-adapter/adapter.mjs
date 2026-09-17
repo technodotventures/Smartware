@@ -51,12 +51,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { SmartwareCore, createDefaultConfig, knownTime, nullTime } from 'smartware';
-import { ClaimStore } from 'smartware/layer1';
-import { admitClaim } from 'smartware/layer1/conflicts';
-import { computeConfidence } from 'smartware/layer1/confidence';
-import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
-import { showAttributionByDefault, attributionLine, whySentence } from 'smartware/render';
+import { SmartwareCore, createDefaultConfig, knownTime, nullTime } from '@technodotventures/smartware';
+import { ClaimStore } from '@technodotventures/smartware/layer1';
+import { admitClaim } from '@technodotventures/smartware/layer1/conflicts';
+import { computeConfidence } from '@technodotventures/smartware/layer1/confidence';
+import { SearchIndex, syncSearchFromClaims } from '@technodotventures/smartware/layer3';
+import { showAttributionByDefault, attributionLine, whySentence } from '@technodotventures/smartware/render';
 
 export const DEFAULT_NAMESPACE = 'coffee';
 export const DEFAULT_LEASE_TTL_MS = 8000;

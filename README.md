@@ -134,13 +134,13 @@ Smartware is deployable as an embeddable memory substrate. A SaaS host (Coffee,
 Pod, or any other) provisions one Smartware Pod per tenant and speaks to it
 through the published surface:
 
-- `import { SmartwareCore } from 'smartware'` — in-process memory engine
+- `import { SmartwareCore } from '@technodotventures/smartware'` — in-process memory engine
   (`observe`, `recall`, `reflect`, `revise`, `forget`, `forget_scope`,
   `export_scope`, `grant`, `revoke`, `session_*`, `status`).
-- `import { createSmartwareMcpServer } from 'smartware/mcp'` — transport-agnostic
+- `import { createSmartwareMcpServer } from '@technodotventures/smartware/mcp'` — transport-agnostic
   MCP adapter with every tool, including the owner-only Coffee operations
   `smartware_forget_scope` and `smartware_export_scope`.
-- `import { showAttributionByDefault, attributionLine, badge, whySentence } from 'smartware/render'`
+- `import { showAttributionByDefault, attributionLine, badge, whySentence } from '@technodotventures/smartware/render'`
   — the staff-facing provenance renderer (spec §10d). Coffee must render
   attribution through it.
 - Frozen schema sets under `schemas/v0.4.2/` and `schemas/v0.5.0/`.
@@ -227,7 +227,7 @@ session, and compatibility tools.
 Hosts can also import the embedded core:
 
 ```ts
-import { SmartwareCore } from 'smartware';
+import { SmartwareCore } from '@technodotventures/smartware';
 
 const memory = await SmartwareCore.open({
   dataDir: './smartware-data',
@@ -237,7 +237,7 @@ const memory = await SmartwareCore.open({
 Transport hosts can import the side-effect-free MCP Adapter separately:
 
 ```ts
-import { createSmartwareMcpServer } from 'smartware/mcp';
+import { createSmartwareMcpServer } from '@technodotventures/smartware/mcp';
 
 const server = createSmartwareMcpServer(memory);
 ```

@@ -30,7 +30,7 @@ Smartware provides:
 
 | Capability | Surface |
 |---|---|
-| In-process memory engine | `SmartwareCore` (`import { SmartwareCore } from 'smartware'`) |
+| In-process memory engine | `SmartwareCore` (`import { SmartwareCore } from '@technodotventures/smartware'`) |
 | MCP server (stdio, or hosted in-process) | `createSmartwareMcpServer(memory)` (`smartware/mcp`) |
 | Standalone MCP daemon | `dist/cli.js` (via `npm start`) |
 | Provenance/attribution rendering | `smartware/render` |
@@ -47,7 +47,7 @@ persistence — never the memory rules.
 ### 1a. Embedded core (recommended for a trusted in-process service)
 
 ```ts
-import { SmartwareCore } from 'smartware';
+import { SmartwareCore } from '@technodotventures/smartware';
 
 const memory = await SmartwareCore.open({
   dataDir: '/var/lib/smartware/harbor-lane', // one per business
@@ -77,8 +77,8 @@ leaked native handle.
 ### 1b. MCP adapter (in-process, side-effect-free)
 
 ```ts
-import { SmartwareCore } from 'smartware';
-import { createSmartwareMcpServer } from 'smartware/mcp';
+import { SmartwareCore } from '@technodotventures/smartware';
+import { createSmartwareMcpServer } from '@technodotventures/smartware/mcp';
 
 const memory = await SmartwareCore.open({ dataDir });
 const server = createSmartwareMcpServer(memory); // exposes every tool
@@ -116,9 +116,9 @@ Everything below is reachable from the **published package** — that is deliber
 repository's own smoke test imports exactly these paths so they cannot silently stop being public:
 
 ```ts
-import { SmartwareCore, knownTime, nullTime } from 'smartware';  // core + claim time helpers
-import { ClaimStore } from 'smartware/layer1';                   // claim persistence
-import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3'; // indexing for recall
+import { SmartwareCore, knownTime, nullTime } from '@technodotventures/smartware';  // core + claim time helpers
+import { ClaimStore } from '@technodotventures/smartware/layer1';                   // claim persistence
+import { SearchIndex, syncSearchFromClaims } from '@technodotventures/smartware/layer3'; // indexing for recall
 ```
 
 Four things that will otherwise cost you an afternoon:
@@ -166,7 +166,7 @@ there. Resolve the fact — the subject, predicate, scope and object value — r
 key:
 
 ```js
-import { resolveFactMatches } from 'smartware/layer1/corroboration';
+import { resolveFactMatches } from '@technodotventures/smartware/layer1/corroboration';
 
 const matches = store.findActiveFactMatches(subjectId, { predicate, scope, object });
 if (matches.length > 0) {
@@ -296,7 +296,7 @@ inserting is *replaced* the first time the claim is corroborated — a pilot tha
 agree:
 
 ```js
-import { computeConfidence } from 'smartware/layer1/confidence';
+import { computeConfidence } from '@technodotventures/smartware/layer1/confidence';
 
 const claim = { /* ...fields... */ };
 claim.confidence = computeConfidence(claim);   // don't hand-set what the library will recompute
@@ -410,7 +410,7 @@ memory" based on a clock.
 **Coffee must render attribution through it**, not re-implement the rule.
 
 ```ts
-import { showAttributionByDefault, attributionLine, badge, whySentence } from 'smartware/render';
+import { showAttributionByDefault, attributionLine, badge, whySentence } from '@technodotventures/smartware/render';
 
 const input = {
   surface: 'staff',                    // staff-facing only
