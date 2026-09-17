@@ -12,9 +12,10 @@ import { dirname } from 'node:path';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SearchIndex } from '../layer3/search.js';
-import { substrateActorId, type SmartwareConfig } from '../config.js';
+import type { SmartwareConfig } from '../config.js';
 import type { Actor, PreExtractedClaim } from '../layer0/types.js';
-import type { ClaimRole, ClaimType, EpistemicLabel } from '../layer1/types.js';
+import type { Claim, ClaimRole, ClaimType, EpistemicLabel } from '../layer1/types.js';
+import { resolveEntity } from '../layer1/entities.js';
 import { compile, isContextOnlyObservation, type CompileResult, type CompileOptions } from '../layer2/compiler.js';
 import { syncSearchFromClaims } from '../layer3/search.js';
 import type { CompileTelemetry } from '../layer2/types.js';
@@ -33,8 +34,8 @@ import { extractDeterministic } from '../extraction/deterministic.js';
 import { extractClaimsLLM } from '../extraction/llm.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import {
-  appendCommittedOpLogEntries,
-  appendCommittedOpLogEntry,
+  appendOpLogEntries,
+  appendOpLogEntry,
   defaultOpsIndexPath,
   openOpsIndex,
   OPERATION_ID_PATTERN,
@@ -147,6 +148,29 @@ function materializeSemantic(
   };
 }
 
+/**
+ * What `reflect.auto` decided about ONE candidate whose fingerprint key missed but whose fact
+ * the store already holds (F1 / ADR-0005 D7). Recorded on the per-observation terminal receipt
+ * so a suppressed creation is auditable, not silent: `'corroborated'` means the observation was
+ * attached to the existing claim (`derived_from` extended); `'skipped'` means nothing was
+ * written — `'protected'` when the claim is user-owned (spec §9/§11: agents append no version of
+ * it), `'no_active_record'` when the store row says active but the canonical latest record does
+ * not (the record is the authority).
+ */
+export interface FactIdentityDecision {
+  claim_id: string;
+  decision: 'corroborated' | 'skipped';
+  reason?: 'protected' | 'no_active_record';
+  /**
+   * The classification the extraction produced, recorded only when it differs from the claim's
+   * own `claim_type`. Variant 1 (ADR-0005 D7 amendment) does not apply it — the existing claim's
+   * classification stands, and the autonomous pass may not admit a re-classification (spec §9) —
+   * but it is not dropped silently either: the receipt is where the discarded attribute is kept
+   * auditable. It is NOT a candidate: no admission path for claim classification exists in beta.
+   */
+  extraction_claim_type?: ClaimType;
+}
+
 /** Content-free replay checkpoint for one observation considered by REFLECT. */
 export interface ReflectAutoTerminalReceipt extends Record<string, unknown> {
   observation_id: string;
@@ -155,6 +179,7 @@ export interface ReflectAutoTerminalReceipt extends Record<string, unknown> {
   outcome: ReflectAutoTerminalOutcome;
   candidates_found?: number;
   claim_versions_written?: number;
+  fact_identity_matches?: FactIdentityDecision[];
 }
 
 export function isReflectAutoTerminalReceipt(
@@ -227,7 +252,7 @@ export function commitReflectClaimBatch(
   hooks?: ReflectCommitHooks,
 ): void {
   if (records.length > 0) appendClaimVersions(dataDir, records);
-  if (commitCtx && opEntries.length > 0) appendCommittedOpLogEntries(commitCtx.opsDir, opEntries, commitCtx.fence);
+  if (commitCtx && opEntries.length > 0) appendOpLogEntries(commitCtx.opsDir, opEntries);
   for (const record of records) hooks?.afterClaimVersion?.(record);
   if (records.length > 0 || opEntries.length > 0) hooks?.afterCommit?.();
 }
@@ -243,6 +268,8 @@ export interface ObservationProduction {
   outcome: ReflectAutoTerminalOutcome;
   candidates_found: number;
   records: ProducedClaim[];
+  /** Fact-identity decisions taken for this observation (F1 / ADR-0005 D7). */
+  fact_identity: FactIdentityDecision[];
   llm_tried: boolean;
   llm_failed: boolean;
   llm_skippedsensitive: boolean;
@@ -307,7 +334,7 @@ export async function produceObservationClaims(
       }];
       extractedEntities = [{ name: checkpoint.session_id, type: 'session' }];
     } catch {
-      return { outcome: 'no_claims', candidates_found: 0, records: [], llm_tried: false, llm_failed: false, llm_skippedsensitive: false };
+      return { outcome: 'no_claims', candidates_found: 0, records: [], fact_identity: [], llm_tried: false, llm_failed: false, llm_skippedsensitive: false };
     }
   } else {
     const extracted = extractDeterministic(
@@ -341,6 +368,8 @@ export async function produceObservationClaims(
 
   const allClaims = [...detClaims, ...llmClaims];
   const records: ProducedClaim[] = [];
+  /** Fact-identity decisions taken for this observation (F1 / ADR-0005 D7). */
+  const factIdentity: FactIdentityDecision[] = [];
 
   for (const claim of allClaims) {
     const content = claim.rendered_content ?? (typeof claim.object.value === 'string'
@@ -362,35 +391,75 @@ export async function produceObservationClaims(
     };
     const sensitive = obs.policy.sensitive || claim.sensitive;
 
+    /**
+     * Attach this observation to an existing claim: refresh the entity hint the commit
+     * will consume, then — only while the claim is unprotected — extend `derived_from` with
+     * the observation as a new version. Shared by the fingerprint match and the
+     * fact-identity match (spec §238: "new corroborating observations attach to it,
+     * extending `derived_from` — but only while the claim is unprotected").
+     */
+    const attachCorroboration = (existing: ActiveClaimVersion): void => {
+      const existingClaim = ctx.store.getClaim(existing.claim_id);
+      const existingEntity = existingClaim ? ctx.store.getEntity(existingClaim.subject_id) : undefined;
+      const existingHint = ctx.entityHints?.get(existing.claim_id);
+      ctx.entityHints?.set(existing.claim_id, {
+        name: existingClaim?.subject_name ?? existingHint?.name ?? entityInfo.name,
+        type: existingEntity?.type ?? existingHint?.type ?? entityInfo.type,
+        predicate: existingClaim?.predicate ?? existingHint?.predicate ?? claim.predicate,
+        sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
+      });
+      if (existing.derived_from.includes(obs.id)) return;
+      const extended: ActiveClaimVersion = {
+        ...existing,
+        version: existing.version + 1,
+        derived_from: [...existing.derived_from, obs.id],
+        version_at: ctx.commitTs,
+        operation_id: nextOperationId(),
+        actor_id: ctx.podActorId,
+        supersedes: existing.version,
+      };
+      ctx.fingerprintIndex?.upsertVersion(extended);
+      records.push({ record: extended, isNew: false });
+    };
+
     const existingByFp = ctx.fingerprintIndex
       ? ctx.fingerprintIndex.activeByFingerprint(fp)
       : findByFingerprint(ctx.dataDir, fp)
         ?? findSemanticMatch(ctx.dataDir, ctx.store, fp);
     if (existingByFp) {
       if (existingByFp.epistemic_owner === 'user') continue;
-      const existingClaim = ctx.store.getClaim(existingByFp.claim_id);
-      const existingEntity = existingClaim ? ctx.store.getEntity(existingClaim.subject_id) : undefined;
-      const existingHint = ctx.entityHints?.get(existingByFp.claim_id);
-      ctx.entityHints?.set(existingByFp.claim_id, {
-        name: existingClaim?.subject_name ?? existingHint?.name ?? entityInfo.name,
-        type: existingEntity?.type ?? existingHint?.type ?? entityInfo.type,
-        predicate: existingClaim?.predicate ?? existingHint?.predicate ?? claim.predicate,
-        sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
-      });
-      if (!existingByFp.derived_from.includes(obs.id)) {
-        // The spread carries the substrate's demotion fields (ADR-0003): folding a restatement into
-        // an existing claim must not release a duplicate resolution.
-        const extended: ActiveClaimVersion = {
-          ...existingByFp,
-          version: existingByFp.version + 1,
-          derived_from: [...existingByFp.derived_from, obs.id],
-          version_at: ctx.commitTs,
-          operation_id: nextOperationId(),
-          actor_id: ctx.podActorId,
-          supersedes: existingByFp.version,
-        };
-        ctx.fingerprintIndex?.upsertVersion(extended);
-        records.push({ record: extended, isNew: false });
+      attachCorroboration(existingByFp);
+      continue;
+    }
+
+    // ── F1 (ADR-0005 D7): ask fact identity before creating ─────────────────
+    // The fingerprint above answers "has this exact creation already happened?" (Rule B,
+    // ADR-0005 D2). It must never be read as a fact-identity verdict (D3): `claim_type` is
+    // classification metadata, not a truth judgment (spec §6), so a fact the store already
+    // holds under another classification is still the same fact. Rule A — (subject_id,
+    // predicate, scope, normaliseValue(object), validity.to === null) — decides that, and
+    // its survivor (earliest-minted claim id, ADR-0003 contract #2) is the claim to
+    // corroborate, exactly as a fingerprint match would.
+    const factMatch = findFactIdentityMatch(ctx, obs.scope, claim, entityInfo.type);
+    if (factMatch) {
+      const latest = latestActiveVersion(ctx, factMatch.id);
+      if (factMatch.epistemic_owner === 'user' || latest?.epistemic_owner === 'user') {
+        // Protected: agents append no version of it — no corroboration, and no duplicate
+        // either (the fact is held; spec §9/§11). Recorded so the decision is auditable.
+        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'protected' });
+      } else if (!latest) {
+        // The store row says active, the canonical record does not. The record is the
+        // authority: extend nothing, and mint nothing for a fact the store holds.
+        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'no_active_record' });
+      } else {
+        attachCorroboration(latest);
+        factIdentity.push({
+          claim_id: factMatch.id,
+          decision: 'corroborated',
+          // Variant 1 consequence, made auditable: the extraction's classification is not
+          // applied (the held claim's stands) and is not silently dropped either.
+          ...(latest.claim_type !== claimType ? { extraction_claim_type: claimType } : {}),
+        });
       }
       continue;
     }
@@ -431,6 +500,7 @@ export async function produceObservationClaims(
     outcome: allClaims.length === 0 ? 'no_claims' : 'claims_processed',
     candidates_found: allClaims.length,
     records,
+    fact_identity: factIdentity,
     llm_tried,
     llm_failed,
     llm_skippedsensitive,
@@ -624,7 +694,7 @@ export async function handleCompile(
       },
     };
     if (params.operation_id && commitCtx && !parentEntry) {
-      appendCommittedOpLogEntry(commitCtx.opsDir, {
+      appendOpLogEntry(commitCtx.opsDir, {
         operation_id: params.operation_id,
         actor_id: params.actor.id,
         timestamp: new Date().toISOString(),
@@ -636,7 +706,7 @@ export async function handleCompile(
           pages_compiled: 0,
           synthesis_deferred: true,
         },
-      }, commitCtx.fence);
+      });
     }
     return handlerResult;
   }
@@ -669,7 +739,7 @@ export async function handleCompile(
     llm_extraction_skipped_sensitive: reflectionStats.llmSkippedSensitive,
   };
   if (params.operation_id && commitCtx && !parentEntry) {
-    appendCommittedOpLogEntry(commitCtx.opsDir, {
+    appendOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: new Date().toISOString(),
@@ -680,7 +750,7 @@ export async function handleCompile(
         claims_created: reflectionStats.claimsCreated,
         pages_compiled: compiled.pages.length,
       },
-    }, commitCtx.fence);
+    });
   }
 
   const handlerResult: CompileHandlerResult = {
@@ -719,7 +789,7 @@ async function reflectAutoCreateClaims(
   fingerprintIndex?: FingerprintIndex,
   observations?: import('../layer0/types.js').Observation[],
 ): Promise<ReflectAutoCreateResult> {
-  const podActorId = substrateActorId(config);
+  const podActorId = `substrate:${config.instance_id.replace('smartware_', '')}`;
   let created = 0;
   let llmAttempted = 0;
   let llmFailed = 0;
@@ -844,6 +914,11 @@ async function reflectAutoCreateClaims(
         {
           candidates_found: production.candidates_found,
           claim_versions_written: production.records.length,
+          // F1 (ADR-0005 D7): a suppressed creation is never silent — the receipt names the
+          // fact-identity decision so an operator can see why an observation produced nothing.
+          ...(production.fact_identity.length > 0
+            ? { fact_identity_matches: production.fact_identity }
+            : {}),
         },
       );
     }
@@ -868,6 +943,39 @@ async function reflectAutoCreateClaims(
     committed_records: pendingRecords,
     committed_new_ids: committedNewIds,
   };
+}
+
+/**
+ * Rule A — the protocol's one fact-identity predicate (ADR-0003, ADR-0005 D1) — asked of the
+ * store for one candidate claim: `(subject_id, predicate, scope, normaliseValue(object),
+ * validity.to === null)`. Returns the survivor (earliest-minted claim id) or null.
+ *
+ * The subject is resolved with the same `resolveEntity` call the store applies when it
+ * materialises the candidate, so the `subject_id` asked about is the one the claim would carry.
+ * (A second, exact-name-only lookup would be a second entity-resolution rule — the divergence
+ * this ADR series exists to close.)
+ */
+function findFactIdentityMatch(
+  ctx: ProduceObservationContext,
+  scope: string,
+  claim: ReflectionCandidate,
+  subjectType: string,
+): Claim | null {
+  const subject = resolveEntity(claim.subject_name, subjectType, scope, ctx.store);
+  const matches = ctx.store.findActiveFactMatches(subject.id, {
+    predicate: claim.predicate,
+    scope,
+    object: claim.object,
+  });
+  return matches[0] ?? null;
+}
+
+/** Latest ACTIVE canonical version for one claim — the record is the authority for state. */
+function latestActiveVersion(ctx: ProduceObservationContext, claimId: string): ActiveClaimVersion | null {
+  const latest = ctx.fingerprintIndex
+    ? ctx.fingerprintIndex.activeByClaimId(claimId)
+    : readLatestVersion(ctx.dataDir, claimId);
+  return latest?.state === 'active' ? latest : null;
 }
 
 function findByFingerprint(dataDir: string, fp: string): ActiveClaimVersion | null {

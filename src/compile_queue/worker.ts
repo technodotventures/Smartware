@@ -180,6 +180,11 @@ export async function runCompileBatch(
       pendingOpEntries.push(reflectReceipt(obs, actorId, production.outcome, {
         candidates_found: production.candidates_found,
         claim_versions_written: production.records.length,
+        // Same audit detail as the synchronous handler: a fact-identity decision that
+        // suppressed a creation must be visible on the receipt (F1 / ADR-0005 D7).
+        ...(production.fact_identity.length > 0
+          ? { fact_identity_matches: production.fact_identity }
+          : {}),
       }));
       processedCount++;
     } catch (error) {
