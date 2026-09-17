@@ -1579,10 +1579,13 @@ export class SmartwareCore {
   }
 
   /**
-   * Retention expiry sweep (ADR-0001). Tombstones elapsed `duration`-policy
-   * observations in one scope and retracts their sole-evidence claims, with a
-   * single `retention.expire` ops entry. Naturally idempotent: re-running finds
-   * no new expired records. Host-triggered, like `drainCompileQueue`.
+   * Retention expiry sweep (ADR-0001, ADR-0013). Tombstones elapsed
+   * `duration`-policy observations in one scope and retracts their sole-evidence
+   * claims, committing exactly one `retention.expire` ops entry per sweep with
+   * exact counts (the caller's `operation_id` when supplied, otherwise one the
+   * substrate mints for this invocation and returns). Idempotent by effect —
+   * re-running finds no new expired records — and replay-idempotent when the
+   * caller supplies the same id. Host-triggered, like `drainCompileQueue`.
    */
   async expireRetention(params: ExpireRetentionParams): Promise<ExpireRetentionResult> {
     this.fenceGuard('expireRetention');
