@@ -65,6 +65,17 @@ export interface QueryResult {
       contested_by: string[];
     };
   }>;
+  /**
+   * Raw hits the scope's derived claim/page lane returned BEFORE the
+   * authorization/lifecycle eligibility filters run (`assembleContext`).
+   * The lane is derived and updated incrementally, and some rows are
+   * deliberately kept through a lifecycle change (FORGET's claim-FTS rows;
+   * the retention sweep's mirror of them — see forget_scope.ts:519-537), so
+   * these counters can differ from a freshly rebuilt lane by exactly those
+   * kept rows even though `results` is rebuild-equivalent. `filtered_out`
+   * counts hits the eligibility filters (authorized snapshot, temporal,
+   * entity-type) dropped.
+   */
   total_found: number;
   filtered_out: number;
   query_scope: string;

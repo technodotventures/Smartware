@@ -96,6 +96,31 @@ evidence-tombstone retraction, not retrievability, and does so consistently afte
 pin is `test/protocol/claim-mutation-search-sync.test.ts` (RED at `ab9cf2b`: 1 failed | 5 passed, only
 the revive composition → GREEN 6/6).
 
+Settled 2026-09-17 for the **kept-rows settle + async-compile mirror probe** (kanban `t_8779781f`,
+lane `wip/neo/kept-rows-settle` off `wip/tech-head/mutation-fts-sync` @ `8f2f362`; comment/doc-only
+`src/` change — the FORGET keep-rows design comment now states the counter difference it previously
+overclaimed, RECALL's counter fields document their raw-lane semantics, and `docs/retrieval.md`
+carries the same for integrators): the **decision is (a) — keep the rows**. Nothing served is wrong
+(the authorized snapshot filters forgotten claims at query time; the divergence is exactly the kept
+rows — measured `1/1` in-process vs `0/0` fresh); option (b) (drop the rows at FORGET/retention)
+would only move work onto two hot paths, and option (c) (redefine the counters) would hide the
+lane's real state. Probe results, same lane: the async compile worker's incremental mirror
+(`worker.ts:212-217`) is **store-faithful for the claims it hands over** and does not reconcile rows
+it did not touch (a second drain batch changes nothing; `core.compile`'s re-sync does), so the drain
+is not a divergence source; the survey's predicted counters-only shape is **confirmed on a
+demotion-durable base** (cross-check on the unmerged demotion lanes' tip `3ae8a6b`: served ids
+equal, counters `+1`). On this card's base the prediction is falsified in the opposite direction,
+and not by the lane: a replay-admission demotion (`replay.ts:194 → conflicts.ts:123`) is written to
+its own canonical record as `state: 'active'` with no pointer, so the next open's re-materialisation
+(`ClaimStore.setDataDir`) **erases** it — a fresh open serves the demoted claim again (measured
+`false` here, `true` on `e5f093e`/`3ae8a6b`: the unmerged demotion lanes fix this entry point;
+reported to `t_30732060`'s verification record). A second, independent gap measured on both bases is
+routed to `t_a6bf30a8`: a mid-session `replayCatchUp` inside FORGET/retention/quarantineReview
+materialises claims without re-syncing the claim-FTS lane, so live recall misses them until a
+re-syncing write. Gate at `901861e`: **557 tests across 78 files**, `tsc` clean, `verify:schemas` 31
+files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz`
+sha256 `1aeea8ed…8111`), `npm audit` 0 vulnerabilities.
+
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
