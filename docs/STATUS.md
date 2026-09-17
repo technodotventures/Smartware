@@ -25,7 +25,7 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-17-t_efa8d5a8.md`](journal/2026-09-17-t_efa8d5a8.md) — A matched `operation_id` is the prior result: a REFLECT replay returns the recorded result and writes nothing (2026-09-17)
-- **Journal entries:** 43 · tasks completed on board `smartware`: 97
+- **Journal entries:** 43 · tasks completed on board `smartware`: 98
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -104,8 +104,8 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
 - `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
-- `t_12c79071` [ready] SURVEY (one pass): which SmartwareCore verbs mutate claim rows without re-syncing the claim-FTS lane (forget/revive, retention, endorse leads from t_336ba0b9) (created 2026-09-17, assignee tech-head)
 - `t_6fc254cd` [ready] DECIDE+FIX (low): the page YAML reader's still-unread constructs — `|-`/`|+`/`>` block styles and quoted-key items read as silent garbage (measured on t_cf744a8e's tip) (created 2026-09-17, assignee tech-head)
+- `t_5768425d` [ready] FIX (low, DECIDE-first): the page YAML serialiser still degrades two contract-legal shapes — numeric/boolean/null-looking strings (C1) and a nested object deeper than one level inside a notice item (C2) (created 2026-09-17, assignee neo)
 
 ## Blockers and stale work
 
@@ -137,8 +137,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (118 tasks, 9044 events)
-- ⚠️ 56 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (119 tasks, 9093 events)
+- ⚠️ 57 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index
