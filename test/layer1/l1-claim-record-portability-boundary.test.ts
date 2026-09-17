@@ -22,7 +22,9 @@
 //     fails loudly when that fix composes rather than letting the answer drift.
 //
 // Measurements behind these numbers (raw JSONL off disk, Ajv 2020 complete error list):
-// `test/probe/l1-record-boundary.probe.test.ts`; the report is attached to the card.
+// `attachments/t_11fed5bb/l1-record-boundary.probe.test.ts` on the kanban board — the instrument is a
+// card attachment, not a repo file (it ran from this card's workspace, `workspaces/t_11fed5bb/`); the
+// report it wrote is `attachments/t_11fed5bb/probe-report.json`, same directory.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
