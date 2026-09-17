@@ -29,11 +29,23 @@
 //   R2 — a multi-line string as an inline-array element (`aliases: ['a\nb']`) is CONTRACT-LEGAL
 //   (`aliases.items` is a plain string) and was silently destroyed: the writer's quote branch
 //   emits a literal newline inside the inline array, so the whole array read back as one string.
-//   SUPPORTED now: an all-string array with a multi-line element is written in the block form the
+//   SUPPORTED now when the element's minimum indentation over its non-blank lines is 0 — some
+//   line's content starts at column 0 (every spelling pinned below, and the whole 5569-row probe
+//   corpus): an all-string array with such a multi-line element is written in the block form the
 //   reader already decodes (`- <str>` items, `- |` + indented lines for the multi-line ones — the
 //   t_cf744a8e shape-6 reader support, which the writer never emitted). This also repairs a
 //   re-serialise hazard: a hand-authored `aliases:\n  - |\n    a\n    b` page read as `['a\nb']`
 //   used to be re-emitted corrupted.
+//
+//   The all-indented sub-class is a REMAINING LOSS, disclosed and pinned below rather than left
+//   implied (independent VERIFY t_6012c8ca Finding 1): when every non-blank line of the element is
+//   indented, the writer's fixed 4-space prefix and the reader's minimum-indent strip take the
+//   element's own minimum indentation with them, silently — `' a\n b'` reads back `'a\nb'`,
+//   `'  a\n b'` reads back `' a\nb'`. Pre-existing on both arms (pre-fix these rows were lost too,
+//   garbled rather than de-indented), contract-legal (`aliases.items` is a plain string) and
+//   deliberately NOT refused — refusing a plain string would be an over-refusal — and not reachable
+//   on the compile/endorse re-serialise path (a hand-authored all-indented block already loses the
+//   indent at *read*; it is the host-constructed-value path that does).
 //
 // See the task's DECISION.md (board attachment) for the full rationale and measurements.
 import assert from 'node:assert/strict';
@@ -211,7 +223,7 @@ describe('L2 page frontmatter — the write boundary at array positions (t_0e190
     );
   });
 
-  test('a multi-line string as an array element round-trips in the reader\'s block form', () => {
+  test('a multi-line string as an array element round-trips in the block form when a line starts at column 0 (all-indented elements: a pinned, disclosed loss)', () => {
     const validate = validator(createAjv(), 'page-frontmatter.schema.json');
     const spellings = [
       'line one\nline two',
@@ -251,6 +263,35 @@ describe('L2 page frontmatter — the write boundary at array positions (t_0e190
         serialiseFrontmatter(parsed.frontmatter, BODY),
         serialised,
         `serialise → parse → serialise is idempotent: ${JSON.stringify(spelling)}`,
+      );
+    }
+
+    // The all-indented sub-class (every non-blank line indented) does NOT round-trip: the writer
+    // prefixes every content line with 4 spaces and the reader's `readBlockScalar` strips the
+    // block's *minimum* indent, so the element's own minimum indentation is stripped with it. The
+    // string is contract-legal and is deliberately not refused; the measured reset is asserted
+    // here so the boundary is pinned instead of implied (VERIFY t_6012c8ca Finding 1).
+    const allIndented: Array<[string, string]> = [
+      [' a\n b', 'a\nb'],
+      ['  a\n b', ' a\nb'],
+      ['  a\n  b', 'a\nb'],
+      ['\ta\n\tb', 'a\nb'],
+    ];
+    for (const [spelling, measured] of allIndented) {
+      const fm = pageFrontmatter({ aliases: ['Graphiti', spelling] });
+      const serialised = serialiseFrontmatter(fm, BODY);
+      assert.ok(serialised.includes('  - |'), 'the all-indented element still takes the block form');
+      const parsed = parseFrontmatter(serialised);
+      assert.ok(parsed, 'the serialised page is readable — the loss is silent, not a throw');
+      assert.deepEqual(
+        parsed.frontmatter['aliases'],
+        ['Graphiti', measured],
+        `an all-indented element reads back de-indented (this is the measured reset, not the value written): ${JSON.stringify(spelling)}`,
+      );
+      assert.deepEqual(
+        errorKeys(validate, parsed.frontmatter),
+        [],
+        'and the de-indented read-back is still contract-legal (a plain string) — the loss is silent',
       );
     }
 
@@ -315,10 +356,17 @@ describe('L2 page frontmatter — the write boundary at array positions (t_0e190
   });
 
   test('a parsed page re-serialises — the new refusals cannot fire on the compile/endorse path', () => {
-    // compile.ts / endorse.ts re-serialise *parsed* frontmatter. The reader's line model cannot
-    // produce a refused shape (its arrays come from `splitInlineArray` — strings — and
-    // `parseBlockArray` — strings, and objects with at least one `key: value` line), so the
-    // boundary t_5768425d measured for the object guard holds for these refusals too.
+    // compile.ts / endorse.ts re-serialise *parsed* frontmatter. The THREE refusals this lane
+    // adds (a non-string scalar item, an array item, an empty object item) cannot fire there: the
+    // reader's line model cannot produce them (its arrays come from `splitInlineArray` — strings —
+    // and `parseBlockArray` — strings, strings-only arrays, and objects with at least one
+    // `key: value` line); measured 0/4000 fuzzed hand-authored blocks, plus that structural
+    // argument, on both arms of the t_6012c8ca VERIFY. Scope matters here: the *pre-existing*
+    // mixed scalar/object refusal is NOT unreachable — `parseBlockArray` yields a mixed array
+    // whenever a block-array item is not a mapping (`notices:` with a bare dash, or a `|-` item,
+    // next to a mapping item; 12/4000 fuzzed blocks) and the real COMPILE path re-throws
+    // end-to-end on it, identically on both arms (t_6012c8ca Finding 2; behavioural follow-up
+    // carded as t_5742162f, not this lane).
     const parsed = parseFrontmatter(rawPage(
       'notices:\n  - type: staleness\n    message: x\n    links:\n      - url: u\n        refs:\n          - x: a\n',
     ))!;

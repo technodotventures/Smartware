@@ -36,15 +36,16 @@ Specification v1.6.16 conformance.
 ## Verified baseline
 
 Verified 2026-09-17 on Node v26.5.1 for **the page YAML serialiser's remaining write-boundary
-losses** (`wip/neo/frontmatter-write-residuals @ 4a30730`, stacked on the still-unmerged
-`wip/neo/frontmatter-coercion-depth @ c740511`; kanban `t_0e19036e` — a writer + guard change in
-one file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **572 tests across 80
-files**, 31 schema files. The delta over the entry below is 7 tests in one new file
-(`test/layer2/l2-frontmatter-write-residuals.test.ts`; one stale clause in the sibling pin's
-header comment is corrected to match). The independent VERIFY `t_5708fed6` (§4) measured six
-shapes still below this boundary — all pre-existing, identical on both arms it tested — and each
-is decided here, the guard now refusing every shape the writer cannot carry back and supporting
-the one it can:
+losses** (`wip/neo/frontmatter-write-residuals` @ `a872f42` plus the `t_15b309f3` text/pin
+correction on top — no behaviour change, only the pin, the code comments and this entry; stacked
+on the still-unmerged `wip/neo/frontmatter-coercion-depth @ c740511`; kanban `t_0e19036e` — a
+writer + guard change in one file, so **no published schema byte moves**, `SHA256SUMS`
+unchanged): **572 tests across 80 files**, 31 schema files. The delta over the entry below is 7
+tests in one new file (`test/layer2/l2-frontmatter-write-residuals.test.ts`; one stale clause in
+the sibling pin's header comment is corrected to match). The independent VERIFY `t_5708fed6` (§4)
+measured six shapes still below this boundary — all pre-existing, identical on both arms it
+tested — and each is decided here, the guard now refusing every shape the writer cannot carry
+back and supporting the one it can:
 
 - a non-string scalar as an **array element** (`meta: [1, 2]`, `['b', true]`, `['a', null]`) was
   written through `String(item)` and read back as a string, and a null *first* item additionally
@@ -60,13 +61,33 @@ the one it can:
 - an **empty object item** (`notices: [{}]`) degraded to `''`. REFUSED, naming the item.
 - a **multi-line string as an array element** (`aliases: ['a\nb']`) is contract-legal
   (`aliases.items` is a plain string) and was silently destroyed — the writer quoted the element
-  across lines and the whole array read back as one string. **SUPPORTED**: the writer now emits
-  the block form (the `- <str>` item form, and the `- |` block form for multi-line elements) that
-  the reader has decoded since `t_cf744a8e`'s shape 6, and a hand-authored block-array page is no
-  longer corrupted on re-serialise.
+  across lines and the whole array read back as one string. **SUPPORTED when the element's
+  minimum indentation over its non-blank lines is 0** (some line's content starts at column 0 —
+  every spelling in the pin, and the whole 5569-row probe corpus): the writer now emits the block
+  form (the `- <str>` item form, and the `- |` block form for multi-line elements) that the
+  reader has decoded since `t_cf744a8e`'s shape 6, and a hand-authored block-array page is no
+  longer corrupted on re-serialise. **Not supported, disclosed and pinned** (VERIFY `t_6012c8ca`
+  Finding 1): an **all-indented** element silently loses its own minimum indentation to the
+  writer's fixed 4-space prefix plus `readBlockScalar`'s minimum-indent strip — `' a\n b'` reads
+  back `'a\nb'`, `'  a\n b'` reads back `' a\nb'` — and the same reset appears at every array
+  position the writer emits (the pre-existing `key: |` mapping-value path behaves identically).
+  The string is contract-legal and deliberately **not** refused (refusing it would be an
+  over-refusal); it is a host-constructed-value loss only — a hand-authored all-indented block
+  already loses the indent at *read*, so the compile/endorse re-serialise path cannot re-lose it.
 
-Non-tautological: the pin file (sha256
-`8190c7821dc57e0f734789efe2c5f2942f0585a835a9f9682afaa13980c167b2`) is **5 failed | 2 passed (7)**
+Correction note (`t_15b309f3`, after the independent VERIFY `t_6012c8ca`): the R2 bullet and the
+reachability clause above are the corrected text — the fix commit `4a30730` and the first docs
+commit `a872f42` stated the SUPPORTED class and the reachability conclusion without the two
+qualifiers now named here (the all-indented sub-class; the pre-existing mixed-array refusal being
+reader-reachable). Corrected in the same pass: the pin (header comment, the R2 test's measured
+resets, the reachability comment), the `frontmatter.ts` comments, the sibling pin's mixed-array
+message assertion (`mixes object and non-object items` — an array item is not a scalar) and this
+entry. No refusal semantics, no emitted bytes for carriable shapes and no published schema byte
+changed: the corrected pin reproduces **5 failed | 2 passed (7)** at `c740511` and **7 passed (7)**
+on the fix, and the 5569-row and byte-level re-runs reproduce the numbers quoted here.
+
+Non-tautological: the corrected pin file (sha256
+`be19837ad18311f109c4b19388d4d836de8f389b1523563c5e5b11280b239585`) is **5 failed | 2 passed (7)**
 in a worktree at `c740511` with the fix absent (the 5 feature pins fail; the 2 controls pass on
 both arms) and **7 passed (7)** on the fix; the independent probe's 5569 rows move exactly 208 —
 51 `LOSS → PASS` (every one a `S2.aliases_elem` newline string) and 157 `STATUS_MOVED_OTHER` (81
@@ -74,13 +95,22 @@ both arms) and **7 passed (7)** on the fix; the independent probe's 5569 rows mo
 `LOSS_scalar_array_type_change`, 8 `MEASURED_LOSS`, 5 `THREW_UNNAMED` → `GUARDED`, every one
 naming a concrete path) — with **0 REGRESSIONS, 0 rows whose read-back moved without a status
 move, 0 OVER_REFUSED** (every must-work control still round-trips and validates) and the
-compile/endorse re-serialise path clean (the reader cannot produce a refused shape; 6/6
-`R.reserialise` rows CLEAN). A byte-level re-run of the same corpus shows emitted frontmatter
+compile/endorse re-serialise path unable to hit **the three refusals this lane adds** — the reader
+cannot produce them (0/4000 fuzzed hand-authored blocks plus the structural argument; 6/6
+`R.reserialise` rows CLEAN). That scoping is load-bearing, per VERIFY `t_6012c8ca` Finding 2: one
+**pre-existing** refusal *is* reachable from the reader — a mixed scalar/object array
+(`parseBlockArray` yields one whenever a block-array item is not a mapping; 3 named blocks,
+12/4000 fuzzed) — and on the real COMPILE path the next re-serialise throws end-to-end,
+identically on both arms; the behavioural half is carded as `t_5742162f`, not this lane. A
+byte-level re-run of the same corpus shows emitted frontmatter
 byte-identical on 5256 rows; every byte change is on a row whose status moved, plus one row
 (`'a\n \nb'`) whose status was and stays LOSS. Remaining at this tip: that string loses the space
 on its whitespace-only line at four positions — pre-existing reader behaviour (`readBlockScalar`,
-identical on both arms; the C4 half of `t_6fc254cd`, not in this ancestry) — and `tags: ['123']`
-still fails the published `Tag` pattern (a contract refusal, not a serialiser defect). Gate:
+identical on both arms; the C4 half of `t_6fc254cd`, not in this ancestry) — `tags: ['123']`
+still fails the published `Tag` pattern (a contract refusal, not a serialiser defect), and the
+all-indented multi-line array element above (`' a\n b'` → `'a\nb'`) stays a silent
+host-constructed-value loss (measured reset, pinned in the pin's R2 test; not refused; not
+reachable from a parsed page — VERIFY `t_6012c8ca` Finding 1). Gate:
 `npm run build` exit 0; focused `test/layer2` **5 files / 33 tests**; full suite **80 files / 572
 tests exit 0** (151 s); `verify:schemas` 31 files OK; `verify:saas` `SMOKE_OUTCOME=pass`;
 `npm audit --omit=dev` 0 vulnerabilities. Not run: `npm ci` (shared `node_modules` symlink policy

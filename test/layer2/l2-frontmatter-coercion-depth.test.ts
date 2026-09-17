@@ -262,12 +262,12 @@ describe('L2 page frontmatter — coerced scalars and guard depth (t_5768425d)',
     // `0: a` lines — both came back as something else (probe C2d/C2e: SILENT_LOSS).
     assert.throws(
       () => serialiseFrontmatter(pageFrontmatter({ aliases: ['a', { b: 'c' }] }), BODY),
-      /page field "aliases" mixes scalar and object items/,
+      /page field "aliases" mixes object and non-object items/,
       'scalar-then-object must be refused, naming the field',
     );
     assert.throws(
       () => serialiseFrontmatter(pageFrontmatter({ aliases: [{ b: 'c' }, 'a'] }), BODY),
-      /page field "aliases" mixes scalar and object items/,
+      /page field "aliases" mixes object and non-object items/,
       'object-then-scalar must be refused too',
     );
   });

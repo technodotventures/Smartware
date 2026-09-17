@@ -16,7 +16,11 @@
 // non-string scalar or an array as an array element and an empty object item are refused (the
 // t_cf744a8e nested-sequence carve-out is superseded on the write side — it was the same
 // uncarriable class), and a multi-line string as an array element is supported by emitting the
-// block form (`- |`) the reader already decodes.
+// block form (`- |`) the reader already decodes — for an element whose minimum indentation over
+// its non-blank lines is 0 (some line's content starts at column 0). An all-indented element is a
+// disclosed, pinned remaining loss, not a refusal: the writer's fixed 4-space prefix and the
+// reader's minimum-indent strip take the element's own indentation with them (`' a\n b'` reads
+// back `'a\nb'`), silently (independent VERIFY t_6012c8ca Finding 1).
 
 import { toPageCategory } from './paths.js';
 
@@ -47,7 +51,9 @@ export function parseFrontmatter(raw: string): { frontmatter: Record<string, unk
  * a mixed scalar/object array, a non-string scalar or an array as an array element, an empty
  * object item (t_cf744a8e, t_5768425d, t_0e19036e) — instead of writing YAML that flattens,
  * drops or retypes it on the next read. A multi-line string inside a string array is carried in
- * the block form, not refused.
+ * the block form, not refused, when some line's content starts at column 0; an all-indented
+ * element is written the same way but reads back de-indented (the reader's minimum-indent strip —
+ * a disclosed remaining loss, not an over-refusal; see the module header).
  */
 export function serialiseFrontmatter(frontmatter: Record<string, unknown>, body: string): string {
   assertPageVocabulary(frontmatter);
@@ -144,7 +150,7 @@ function rejectNestedObject(field: string): never {
 
 function rejectMixedArray(field: string): never {
   throw new Error(
-    `serialiseFrontmatter: page field "${field}" mixes scalar and object items in one array, which `
+    `serialiseFrontmatter: page field "${field}" mixes object and non-object items in one array, which `
     + `the page YAML vocabulary cannot carry (write a string array or an array of objects, not both); `
     + `split the value or extend the page contract (schemas/v0.5.0/page-frontmatter.schema.json) first`,
   );
@@ -252,7 +258,10 @@ function toYAML(obj: Record<string, unknown>, indent = 0): string {
         // `- item` lines, and `- |` plus the indented content for each multi-line element. The
         // reader already decodes both (t_cf744a8e's block-scalar item branch); this is also the
         // form the writer uses for a multi-line mapping value. The guard has already refused
-        // every non-string element, so the cast is sound.
+        // every non-string element, so the cast is sound. Reading is exact when some line's
+        // content starts at column 0; an all-indented element loses its own minimum indent to the
+        // reader's minimum-indent strip (`' a\n b'` reads back `'a\nb'`) — disclosed and pinned,
+        // not refused (t_6012c8ca Finding 1).
         lines.push(`${pad}${key}:`);
         for (const item of val as string[]) {
           if (!item.includes('\n')) {
