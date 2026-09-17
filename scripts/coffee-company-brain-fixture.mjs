@@ -354,7 +354,7 @@ const runMeta = {
   artifact_sha256: process.env.GATE_ARTIFACT_SHA256 ?? null,
   node: process.version,
   package_version: (() => {
-    for (const candidate of ['./node_modules/smartware/package.json', '../package.json']) {
+    for (const candidate of ['./node_modules/@technodotventures/smartware/package.json', '../package.json']) {
       try { return JSON.parse(fs.readFileSync(new URL(candidate, import.meta.url), 'utf8')).version; } catch { /* try the next location */ }
     }
     return 'unknown';
@@ -370,7 +370,7 @@ try {
   setSection('P0 artifact and provisioning');
   {
     const resolved = runMeta.resolved_smartware;
-    const installed = resolved.includes(`${path.sep}node_modules${path.sep}smartware${path.sep}`);
+    const installed = resolved.includes(`${path.sep}node_modules${path.sep}@technodotventures${path.sep}smartware${path.sep}`);
     check('0a the fixture loads the package through its exports map',
       runMeta.mode === 'packaged'
         ? installed && runMeta.package_version !== 'unknown'
