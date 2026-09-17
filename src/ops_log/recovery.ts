@@ -11,6 +11,7 @@ import { readAll } from '../layer0/log.js';
 import type { Observation } from '../layer0/types.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import { iterAllClaimVersions, type ClaimVersionRecord } from '../layer1/jsonl.js';
+import { parseEnvelope } from '../layer2/envelope.js';
 import {
   readOperationIntentRecords,
   removeOperationIntent,
@@ -105,6 +106,11 @@ function markdownFiles(root: string): string[] {
 
 function pageOperationId(filePath: string): string | null {
   const raw = readFileSync(filePath, 'utf8');
+  // The endorsement's operation id is durable recovery metadata: it lives in the page's derived
+  // cached region (ADR-0013 → D2), or inline in the frontmatter of a page written before that
+  // change. Both shapes are read so recovery works across a tree that is mid-migration.
+  const envelope = parseEnvelope(raw);
+  if (envelope?.endorsement_operation_id) return envelope.endorsement_operation_id;
   const frontmatter = raw.match(/^---\n([\s\S]*?)\n---/)?.[1];
   if (!frontmatter) return null;
   const match = frontmatter.match(/^(?:operation_id|endorsement_operation_id):\s*["']?([^\s"']+)["']?\s*$/m);
@@ -181,7 +187,8 @@ function isExactObservationIntent(
   return position >= 0 && verifyChain(writerChain.slice(0, position + 1)).valid;
 }
 
-function isExactReviseIntent(
+/** Does `version` exactly match the release artifact a REVISE intent describes? */
+function isExactReviseRelease(
   intent: ReviseOperationIntent,
   version: ClaimVersionRecord,
 ): boolean {
@@ -193,6 +200,38 @@ function isExactReviseIntent(
     && version.version_at === intent.prepared_at
     && version.epistemic_owner === intent.result.epistemic_owner
     && computePayloadHash(version) === intent.expected.record_hash;
+}
+
+/** Does `version` exactly match one of the demotion artifacts a re-pick intent describes? */
+function isExactRepickDemotion(
+  intent: ReviseOperationIntent,
+  expected: { claim_id: string; version: number; record_hash: string },
+  version: ClaimVersionRecord,
+): boolean {
+  return version.state === 'active'
+    && version.claim_id === expected.claim_id
+    && version.version === expected.version
+    && version.operation_id === intent.operation_id
+    && version.actor_id === intent.actor_id
+    && version.version_at === intent.prepared_at
+    && computePayloadHash(version) === expected.record_hash;
+}
+
+/**
+ * Exactness for a REVISE commit. A plain revision has exactly one artifact — its next version.
+ * A re-pick (`repick_survivor`) commits the release **and** every demotion the intent names, as
+ * one set: the total count must match and each expected artifact must be present exactly once.
+ * Anything less is a partially materialized commit and is not exact — recovery fails closed.
+ */
+function isExactReviseIntent(
+  intent: ReviseOperationIntent,
+  versions: ClaimVersionRecord[],
+): boolean {
+  const demoted = intent.expected.repick?.demoted ?? [];
+  if (versions.length !== 1 + demoted.length) return false;
+  if (versions.filter(version => isExactReviseRelease(intent, version)).length !== 1) return false;
+  return demoted.every(expected =>
+    versions.filter(version => isExactRepickDemotion(intent, expected, version)).length === 1);
 }
 
 function isExactForgetAudit(
@@ -681,17 +720,27 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           && entry.actor_id === intent.actor_id
           && entry.details?.['payload_hash'] === intent.payload_hash
           && entry.details?.['observation_id'] === intent.expected.observation_id)
-        : existing.some(entry =>
-          entry.op === intent.op
-          && entry.actor_id === intent.actor_id
-          && entry.details?.['payload_hash'] === intent.payload_hash
-          && entry.details?.['claim_id'] === intent.expected.claim_id
-          && entry.details?.['new_version'] === intent.expected.version
-          && entry.details?.['record_hash'] === intent.expected.record_hash);
+        : existing.some(entry => {
+          if (!(entry.op === intent.op
+            && entry.actor_id === intent.actor_id
+            && entry.details?.['payload_hash'] === intent.payload_hash
+            && entry.details?.['claim_id'] === intent.expected.claim_id
+            && entry.details?.['new_version'] === intent.expected.version
+            && entry.details?.['record_hash'] === intent.expected.record_hash)) {
+            return false;
+          }
+          const demotedIds = intent.result.demoted;
+          if (demotedIds === undefined) return true;
+          // A re-pick commit also names its demotions; the entry must agree with the intent.
+          const recorded = entry.details?.['demoted'];
+          return entry.details?.['repick_survivor'] === true
+            && Array.isArray(recorded)
+            && recorded.length === demotedIds.length
+            && demotedIds.every((claimId, index) => recorded[index] === claimId);
+        });
       const matchingArtifact = intent.op === 'observe'
         ? true
-        : (l1ByOperation.get(intent.operation_id) ?? []).filter(version =>
-          isExactReviseIntent(intent, version)).length === 1;
+        : isExactReviseIntent(intent, l1ByOperation.get(intent.operation_id) ?? []);
       if (matchingCommit && matchingArtifact) removeOperationIntent(ctx.opsDir, intent.operation_id);
       else manualReview.add(intent.operation_id);
       continue;
@@ -706,8 +755,8 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
     }
     const exact = intent.op === 'observe'
       ? isExactObservationIntent(intent, artifacts[0]! as Observation, observations)
-      : isExactReviseIntent(intent, artifacts[0]! as ClaimVersionRecord);
-    if (artifacts.length !== 1 || !exact) {
+      : isExactReviseIntent(intent, artifacts as ClaimVersionRecord[]);
+    if (intent.op === 'observe' ? (artifacts.length !== 1 || !exact) : !exact) {
       manualReview.add(intent.operation_id);
       continue;
     }
@@ -740,6 +789,18 @@ export function runRecovery(ctx: RecoveryContext): RecoveryReport {
           new_version: intent.result.new_version,
           epistemic_owner: intent.result.epistemic_owner,
           record_hash: intent.expected.record_hash,
+          ...(intent.result.superseded_by !== undefined
+            ? { superseded_by: intent.result.superseded_by }
+            : {}),
+          ...(intent.result.demoted !== undefined
+            ? {
+                // A recovered re-pick reports the same shape as the first call: the flag, the
+                // demoted ids, and each demotion artifact's identity/hash.
+                repick_survivor: true,
+                demoted: intent.result.demoted,
+                demoted_records: intent.expected.repick?.demoted ?? [],
+              }
+            : {}),
           recovered: true,
         },
       })) continue;

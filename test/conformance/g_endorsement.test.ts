@@ -103,22 +103,25 @@ describe('Endorsement Cascade', () => {
     const store = new ClaimStore(path.join(dataDir, 'smartware.db'));
     const previews = new CascadePreviewStore(':memory:');
     const sharedClaim = `claim_${ulid()}`;
+    // The fixture is written in the **published** page vocabulary: §9's field set, with the
+    // compile envelope left out of the frontmatter (ADR-0013 → D2). `sources` is the claim list
+    // the cascade endorses.
     const frontmatter = (entityId: string): Frontmatter => ({
-      entity_id: entityId,
-      entity: entityId,
-      type: 'concept',
-      scope: 'personal',
-      epistemic: 'observed',
-      sensitive: false,
-      sources: [],
-      claim_ids: [sharedClaim],
-      sources_claim_ids: [sharedClaim],
-      compiled_at: new Date().toISOString(),
-      compiled_by: 'smartware',
-      confidence: 0.5,
-      supersedes: [],
-      related: [],
+      title: entityId,
       page_id: `page_${entityId}`,
+      category: 'concept',
+      author: 'agent',
+      sources: [sharedClaim],
+      supporting_claims: [],
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      scope: 'personal',
+      confidence: 'medium',
+      epistemic_tag: 'inference',
+      summary: `${entityId} test page`,
+      tags: [],
+      aliases: [],
+      notices: [],
     });
     const targetPath = path.join(wikiDir, 'target.md');
     fs.writeFileSync(

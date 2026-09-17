@@ -35,69 +35,222 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-10 for the 0.7.0 release cut on Node v26.5.1 (CI re-runs the
-same gate via `npm ci` from `package-lock.json` on Node 22 and 24, so the two
-runtime lines are verified by CI rather than by this local run), superseding
-the 2026-09-07 baseline: the counts below are unchanged — **446 tests across
-64 files**, 31 schema files, 9/9 retrieval-kernel scenarios, and the activation
-contract still fails closed. Re-measured 2026-09-14 after the isolation suite
-landed: **482 tests across 69 files**, build clean (`tsc`), same schema and
-kernel results. Re-measured again 2026-09-14 after the contradiction/temporal
-lifecycle suite landed: **488 tests across 70 files**, build clean (`tsc`),
-same schema and kernel results. Re-measured a third time 2026-09-14 after the
-sources/ingestion/federated-read suite landed: **515 tests across 71 files**,
-build clean (`tsc`), same schema and kernel results. Re-measured a fourth time
-2026-09-14 after the export-restore return path landed (ADR-0006):
-**520 tests across 72 files**, build clean (`tsc`), same schema and kernel
-results. Re-measured a fifth time 2026-09-15 after the host health contract and
-Coffee-trial SLOs landed (ADR-0008): **550 tests across 77 files**, build clean
-(`tsc`), same schema and kernel results.
+Verified 2026-09-17 on Node v26.5.1 for **the L2 page `notices` array through the hand-rolled page YAML
+serialiser** (`fix/tech-head/notices-frontmatter-roundtrip`, stacked on the still-unmerged
+`wip/tech-head/l2-page-frontmatter-schema @ 5a1c58c`; kanban `t_4d84ff6b` — a writer + reader fix in one
+file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **550 tests across 77 files**, 31
+schema files. The delta over the entry below is 6 tests in one new file,
+`test/layer2/l2-notices-frontmatter-roundtrip.test.ts`. Spec §9 / `page-frontmatter.schema.json` declare
+`notices` as an array of objects (the slot a *user-authored* page carries its notice in); the serialiser
+emitted that branch with the item's indent left inside the dash line (`-     type: staleness`, the
+continuation keys at a *shallower* column) and the parser read every dash line as a **string**, so
+`parse(serialise(fm))` returned `notices: ["type: staleness"]` and pushed `message`/`posted_at` out as
+stray top-level keys — which the frozen contract rejects on `additionalProperties: false`. Measured by the
+`t_8d6f4a5c` reviewer at `5a1c58c` (5/7 probe checks); the fix makes the writer emit standard block YAML
+(`- key: value`, continuation keys at the item's content column) **and** the reader decode mapping items,
+including the mis-indented bytes the old writer left on disk, so a page already written by the broken
+writer is recovered on read and converges on its next write. Non-tautological: the pin fails 6/6 on
+`5a1c58c` (`Test Files 1 failed (1) | Tests 6 failed (6)`) and passes 6/6 on the fix; the last test drives
+compile → ENDORSE → notice attached to the user's own page → **recompile** through the real compiler and
+asserts the notice survives with an empty Ajv error list. Gate: `npm run build` exit 0;
+`test/layer2` + `f_l2_voice_protection` + `g_endorsement` 4 files / 24 tests; full suite 77 files / 550
+tests exit 0 (82.06 s); `verify:schemas` 31 files OK; `verify:saas` pass; `npm audit --omit=dev` 0
+vulnerabilities. Not run: `npm ci` (the worktree symlinks the shared `node_modules`, so a reinstall would
+hit every sibling lane — CI runs it on Node 22/24). **This entry also corrects the entry below** on one
+clause: it states a user page's `notices` is preserved verbatim through a rewrite — the frontmatter field
+was carried by both writers, but the serialiser corrupted it on the way to disk. Measured after the fix,
+four neighbouring shapes of the same minimal serialiser still degrade (a multi-line string anywhere, a
+nested object inside a notice item, a single inline-array element containing a comma) — all pre-existing,
+all latent (no in-tree verb writes one), none in this card's scope, carded as `t_cf744a8e`. No published
+schema byte, `SHA256SUMS` line, or spec/protocol text moves with this change.
 
-Verified 2026-09-16 on Node v26.5.1 for the **correction path, composed onto the Coffee release
-candidate** (`fix/b1-correction-durability` off `wt/t_9740ae98` @ `e937fab`, kanban `t_8ddfa350`,
-ADR-0016 — two `src/` changes: `ClaimStore.insertClaim` derives the canonical record's `state` from
-`status`, and `SmartwareCore.correct` re-syncs the claim-FTS index after the mutation, the way
-`consolidate` already did): **551 tests across 77 files**, `tsc` clean, `verify:schemas` 31 schema
-files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-adapter` 53/53, and **`verify:coffee-gate`
-85/85** against the packed artifact (`smartware-0.7.0.tgz` sha256
-`874a898b8f944a40701cd1478a5a17e6662811383e4d60c763ad7b6b60c22db7`). The gate grew by six checks
-(79 → 85): 3f gains its positive half (the corrected value must be *served*, not merely "not the wrong
-one" — the missing half that let this defect through), and 3j–3o drill write → CORRECT → restart as a
-new adapter instance → the same question from a **second process**: exactly one row, the corrected value,
-the retracted claim's latest canonical version not `active`, and no canonical record appended by the
-restarts. Both halves are separately load-bearing under mutation (reverting the `state` derivation fails
-3l/3m/3n; reverting the index re-sync fails 3f/3k). Measured before the composition at `e937fab`: recall
-`[]` after CORRECT, and a fresh process serving **both** the corrected and the corrected-away value as
-`active`, with the retracted claim canonicalised as `v1 active` + `v2 active`. Not composed with this
-change and still open: the lane's unit test `test/layer1/replay-correction-state.test.ts` (four of its
-assertions pin `supersedes`, the `semantic` enum, the Crockford OperationId and the demotion pointer —
-all carded elsewhere), the writer's `supersedes` pointer and the Crockford legacy OperationId (B2,
-`t_5ef44cc1`).
+Verified 2026-09-16 on Node v26.5.1 for **the compiled L2 page frontmatter against
+`page-frontmatter.schema.json`** (`wip/tech-head/l2-page-frontmatter-schema`, stacked on the ADR-0013 lane
+`wip/smarty/canonical-schema-boundary @ 6ed7a93`; kanban `t_8d6f4a5c`, ADR-0013 → D2 — a **writer** fix, so
+**no published schema byte moves**, `SHA256SUMS` unchanged): **544 tests across 76 files**, 31 schema
+files. The delta over the entry below is 3 tests, all in `test/layer2/l2-page-frontmatter-boundary.test.ts`,
+whose assertions **inverted**: the compiled page's raw frontmatter now validates with an **empty** error
+list where it previously rejected with exactly 19 (`required` ×2 — `created`, `epistemic_tag`;
+`additionalProperties` ×12; `/category:enum`, `/sources/0:pattern`, `/updated:format`,
+`/confidence:type`, `/confidence:enum`), and the same file now also pins the **endorsed** page (ENDORSE is
+a second writer of this artifact), the voice-protected surface across a recompile of an endorsed page
+(prose, locked `sources`, `created`, endorsement metadata — driven through the real compiler), and the
+pre-fix read path. The writer emits spec §9's field set verbatim;
+the compile envelope (`entity_id`, `entity`, `type`, `sensitive`, `compiled_at`, `compiled_by`, `model`,
+`supersedes`, `related`, and ENDORSE's recovery metadata) renders into the page's derived **Evidence
+Timeline** region as a `smartware-envelope` block instead of into the frozen contract, and READ derives
+sensitivity from L1 and resolves entity → page from the L1 entity record rather than from removed
+frontmatter. A/B with one probe over both revisions: 19 errors at `6ed7a93` → 0 errors at the fix, and the
+old pin passes at `6ed7a93` (2/2) while failing loudly at the fix (1 failed | 1 passed) — the inverted pin
+is not tautological. Pages already on disk are read through the compatibility accessor
+(`src/layer2/envelope.js`) and upgraded deterministically in place on their next compile or endorsement;
+no user prose, locked `sources`, `created`, or user `tags`/`aliases`/`notices` is rewritten. Not covered:
+the page `scope` value is the substrate's own string, so a page in a scope outside the v0.5.0 `Scope`
+pattern stays an ADR-0015 boundary rather than a page-vocabulary claim. Fixtures in
+`f_l2_voice_protection`, `g_endorsement` and `demotion-durability` moved to the published vocabulary;
+`e2e/smoke` and `protocol/query` assert the published fields. No other suite changed.
 
-Verified 2026-09-17 on Node v26.5.1 for the **REVISE half of the same re-sync** (kanban `t_336ba0b9`,
-lane `wip/neo/revise-fts-sync` off `fix/b1-correction-durability` @ `ab9cf2b` — one `src/core.ts`
-change: `revise` re-syncs the claim-FTS index after the mutation, the way `correct` and `consolidate`
-already did): **553 tests across 78 files**, `tsc` clean, `verify:schemas` 31 schema files OK,
-`verify:saas` `SMOKE_OUTCOME=pass`, and **`verify:coffee-gate` 85/85** against the packed artifact
-(`smartware-0.7.0.tgz` sha256
-`d1fc431046400d928e0f7b514eeb71b0d70172e837d1f46eec12769260c0c083`). Measured before the fix through
-the Coffee adapter (`scripts/coffee-revise-restart-probe.mjs`, three legs): recall served **1 row**
-in the process that had just performed a warranted REVISE while a restart and a genuine second
-process over the same brain served **2** — the revised claim was missing from the live claim-FTS
-lane until some later write re-synced the scope. The regression pin is
-`test/protocol/revise-search-sync.test.ts` (RED at `ab9cf2b`: in-process `[replacement]` vs fresh
-open `[original, replacement]`); the gate grew no fixture checks because the fixture has no REVISE
-surface (the Coffee adapter exposes `correctClaim` only). The re-sync is semantics-neutral — the live
-lane is made equal to whatever the store says is indexable — so it holds whether a REVISE leaves a
-superseded target `active` (this base) or still superseded (the demotion carry-forward decision on
-`t_742e31f9`, unmerged).
+Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
+evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
+`t_0920aa1d`, ADR-0013 — schema/contract accuracy plus a disclosed boundary; **no published schema byte
+moves**, `SHA256SUMS` unchanged): **541 tests across 76 files** (540 passed; the single failure is
+`mcp_smoke`'s 10 s stdio-transport hook under a load average of 23–27 with five sibling lanes running
+vitest — re-run alone on the same tree: 4/4 pass, exit 0), 31 schema files. The delta over the entry below is 4
+tests in two new files — `test/layer0/l0-record-wire-boundary.test.ts` (2) and
+`test/layer2/l2-page-frontmatter-boundary.test.ts` (2) — which pin, for the first time, which schema
+belongs to which artifact: no `src/` file referenced either schema, and no normative text assigned one
+to a surface (the contract prints the OBSERVE payload in prose without naming `observation.schema.json`,
+and mentions `page-frontmatter` only in its Scope-vocabulary list). Measured on the
+protocol-native flow (`observe → reflect → compile → exportScope`, raw bytes + Ajv 2020):
+`observation.schema.json` accepts the contract's OBSERVE payload plus the stamped identity and rejects
+the on-disk **record envelope** by construction (4 `required`, 9 `additionalProperties`,
+`/source:type` — the record's nested `source`, `status`, `visibility`, `version`, `policy` and
+`integrity` chain have no place in a closed wire schema), **including the byte-identical copies
+`EXPORT.SCOPE` ships in `observations.jsonl`/`evidence.jsonl` while its manifest declares
+`"schemas": "v0.5.0"`**; `page-frontmatter.schema.json` accepts the spec §9 projection of the frontmatter
+the compiler itself writes and rejects the raw form with 19 errors (2 `required`, 12
+`additionalProperties`, `category` enum, `sources/0` pattern, `updated` format, `confidence`
+type+enum), so there the writer is the side that is wrong. Both divergences are **disclosed** in
+`schemas/v0.5.0/README.md` → *Which schema covers which surface*, not silently relaxed; the two fixes
+(the L2 page writer, and a published record schema plus an honest export-manifest label) are carded with
+their measured evidence (`t_8d6f4a5c`, `t_f1157ed4`). No other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the **substrate ActorId and the host-lane scope disclosure**
+(`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0015 — a writer-identity fix plus a stated
+conformance boundary; no schema byte moves, `SHA256SUMS` unchanged): **537 tests across 74 files**, 31
+schema files. The delta over the entry below is 5 tests — a new `test/layer1/pod-profile-conformance.test.ts`
+(4: the pod-profile record's complete Ajv error list is exactly `["/scope:pattern"]` with a conformant
+actor id equal across claims and operations-log entries, the protocol-native control record's list is
+empty, reflect.auto and dream carry the same `substrateActorId`, and the slug rule for named/ULID
+instances) and one fixture in `test/schemas-v0.5.0.test.ts` (host-lane spellings are not `Scope`
+values) — while `test/semantic-materialization.test.ts` substitutes only the scope now, because the
+actor id it used to substitute is written conformant. One instance now mints exactly one substrate
+identity (`substrate:<slug>`; `smartware_coffee` → `substrate:coffee`), where reflect.auto / the
+compile queue previously wrote `substrate:<ULID>` (uppercase, rejected by the published pattern) and
+`dream` a second spelling. `pod/<pod>/<lane>` scopes are disclosed as **host-registered lanes** outside
+the v0.5.0 `Scope` vocabulary and the schema-conformance claim (see *Remaining limits*). Mutation
+checks: reverting the writer mint fails 4 tests; widening the Scope pattern to admit host lanes fails
+the new closed-vocabulary fixture. No other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the **claim record's extraction materialization block**
+(`wip/tech-head/claim-record-semantic`, kanban `t_229601e4`, ADR-0011 — schema/contract accuracy, not a
+protocol change): **532 tests across 73 files**, 31 schema files, `claim.schema.json` the only schema
+file changed (`SHA256SUMS` regenerated; the required set and every other property are unchanged). The
+delta over the entry below is 2 tests — a fixture group in `test/schemas-v0.5.0.test.ts` (the block is
+optional, closed, and required-field-complete when present) and one test in
+`test/semantic-materialization.test.ts` (the records `reflect.auto` appends validate against the
+published schema) — plus the pinned `test/layer1/legacy-operation-id.test.ts`, which now asserts the
+**whole** Ajv error list of the record `insertClaim` appends is empty instead of pinning the known
+divergence (same test count). `claim.schema.json` now enumerates the optional `semantic` block, so an
+active record the reference implementation writes is accepted by the contract it publishes; the block
+is optional, not a wire field, and no conformance claim depends on it. Two same-class divergences were
+measured while deciding this and stay open, carded with their evidence (ADR-0011 → *Known
+divergences*): `insertClaim`'s forgotten path omits `supersedes` that the schema's forgotten branch
+requires (`t_3ba3ee39`), and pod-profile records carry `pod/<pod>/<lane>` scopes and
+`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed` — both halves
+settled in the entry above: the ActorId defect fixed in the writers, the host-lane scope disclosed as
+outside the v0.5.0 `Scope` vocabulary, ADR-0015). No other
+suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
+(`wip/smarty/l1-legacy-op-id`, kanban `t_85817375`): **530 tests across 73 files**, 31 schema files, no
+schema file changed (the `OperationId` pattern is unchanged). The delta over the baseline below is 6
+tests in one new file (`test/layer1/legacy-operation-id.test.ts`), which drives `insertClaim` with no
+caller operation id, validates the written L1 record against `schemas/v0.5.0/claim.schema.json`, and
+pins the marker to the one `src/layer1/tombstone-backfill.ts` stamps on a pre-A3 row's tombstone (the
+writer fixed in the entry below). The placeholder was `op_LEGACY00000000000000000000`, whose `L` the
+published Crockford-base32 pattern rejects; it is now `op_000000000000000000000000A3`. One Ajv error
+remains on such a record — the internal `semantic` block the published claim schema does not enumerate
+— measured, unchanged by this fix, and carded separately; **that second half was decided in the entry
+above** (the schema enumerates the block, and the pinned test now asserts an empty error list). No
+other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the **tombstone backfill writer**
+(`wip/neo/tombstone-backfill-writer`, kanban `t_9e124fe6`): **524 tests across 72 files**, 31 schema
+files. The delta over the baseline below is 3 tests in one new file
+(`test/layer1/tombstone-backfill.test.ts`), which drives the only in-tree writer of
+`wiki/tombstones/*.md` over legacy-shaped rows (`status: 'retracted'`, no `operation_id`/`actor_id`)
+and validates the written frontmatter against
+`schemas/v0.5.0/tombstone-frontmatter.schema.json`; the writer now emits the snapshot envelope fields
+the schema requires (`claim_id`, `state`, `epistemic_owner`, `fingerprint`), buckets `confidence`
+through `confidenceToBucket`, stamps schema-valid `operation_id`/`actor_id` placeholders for a pre-A3
+row, and carries a mechanical demotion into the snapshot; no other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the tombstone schema's coverage of the claim record
+envelope (`wip/smarty/tombstone-snapshot-envelope`, kanban `t_2bba749f` — schema/contract accuracy,
+not a protocol change): **521 tests across 71 files**, 31 schema files. The delta over the baseline
+below is 2 tests, both in `test/schemas-v0.5.0.test.ts` (a tombstone-frontmatter fixture group for
+the demotion/release fields in the `snapshot` block, and a guard that the block mirrors
+`claim.schema.json` field-for-field); no other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the mechanical demotion's **release** vocabulary —
+`REVISE` with `repick_survivor` (`wip/neo/repick-survivor`, kanban `t_1db21462`, ADR-0003 →
+*Releasing a demotion*): **519 tests across 71 files**, 31 schema files. The delta over the
+2026-09-14 baseline below is 12 tests — `test/protocol/repick-survivor.test.ts` (11: swap,
+stability, rescue, multi-copy demotion, the two rejections, the two crash legs, the torn-set
+fail-closed case, plus rebuild-equivalence assertions) and one schema fixture group in
+`test/schemas-v0.5.0.test.ts` (the `repick_survivor` form and the demotion record fields) — and no
+other suite changed.
+
+Verified 2026-09-14 on Node v26.5.1 for the duplicate-claim-identity change
+(`fix/duplicate-claim-recipe`), the demotion-durability fix on top of it
+(`wip/neo/demotion-durability`), and the carry-forward of a demotion through the
+flows that hand-build a version record (`wip/smarty/demotion-handbuilt-records`),
+superseding the 2026-09-10 0.7.0 release-cut baseline (which recorded **446 tests
+across 64 files**): **507 tests across 70 files**, 31 schema files. The delta over
+the parent commit is 6 tests — `test/layer1/demotion-durability.test.ts` (4:
+`REVISE`, `FORGET` → `REVIVE`, endorsement, consolidation), plus one each in
+`test/protocol/forget-scope.test.ts` (offboarding) and
+`test/protocol/retention-expire.test.ts` (expiry) — and the eight
+demotion-durability tests of the parent change are all still green; no other suite
+changed. The retrieval-kernel contract (9/9 scenarios) and the activation contract
+(fails closed) were last measured on the parent revision of this baseline; this
+change touches Layer 1 version records only, not the retrieval kernel or the
+extractor. (CI re-runs the same gate via `npm ci` from `package-lock.json` on Node
+22 and 24, so the two runtime lines are verified by CI rather than by this local
+run.)
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **520 tests across 72 files** with no skips
-  (446/64 at the 2026-09-10 cut).
+- The standalone suite passes **524 tests across 72 files** with no skips.
+- The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
+  claim write-path identity contract documented in the integration guide §1e:
+  `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
+  fact (survivor order — lexicographically smallest claim id, i.e. earliest-minted
+  ULID first) and `resolveFactMatches` folds duplicates into that survivor by
+  unioning the losers' `supporting_evidence`, demoting them (`status:
+  'superseded'`, `superseded_by`, timestamped, never deleted), recomputing
+  confidence with the library formula, and reporting `ambiguous_matches` /
+  `superseded_claims`. Both insertion orders of a duplicate pair yield the same
+  survivor; a demoted duplicate is no longer matched, **and the demotion is
+  durable**: it is recorded in the demoted claim's own canonical version records
+  (`superseded_by`, `superseded_at`) and every materialisation derives the row
+  from them, so a compile-path row sync and a full canonical replay both keep the
+  duplicate out of the recall-eligible set (previously projection-only — measured
+  in `t_15bb0cd0` `evidence/23-demotion-durability.txt`; pinned by
+  `test/layer1/demotion-durability.test.ts`, which now also covers the flows that
+  hand-build a version record). The same 6 fixtures as the
+  host-side pilot reference implementation are reproduced 1:1, so the pilot's
+  deterministic suite remains a valid cross-check.
+- The same suite pins the **known divergence between that write-path identity and
+  the pre-existing structured claim fingerprint** (`computeStructuredClaimFingerprint`,
+  `reflect.auto` idempotency, spec §193/§238) in both measured directions: two
+  active rows differing only in `claim_type` are one fact to the write path and two
+  to the fingerprint, while two rows differing only in text case are the reverse.
+  The divergence is recorded, unreconciled, with a reversal trigger in
+  [ADR-0003](adr/0003-claim-fact-identity.md) → *Known divergence*; reconciliation
+  needs owner sign-off. Re-closing it silently fails the suite (measured: dropping
+  `claim_type` from the fingerprint fails 1 test, case-folding a text value in
+  `normaliseValue` fails 3, making fact identity depend on `claim_type` fails 1).
+- `npm run verify:saas` (public-API smoke) exercises the same contract end to end
+  against the packaged surface: a store seeded with two active claims for one fact
+  answers **2** recall results for that fact and **1** after
+  `resolveFactMatches`, with the duplicate superseded, its evidence unioned
+  (2→3 refs), survivor confidence formula-consistent, and the two rows for the one
+  fact shown to carry two different `canonicalKey`s (the key includes
+  `validity_from`, so it is not the fact identity).
 - The G3 provenance-rendering contract suite (`test/render/provenance-rendering.test.ts`,
   33 tests) asserts the spec §10d wording table verbatim — flagship
   "Learned from Maya, May 12; corrected by owner May 13.", badge set
@@ -130,63 +283,6 @@ superseded target `active` (this base) or still superseded (the demotion carry-f
   never Bcau/Gate/`*`; owner bypasses grants); and EXPORT.SCOPE is exactly one
   client — `scope_exclusive: true`, zero cross-client ids in the package, per-client
   packages distinct, and idempotent by `operation_id`.
-- The isolation suite (`test/conformance/p0_isolation_conformance.test.ts`,
-  11 tests, added 2026-09-14) closes P0-5/P0-7: six businesses with IDENTICAL
-  client scope ids in one process, every read lane (recall, hybrid recall,
-  context, raw-observation window, activity feed, read/browse, conflicts,
-  knowledge graph, semantic documents) driven per actor (owner, human staff,
-  agent, revoked staff, unregistered stranger); a fuzz over
-  **1,350 (actor × scope × lane) combinations** — 972 denials, 378 allowed,
-  **zero cross-tenant or cross-scope results**; federated multi-scope reads
-  deny rather than partially answering an unauthorized scope; denied writes
-  leave no observation, claim, or index row behind. Every denial is an explicit
-  `ProtocolError` (`actor_unregistered` for an identity with no grant row,
-  `insufficient_permission` for a known actor outside its scope) — a lane never
-  answers an unauthorized actor with an empty result.
-- The contradiction/temporal lifecycle suite
-  (`test/conformance/p0_contradiction_temporal.test.ts`, 6 tests, added
-  2026-09-14) closes P0-2/P0-4 against the embedded `SmartwareCore` seam:
-  two actors' conflicting facts for the same canonical key are both retained
-  (claims, evidence lists, raw L0 episodes) and both marked contested, and
-  RECALL returns both with `status: contested` / `epistemic_tag: contested`
-  instead of a silent empty result (the pre-fix defect); a third voice joins
-  the same contest rather than becoming a lone active claim; supersession
-  closes the older claim's event-valid window at the replacement's start
-  (`t_valid_to`) while recording system time (`t_invalidated`); current recall
-  and the working index exclude superseded and stale facts
-  (`include_superseded` / `include_stale` history reaches them); as-of reads
-  reconstruct along **both** axes (event-valid March → the superseded fact;
-  system-recorded March → what the brain then knew); a warranted user REVISE
-  (`origin: user` supersedes edge) is the only path that retires one side of a
-  contest — no LLM adjudication anywhere (fixture configures
-  `llm.provider: 'none'`).
-- The sources/ingestion/federated-read suite
-  (`test/conformance/p0_sources_ingestion.test.ts`, 24 tests, added
-  2026-09-14) closes the shared-workspace contract (P1-2 shape): a source
-  registry inside one business brain (owner-only upsert; per-brain scope; a
-  second business never sees another's sources); fail-closed source context on
-  the write path (unknown → `source_unregistered`, paused → `source_inactive`,
-  actor outside the allow-list → `insufficient_permission`, and nothing
-  written); scope-aware item dedup (the same source item in two scopes is two
-  observations — a client's evidence is never shadowed by another's); ingest
-  receipts with per-item outcomes (a `secret_detected` item is rejected with
-  its code while the batch still commits); `operation_id` replay returning the
-  recorded receipt with zero new writes; crash-mid-batch convergence on retry
-  (fault-injected after the second item: written prefix dedups, the remainder
-  completes once); per-`(source, scope)` cursors; sync status counts and
-  cursors per source/scope, owner-only, with "connected, never synced" and an
-  explicit `source_unregistered` denial for a named unknown source; federated
-  reads across scopes — owner answers across named scopes with scope-tagged
-  results, a staff actor naming an unauthorized scope is denied as a whole
-  (never partially answered), omitted scopes federate over exactly the actor's
-  readable set, and no result carries another business's facts; and attribution
-  through every lane for a human and an agent writing one workspace (actor,
-  actor type and source preserved; quarantined ingestions counted and hidden
-  from the raw window; dedup never rewrites the original writer). The MCP
-  transport suite (`test/conformance/mcp_smoke.test.ts`) drives the same
-  contract over the real stdio server: the five new tools are registered with
-  their required inputs, and a register → ingest → sync-status → federated-read
-  round trip plus a fail-closed ingest denial run over the wire.
 - Tests exercise OBSERVE, RECALL, REFLECT, REVISE, FORGET, REVIVE, ENDORSE,
   FORGET.SCOPE (erasure and offboarding lanes, owner-only enforcement,
   same-commit grant revocation, exact retraction counts, idempotent retry,
@@ -216,7 +312,10 @@ and user-facing authorization against the exact Smartware version they ship.
 
 Operation-ID-backed OBSERVE, REVISE, FORGET, REVIVE, ENDORSE, automatic
 REFLECT, and FORGET.SCOPE claim writes persist a content-free expected-artifact
-intent before canonical mutation.
+intent before canonical mutation. (A `REVISE` re-pick commits **two** version
+records — the release and the demotion(s) — as one exact artifact set: the
+records land in one append, and recovery commits only when every named artifact
+is present.)
 
 Startup recovery:
 
@@ -236,10 +335,82 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
+- **The L0 evidence record's field shape is not published in v0.5.0.** `observation.schema.json` covers the
+  observation object *on the wire* (the OBSERVE payload plus the stamped identity), not the record the
+  substrate appends to `<data_dir>/evidence/<date>.jsonl` — which carries the same information under
+  different names plus `status`, `visibility`, `version`, `policy` and the `integrity` chain, none of
+  which a closed wire schema can hold. **This includes the copies `EXPORT.SCOPE` ships** in
+  `observations.jsonl` / `evidence.jsonl`, in a package whose manifest declares `"schemas": "v0.5.0"`.
+  An integrator validating raw evidence — or a third-party implementation claiming v0.5.0 — has no
+  published contract for the record until the carded record schema lands (`t_f1157ed4`). Disclosed in
+  `schemas/v0.5.0/README.md` → *Which schema covers which surface*; decided in
+  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md); pinned by
+  `test/layer0/l0-record-wire-boundary.test.ts` (the record envelope, the wire projection validating,
+  the record's exact 14-error rejection, and the export package carrying the same bytes).
+- **The reference implementation's compiled page frontmatter does not yet validate against
+  `page-frontmatter.schema.json`** — 19 Ajv errors (`created`/`epistemic_tag` missing, plural `category`,
+  ISO `updated`, numeric `confidence`, observation ids under `sources`, plus the compile envelope). The
+  schema is the contract for that artifact (spec §9 prints the same field set); the writer fix is carded
+  (`t_8d6f4a5c`), disclosed in the same README section, and pinned by
+  `test/layer2/l2-page-frontmatter-boundary.test.ts`.
+- **Host-registered lanes are outside the v0.5.0 `Scope` vocabulary.** The reference implementation's
+  pod-profile helper registers `pod/<pod>/<lane>` ids — a host's own lanes, and the live Pod product's
+  scope ids — and the published vocabulary admits no host-lane form. A canonical record written in a
+  host lane therefore does not meet this contract's conformance boundary ("schema validity on every
+  canonical write"); hosts that need v0.5.0 schema-conformant records write protocol-native lanes
+  (`self` / `workspace` / `project:<slug>` / `agent:<slug>` / `client:<id>[#n]`). Decided, with the
+  measured evidence and the recommendation to define a host-lane form in a later protocol revision:
+  [ADR-0015](adr/0015-host-registered-lanes-and-the-substrate-actor-id.md). Pinned by
+  `test/schemas-v0.5.0.test.ts` (the vocabulary rejects host lanes) and
+  `test/layer1/pod-profile-conformance.test.ts` (a pod-profile record's only Ajv error is
+  `/scope:pattern`; a protocol-native record's complete error list is empty).
 - Legacy direct calls without an operation ID are outside the recovery
   guarantee.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts
   remain available for manual review.
+- Duplicate-claim convergence is **host-triggered**, not automatic: an existing
+  store keeps two active claims for one fact until a write touching that fact
+  resolves them or the host sweeps the scope (`ClaimStore.findActiveFactMatches`
+  + `resolveFactMatches`, integration guide §1e). Identity is
+  `(subject, predicate, scope, object value)` — the same fact asserted in two
+  different scopes is never merged.
+- The demotion is durable **from the version that records it** — a compile-path
+  row sync and a canonical replay both reconstruct it from the claim's canonical
+  version records — and **every flow that hand-builds a claim's next version
+  record carries it forward**: user `REVISE` (whose result reports `superseded_by`,
+  because a revise changes metadata and not the asserted fact), the `FORGET`
+  tombstone, `REVIVE`'s restore from the snapshot, the endorsement cascade,
+  consolidation's input tombstones, scope offboarding and retention expiry. One
+  limit remains: a demotion written before this fix was projection-only and is not
+  reconstructible from canonical data. **Releasing a demotion is a user-only
+  re-pick** — `REVISE` with `repick_survivor: true` on the demoted duplicate
+  (protocol v0.5.0, shipped 2026-09-15): one atomic commit releases the duplicate
+  and demotes the fact's current active copy with a `superseded_by_origin: 'user'`
+  warrant, so exactly one copy stays recall-eligible. It works in swap mode (the
+  survivor is active) and rescue mode (the survivor is already forgotten — the
+  fact returns from audit-only visibility). `invalidate_relations` still cannot
+  release one (the demotion is deliberately not an edge); a bare release remains
+  unstable and is rejected as a design. Reasoning and the rejected alternatives:
+  [ADR-0003](adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built
+  version records* and *Releasing a demotion*.
+- **Two identity rules over the claim table are unreconciled.** The write-path
+  identity above governs the host write path; the autonomous-creation path
+  (`reflect.auto`) is idempotent on the structured claim fingerprint instead
+  (`claim_type` included, text lowercased), and `insertClaim` stamps that
+  fingerprint on every claim when the store has a `data_dir`. A host running both
+  surfaces over one store can therefore end up with a duplicate the write path would
+  have merged, or a merge the compile path does not see. Recorded with the measured
+  cases and a reversal trigger in
+  [ADR-0003](adr/0003-claim-fact-identity.md) → *Known divergence*; reconciling the
+  two is protocol identity semantics and needs owner sign-off. One legacy artifact
+  picks a side rather than inventing a third rule: a backfilled tombstone snapshot
+  (`wiki/tombstones/*.md` for a pre-A3 `status: retracted` row) recomputes the
+  **content form** — the snapshot block enumerates neither the structured assertion
+  nor `semantic`, so a structured value would not be re-derivable from the artifact
+  whose purpose is reconstruction (`t_9e124fe6`, ADR-0003 → *Known divergence*).
+  (Deliberately unchanged by `t_229601e4` / ADR-0011: the L1 *record* now enumerates
+  the materialization block, the snapshot block still does not — its promise is the
+  claim schema's **required** fields, and the block is optional.)
 - The suite does not prove concurrent multi-writer serialization or universal
   sudden-power-loss durability.
 - REFLECT page output and search databases are rerunnable projections rather
@@ -248,133 +419,6 @@ The exact ordering and recovery state table are documented in
   owner-approved non-PII pointer path exists only for `offboarding`.
 - Passing schemas and behavioral invariants is not an exhaustive
   requirement-by-requirement proof of Specification v1.6.16.
-
-## Consumer-visible change — isolation enforcement (2026-09-14, unreleased)
-
-The embedded read lanes are now actor-bound end to end; a host that currently
-reaches them without an identity must pass one. **No protocol or schema surface
-changed** (the five verbs, RECALL family and FORGET.SCOPE are untouched); this
-is the embedded `SmartwareCore` seam.
-
-| surface | before | now |
-|---|---|---|
-| `core.searchObservations(query, scope, opts?)` | no actor, no grant check — anyone holding the core could read any scope's raw evidence | `core.searchObservations({ actor, query, scope, ... })`; requires a `read` grant on the scope, sensitive content requires owner + opt-in |
-| `core.listActivity(opts?)` | no actor, no grant check; `includeSensitive` widened any caller's view | `core.listActivity({ actor, ... })`; per-scope grants (scope-less calls return only readable scopes); `includeSensitive` requires the owner |
-| `core.recall(...)` / `core.context(...)` on an ungranted scope | empty result set (indistinguishable from "no memory") | `ProtocolError` — `insufficient_permission` / `actor_unregistered` |
-| any `requireGrant` denial | always `insufficient_permission` | `actor_unregistered` when the actor has no grant row at all; `insufficient_permission` when the Pod knows the actor (including revoked/expired grants) |
-
-Hosts must supply the same actor identity they already use for `observe`/`read`,
-and should surface the denial code to the user rather than treating it as "no
-data". Coffee/Pod adapters calling `listActivity` need the actor threaded
-through their activity routes.
-
-## Consumer-visible change — contradiction and temporal semantics (2026-09-14, unreleased)
-
-Conflicting facts now have defined, deterministic semantics on both write paths,
-and a disagreement is visible instead of silent. **No protocol or schema
-surface changed** (the five verbs and their schemas are untouched); this is the
-embedded `SmartwareCore` seam plus one new public subpath. Decision record:
-[ADR-0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md).
-
-| surface | before | now |
-|---|---|---|
-| conflicting writes | second claim became a parallel `active` claim — two "current" truths for one fact | one deterministic policy: same canonical key + different value → every side `contested` (retained, linked via `contested_by`); later event-valid start → older claim `superseded` |
-| contested claims in RECALL | dropped from the claim index → **empty result** for a disagreement | recallable, returned with `status: contested` and `epistemic_tag: contested`; `readConflicts` unchanged |
-| superseded claims | `t_invalidated` (system time) recorded, event-valid window (`t_valid_to`) left open | window closed at the replacement's `t_valid_from` (event-valid time); `validity.to` is now meaningful |
-| valid-time as-of / range reads | superseded claims excluded, so a past window could read empty | include claims that were true in the window (superseded history reconstructs); transaction-time reads unchanged |
-| recall result `claim` object | `id`, `predicate`, `object`, `epistemic`, `confidence`, `status`, `observation_ids`, `valid_at`, `invalid_at`, `recorded_at`, `invalidated_at` | **additive**: `epistemic_tag`, `superseded_by`, `contested_by` |
-| host write path | hosts hand-rolled corroboration and had no contradiction handling at all | `admitClaim(claim, store)` from the new public `smartware/layer1/conflicts` returns `inserted / corroborated / contested / superseded` |
-
-Hosts that render recall results should now handle `contested` (surface both
-sides with the marker) instead of assuming one current truth, and should prefer
-`admitClaim` over a bare `insertClaim` when persisting an extracted fact so the
-corroborate/contest/supersede policy is the library's, not a re-implementation.
-
-## Consumer-visible change — sources, ingestion and federated reads (2026-09-14, unreleased)
-
-Connectors now have a registered provenance origin and an idempotent ingestion
-contract, and a company brain can read across client scopes in one call. **No
-protocol or schema surface changed** (the five verbs, the RECALL family and
-FORGET.SCOPE are untouched); this is the embedded `SmartwareCore` seam plus one
-new public subpath (`smartware/ingestion`) and five MCP tools. Decision record:
-[ADR-0005](adr/0005-sources-ingestion-and-federation.md).
-
-| surface | before | now |
-|---|---|---|
-| observation source | `observation.source` carried only the free-form `source_id` dedup string — any string, no registered origin | **additive** optional `source_ref` = the registered source id; every lane that returns raw evidence carries it (`searchObservations`, `listActivity`, `readObservationEvidence`) |
-| source registry | none | `core.registerSource({ actor, id, kind, display_name, status?, actor_ids?, external_ref? })` (owner-only upsert in `config.json`, `created_at` preserved) and `core.listSources({ actor })`; `kind ∈ connector/meeting/note/agent/manual/system`; `status ∈ active/paused/revoked` |
-| writes under a source | a `source_id` string was accepted from anyone | fail-closed before any write: `source_required` (missing), `source_unregistered`, `source_inactive`, `insufficient_permission` (actor outside the entry's allow-list) |
-| dedup identity | `(app, source_id)` — **scope-blind**: the same item in a second scope was silently dropped as a duplicate of the first | `(app, source_id, scope)` — one item per scope; the same message that matters to two clients lands in both (index swap is in-place in the derived Layer 0 index) |
-| connector ingestion | none — hosts looped `observe` with no cursor, no batch replay, nothing to reconcile after an interrupted sync | `core.ingest({ actor, source_id, scope, cursor, operation_id, items })`: one polled page per batch; opaque cursor + `cursor_before` per `(source, scope)`; replaying a committed `operation_id` returns the recorded receipt and writes nothing; a crash mid-batch converges on retry (written prefix dedups); per-item outcomes with codes (`accepted/duplicate/quarantined/rejected`) and a rejected item never wedges the batch; ≤ 500 items per batch |
-| sync status | none | `core.sourceSyncStatus({ actor, source_id? })` (owner-only): per source and scope — cursor, `cursor_before`, `synced_at`, batch and outcome counts; a registered source with no batches reports "connected, never synced"; a named unknown source denies (`source_unregistered`) |
-| multi-scope reads | no lane answered across scopes (`recall` is single-scope) | `core.recallFederated({ actor, query, scopes? })`: named scopes must **all** be readable or the whole read denies; omitted scopes federate over exactly the actor's readable set (owner: all); results are scope-tagged, scope-major, ranked within each scope |
-| `core.findObservationBySource(app, sourceId)` | two args | now requires the `scope` (identities are scope-aware) |
-| MCP tools | — | `smartware_register_source`, `smartware_list_sources`, `smartware_ingest`, `smartware_sync_status`, `smartware_recall_federated`; `smartware_observe` gains optional `source_ref` |
-
-The ingestion receipt/cursor ledger is **operational state**, not canonical
-evidence: the evidence JSONL a batch wrote is the record, and losing the ledger
-costs a resume hint, not writes (item dedup is content-safe). Hosts keep their
-own checkpoint too; a missing cursor means "resume from your side", never "the
-brain lost writes".
-
-## Consumer-visible change — fencing token at the mutation boundary (2026-09-14, unreleased)
-
-A brain can now refuse a **stale writer**: an optional monotonic epoch is validated at the
-mutation boundary, before any canonical artifact is written. **No protocol or schema surface
-changed** (the five verbs, the RECALL family and FORGET.SCOPE are untouched); this is the
-embedded `SmartwareCore` seam plus one optional open parameter. Decision record:
-[ADR-0007](adr/0007-fencing-token-at-the-mutation-boundary.md).
-
-| surface | before | now |
-|---|---|---|
-| `SmartwareCore.open(options)` | `{ dataDir, ownerId? }` | **additive** optional `fencingToken` — claimed at open, before recovery runs (a stale owner fails fast) |
-| `core.claimFence(token)` | — | register a new ownership epoch on an open writer; refused `fencing_token_stale` below the brain's high-water mark |
-| `core.fencingState()` | — | `{ enabled, token, high_water, refusals, last_refusal }` — the auditable refusal surface |
-| canonical mutations on a fenced brain | any process holding the brain handle could write | refused before any artifact when the presented epoch is older than the high-water (`fencing_token_stale`) or absent (`fencing_token_missing`); each refusal increments a counter and records `{ op, token, high_water, at }` |
-| `ProtocolError` | `code`, `message` | **additive** optional `details` (structured, non-content); surfaced in the MCP/index error envelopes |
-
-The guard is the first step of every canonical mutation (`observe`, `ingest`, `compile`,
-`drainCompileQueue`, `correct`, `revise`, `forget`, `forgetScope`, `restoreScope`,
-`expireRetention`, `consolidate`, `revive`, `endorse`, `quarantineReview`, `grant`, `revoke`,
-`dream`, `registerSource`, `ensureScopes`, `createPodProfile`, `ensureTrustedClientGrant`).
-Session bookkeeping and derived-index writes are not gated. A brain that never saw a claim keeps
-legacy behaviour; once claimed, tokenless writes are refused (fail-closed).
-
-Measured boundary (gauntlet drill `lease-loss-steal` phase A, before/after with a deterministic
-post-guard stall; evidence `gauntlet-fencing-before-20260915T083255Z/` vs
-`gauntlet-fencing-after-20260915T083414Z/` under `/opt/data/workspaces/brain-pilot-evidence/`):
-with the unfenced build the owner, frozen 2.58 s across a lease handoff, **committed on resume**
-(`201`, evidence present) — the window is real; with the fenced build the same scenario is
-refused before any artifact (`503 fencing_token_stale`, evidence JSONL unchanged, refusal
-recorded in `fencingState()`, zero acknowledged writes after the handoff). Latency A/B
-(5 pairs × 40 writes/arm, `latency-ab-20260915T083526Z/`): p50 medians 15.96 vs 15.62 ms — no
-regression distinguishable from run-to-run variance. The remaining
-limit is explicit: a pause *inside* a mutation after its boundary check can still leave partial
-artifacts (never an ops-log commit); storage-level fencing is the follow-on (ADR-0007).
-
-## Consumer-visible change — host health contract and Coffee-trial SLOs (2026-09-15, unreleased)
-
-A host can now operate a brain from machine-readable status instead of logs, and
-the misleading single `layer3.indexed` number is gone. **No protocol or schema
-surface changed** (the five verbs, the RECALL family and FORGET.SCOPE are
-untouched); this is a new embedded `SmartwareCore` method (`health`), one new
-MCP tool (`smartware_health`) and a shape change to the generated `STATUS`
-projection. Decision record:
-[ADR-0008](adr/0008-host-facing-health-contract.md); field-by-field definitions
-in [integration/observability.md](integration/observability.md).
-
-| surface | before | now |
-|---|---|---|
-| `STATUS.layer3` | one `indexed` number counting only the entity/topic FTS lane, reading as "everything is indexed" | four named lanes: `entity_index_rows`, `claim_index_rows`, `observation_index_rows`, `observations_by_freshness` |
-| `core.health({ actor, backup_dir? })` / MCP `smartware_health` | — | lease `role`/holder/epoch-age with `ttl_owner: 'host'`, brain-open state, compile queue depth/oldest-pending age/failures, ingestion cursor lag per `(source, scope)` stream, lane-explicit counts, drift records (`wiki_manifest`, `observation_fts`), denied-access counts by code and entry point, retention/forget receipts (numeric details only), storage bytes by area, backup freshness, recall/write latency histograms with upper-bound p50/p95/p99, recovery events, and the Coffee-trial SLO verdict |
-| authority | owner-only everything | owner sees the whole brain; a read-granted actor sees its readable scopes' counts; an actor with no `read` anywhere is `insufficient_permission`; unregistered is `actor_unregistered` |
-| content | n/a | the report is counts, states, ids and time — no field can carry tenant content (asserted on the serialized report) |
-| SLOs | — | `COFFEE_TRIAL_SLO` with three-state verdicts: `pass` / `breach` / `unknown`; overall `breach` > `unknown` > `ok`, so an unmeasured trial is never reported as `ok` |
-
-The metrics store (`<dataDir>/indices/metrics.db`: denials, latency histograms,
-recovery events) is **operational state**, not canonical memory: deleting it
-loses history and nothing else, and a report after such a wipe says so by
-absence rather than rendering an absent measurement as a pass.
 
 ## Accurate release claim
 
@@ -387,11 +431,5 @@ The tested beta boundary is:
 
 Smartware must not be described as providing general ACID filesystem
 transactions, automatic repair of ambiguous memory, concurrent multi-writer
-safety, or full Specification v1.6.16 conformance.
-
-Fencing (ADR-0007) adds one **conditional** guarantee that must not be
-over-read: *a writer that presents an epoch older than the brain's high-water
-mark is refused before any artifact is written.* It holds when the host issues
-tokens from a monotonic arbiter and claims them (§1h of the integration guide);
-it is not concurrent multi-writer safety, and a pause inside a mutation after
-its boundary check remains outside the measured boundary.
+safety, a single fact-identity rule across its write and compile paths, or full
+Specification v1.6.16 conformance.

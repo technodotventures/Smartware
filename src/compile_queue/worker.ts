@@ -24,7 +24,7 @@ import type { Observation } from '../layer0/types.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { Claim } from '../layer1/types.js';
 import type { SearchIndex } from '../layer3/search.js';
-import type { SmartwareConfig } from '../config.js';
+import { substrateActorId, type SmartwareConfig } from '../config.js';
 import { defaultFingerprintIndexPath, openFingerprintIndex, type FingerprintIndex } from './fingerprint.js';
 import { CompileQueue, defaultCompileQueuePath } from './queue.js';
 import { nextOperationId } from './ids.js';
@@ -76,8 +76,15 @@ export interface CompileBatchResult {
   failed_observation_ids: string[];
 }
 
+/**
+ * The substrate ActorId this worker's autonomous writes carry.
+ *
+ * Kept as the compile-queue barrel's public name; mints through the one
+ * canonical helper (`substrateActorId`, src/config.ts) so the queue, the
+ * synchronous REFLECT handler and dream write the same identity.
+ */
 export function podActorId(config: SmartwareConfig): string {
-  return `substrate:${config.instance_id.replace('smartware_', '')}`;
+  return substrateActorId(config);
 }
 
 /** Body projection used by the shared production function. */

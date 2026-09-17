@@ -16,6 +16,7 @@ import {
   readLatestVersion,
   snapshotAt,
   appendClaimVersion,
+  carryDemotion,
   readClaimHistory,
   type ActiveClaimVersion,
   type ForgottenClaimVersion,
@@ -296,7 +297,10 @@ export async function handleForget(
   if (target.type === 'claim' && storeDataDir) {
     const latest = readLatestVersion(storeDataDir, target.id);
     if (latest && latest.state === 'active') {
-      forgottenVersion = {
+      // Spec §11: the forgotten version carries forward all non-content metadata. A mechanical
+      // demotion is non-content metadata about this claim (ADR-0003), so it is carried — the
+      // tombstone must not read as an event that lifts a duplicate back into recall.
+      forgottenVersion = carryDemotion({
         claim_id: latest.claim_id,
         version: latest.version + 1,
         state: 'forgotten',
@@ -320,7 +324,7 @@ export async function handleForget(
         tags: latest.tags,
         supersedes: latest.version,
         endorsement_source: latest.endorsement_source,
-      };
+      }, latest);
     }
   }
 
@@ -572,7 +576,7 @@ export async function handleRevive(
     return r;
   });
 
-  const revived: ActiveClaimVersion = {
+  const revived: ActiveClaimVersion = carryDemotion({
     claim_id: claimId,
     version: newVersion,
     state: 'active',
@@ -596,7 +600,7 @@ export async function handleRevive(
     revived_via: params.tombstone_id,
     endorsement_source: lastActive.endorsement_source,
     semantic: lastActive.semantic,
-  };
+  }, lastActive);
 
   if (commitCtx) {
     const recordHash = computePayloadHash(revived);

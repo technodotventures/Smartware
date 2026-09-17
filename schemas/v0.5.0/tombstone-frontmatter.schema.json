@@ -35,7 +35,7 @@
     },
     "snapshot": {
       "type": "object",
-      "description": "Full snapshot of the prior active L1 version at time of forgetting. Contains every field the claim schema requires, so a missing forgotten L1 version can be reconstructed catastrophically from this snapshot plus the tombstone's top-level forget-specific fields (see Conformance Test LC-04).",
+      "description": "Full snapshot of the prior active L1 version at time of forgetting. Contains every field the claim schema requires, so a missing forgotten L1 version can be reconstructed catastrophically from this snapshot plus the tombstone's top-level forget-specific fields (see Conformance Test LC-04). It also enumerates the claim record envelope's optional demotion/release fields, so a snapshot of a demoted duplicate or of a version that released a demotion still validates.",
       "required": [
         "claim_id",
         "version",
@@ -137,6 +137,28 @@
         },
         "revived_via": {
           "$ref": "common.schema.json#/$defs/TombstoneId"
+        },
+        "superseded_by": {
+          "$ref": "common.schema.json#/$defs/ClaimId",
+          "description": "Set on a demoted duplicate (resolved fact match, §1e): the surviving claim that supersedes this one. The claim stays state=active for history and audit; recall eligibility derives from this pointer (status 'superseded')."
+        },
+        "superseded_at": {
+          "$ref": "common.schema.json#/$defs/Iso8601",
+          "description": "Commit time of the demotion; present whenever superseded_by is."
+        },
+        "superseded_by_origin": {
+          "type": "string",
+          "enum": [
+            "user"
+          ],
+          "description": "Warrant for the demotion. Absent = the library's mechanical duplicate resolution; 'user' = the user re-picked against this copy (REVISE repick_survivor, protocol v0.5.0)."
+        },
+        "reinstated_by": {
+          "type": "string",
+          "enum": [
+            "user"
+          ],
+          "description": "Audit-only marker on a version that released a demotion: the user reinstated this claim as the recall-eligible copy (REVISE repick_survivor). Never a lifecycle input."
         }
       },
       "additionalProperties": false

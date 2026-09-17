@@ -25,11 +25,12 @@ import { appendObservation } from '../../src/layer0/log.js';
 import { assignIntegrity } from '../../src/layer0/integrity.js';
 import { handleForgetScope } from '../../src/protocol/forget_scope.js';
 import { handleRevive } from '../../src/protocol/forget.js';
+import { resolveFactMatches } from '../../src/layer1/corroboration.js';
 import type { SmartwareConfig } from '../../src/config.js';
 import { loadConfig, saveConfig } from '../../src/config.js';
 import { ProtocolError } from '../../src/auth/middleware.js';
 import { makeClaim } from '../helpers.js';
-import { iterAllClaimVersions } from '../../src/layer1/jsonl.js';
+import { iterAllClaimVersions, readLatestVersion } from '../../src/layer1/jsonl.js';
 import { SMARTWARE_VERSION } from '../../src/version.js';
 import { readAllOpLogEntries } from '../../src/ops_log/log.js';
 import { CompileQueue } from '../../src/compile_queue/queue.js';
@@ -497,6 +498,45 @@ describe('handleForgetScope — offboarding', () => {
     const revivedClaim = store.getClaim(claim.id);
     expect(revivedClaim?.status).toBe('active');
     expect(revivedClaim?.state).toBe('active');
+  });
+
+  it('carries a mechanical demotion onto the offboarding forgotten version', async () => {
+    const { claim } = seedScope(SCOPE);
+
+    // A second claim for the same fact. §1e picks the lexicographically smallest claim id as the
+    // survivor, so this id is the loser by construction — deterministic, no ULID-ordering race.
+    const duplicateId = `claim_${'Z'.repeat(26)}`;
+    store.insertClaim(makeClaim({
+      id: duplicateId,
+      subject_id: claim.subject_id,
+      subject_name: 'Acme',
+      predicate: 'status_is',
+      object: { type: 'text', value: 'active' },
+      scope: SCOPE,
+      supporting_evidence: ['obs_duplicate'],
+      status: 'active',
+      state: 'active',
+    }));
+    const resolution = resolveFactMatches({
+      store,
+      matches: store.findActiveFactMatches(claim.subject_id, {
+        predicate: 'status_is', scope: SCOPE, object: { type: 'text', value: 'active' },
+      }),
+    });
+    expect(resolution.superseded_claims).toEqual([duplicateId]);
+
+    await handleForgetScope(
+      { actor: OWNER, scope: SCOPE, reason: 'offboarding', operation_id: `op_${ulid()}` },
+      { evidenceDir, dataDir, layer0, store, searchIndex, config, commitCtx: { opsDir } },
+    );
+
+    // The demotion is non-content metadata about the claim (ADR-0003), so the offboarding
+    // tombstone carries it: a later REVIVE restores the assertion *and* the fact that it is the
+    // duplicate of another claim, instead of silently releasing it into recall.
+    const forgotten = readLatestVersion(dataDir, duplicateId);
+    expect(forgotten?.state).toBe('forgotten');
+    expect(forgotten?.superseded_by).toBe(claim.id);
+    expect(store.getClaim(duplicateId)?.status).toBe('retracted');
   });
 
   it('revokes only grants referencing that scope cluster', async () => {

@@ -575,7 +575,7 @@ async function start(): Promise<void> {
   // ── Tool: smartware_revise (spec §9 admission payload) ─────────────────────
   server.tool(
     'smartware_revise',
-    'Revise a claim: admit relations, set confidence/epistemic_tag, adopt body, invalidate relations (user-only in beta)',
+    'Revise a claim: admit relations, set confidence/epistemic_tag, adopt body, invalidate relations, or re-pick which duplicate of a fact survives (user-only in beta)',
     {
       actor_id: z.string(),
       target: z.string(),
@@ -583,6 +583,7 @@ async function start(): Promise<void> {
       set_confidence: z.enum(['high', 'medium', 'low']).optional(),
       set_epistemic_tag: z.enum(['fact', 'inference', 'opinion', 'stale', 'contested']).optional(),
       adopt_body: z.boolean().optional(),
+      repick_survivor: z.boolean().optional(),
       reason: z.string(),
       operation_id: z.string(),
     },
@@ -597,6 +598,7 @@ async function start(): Promise<void> {
           set_confidence: args.set_confidence,
           set_epistemic_tag: args.set_epistemic_tag,
           adopt_body: args.adopt_body,
+          repick_survivor: args.repick_survivor,
           reason: args.reason,
           operation_id: args.operation_id,
         },

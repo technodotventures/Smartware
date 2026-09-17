@@ -29,6 +29,13 @@ import {
   type EndorseOperationIntent,
 } from '../ops_log/index.js';
 import { parseFrontmatter, serialiseFrontmatter } from '../layer2/frontmatter.js';
+import {
+  endorsedEnvelope,
+  endorsedPageFrontmatter,
+  pageCitedClaimIds,
+  readPageFile,
+  writeEnvelopeIntoBody,
+} from '../layer2/envelope.js';
 import fs from 'fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -113,22 +120,24 @@ export async function handleEndorse(
   }
 
   const content = fs.readFileSync(params.page_path, 'utf-8');
-  const parsed = parseFrontmatter(content);
-  if (!parsed) {
+  const page = readPageFile(content);
+  if (!page) {
     throw new ProtocolError('invalid_page', 'Page has no valid frontmatter');
   }
 
-  const sources = [...new Set(parsed.frontmatter.sources_claim_ids ?? parsed.frontmatter.claim_ids ?? [])];
+  // The page's cited claims. `sources` is the published name (§9); a page written before
+  // ADR-0013 → D2 is read through the compatibility accessor instead of mistaken for a
+  // claim list it never carried.
+  const sources = pageCitedClaimIds(page);
   const wikiRoot = fs.existsSync(path.join(dataDir, 'wiki'))
     ? path.join(dataDir, 'wiki')
     : path.dirname(path.dirname(params.page_path));
   const citedElsewhere = new Set<string>();
   for (const candidate of listMarkdownFiles(wikiRoot)) {
     if (path.resolve(candidate) === path.resolve(params.page_path)) continue;
-    const other = parseFrontmatter(fs.readFileSync(candidate, 'utf8'));
+    const other = readPageFile(fs.readFileSync(candidate, 'utf8'));
     if (!other) continue;
-    const otherSources = other.frontmatter.sources_claim_ids ?? other.frontmatter.claim_ids ?? [];
-    for (const claimId of otherSources) citedElsewhere.add(claimId);
+    for (const claimId of pageCitedClaimIds(other)) citedElsewhere.add(claimId);
   }
   const sharedClaims = sources.filter(claimId => citedElsewhere.has(claimId));
 
@@ -283,6 +292,10 @@ export async function handleEndorse(
     const latest = readLatestVersion(dataDir, claimId);
     if (!latest) throw new ProtocolError('claim_not_found', `Claim '${claimId}' not found`);
     if (latest.state !== 'active') throw new ProtocolError('claim_forgotten', `Claim '${claimId}' is forgotten`);
+    // The spread carries `superseded_by`/`superseded_at` with it: endorsing a claim adopts its body
+    // as user voice, which does not decide that the claim is no longer a duplicate of the survivor
+    // (`resolveFactMatches` makes that call — ADR-0003 → *Carry-forward across hand-built version
+    // records*). Dropping the field here would release the demotion silently.
     const endorsed: ActiveClaimVersion = {
       ...latest,
       version: latest.version + 1,
@@ -298,15 +311,18 @@ export async function handleEndorse(
     missingRecords.push(endorsed);
   }
 
-  const pageContent = serialiseFrontmatter({
-    ...parsed.frontmatter,
-    author: 'user',
-    updated: commitTs,
-    sources_claim_ids: sources,
-    endorsement_operation_id: params.operation_id,
-    endorsed_by: params.actor.id,
-    endorsed_at: commitTs,
-  }, parsed.body);
+  const stamp = {
+    pageId: params.page_id,
+    actorId: params.actor.id,
+    operationId: params.operation_id,
+    commitTs,
+  };
+  const pageContent = serialiseFrontmatter(
+    endorsedPageFrontmatter(page, sources, stamp),
+    // The evidence timeline is a derived render; the endorsement stamps its durable recovery
+    // metadata into the same cached region instead of into the published frontmatter.
+    writeEnvelopeIntoBody(page.body, endorsedEnvelope(page, stamp)),
+  );
   const expectedClaims = endorsedRecords.map(record => ({
     claim_id: record.claim_id,
     version: record.version,

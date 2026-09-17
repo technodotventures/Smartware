@@ -94,6 +94,40 @@ interface ClaimVersionBase {
   tags: string[];
   /** Required when version > 1. */
   supersedes?: number;
+  /**
+   * Set on a mechanically demoted claim (a resolved duplicate): the surviving claim that
+   * supersedes this one, and when the demotion was recorded. Mirrors the derived row's
+   * `superseded_by` / `t_invalidated` so that re-materialising this record — compile-path
+   * sync or a full canonical replay — reconstructs the demotion instead of restoring the
+   * duplicate to the recall-eligible set.
+   *
+   * This is the substrate's record of the library's duplicate resolution
+   * (`resolveFactMatches`), which carries no user warrant and therefore cannot be a
+   * canonical `supersedes` relation edge (spec §6: canonical epistemic edges are
+   * user-admitted in beta). The demotion does not change `state`: a superseded claim
+   * stays `active` for history and audit, exactly as spec §6 says.
+   *
+   * `superseded_by_origin` distinguishes the two demotion channels: absent = the
+   * library's mechanical duplicate resolution; `'user'` = the user re-picked against
+   * this copy (`REVISE` with `repick_survivor`, ADR-0003 → *Releasing a demotion*).
+   * Either way recall eligibility derives from the pointer alone (`status === 'active'`).
+   */
+  superseded_by?: string;
+  /** ISO 8601 commit time of the demotion; present whenever `superseded_by` is. */
+  superseded_at?: string;
+  /**
+   * The warrant a demotion carries. Absent when the demotion is mechanical — the dedup
+   * resolved two copies of one fact and has no user act to point at; `'user'` when the
+   * user re-picked the survivor, so audit and replay can tell a user-demotion from the
+   * library's own duplicate resolution.
+   */
+  superseded_by_origin?: 'user';
+  /**
+   * Audit-only marker on the version that released a demotion: the user reinstated this
+   * claim as the recall-eligible copy (`REVISE` with `repick_survivor`). `status` never
+   * derives from this field — it is the record of the act, not a lifecycle input.
+   */
+  reinstated_by?: 'user';
   /** Set on endorsement-cascade-produced versions. */
   endorsement_source?: string;
   /** Set on revival-produced versions. */
@@ -118,6 +152,38 @@ export interface ForgottenClaimVersion extends ClaimVersionBase {
 
 /** One line in the L1 JSONL canonical surface. */
 export type ClaimVersionRecord = ActiveClaimVersion | ForgottenClaimVersion;
+
+/**
+ * Carry a mechanical demotion onto a hand-built next version of the same claim.
+ *
+ * `resolveFactMatches` records the demotion in the demoted claim's own version records, and every
+ * materialisation derives `status` / `superseded_by` / `t_invalidated` from the record alone
+ * (`ClaimStore.claimVersionVals`). A flow that builds the next record by hand therefore *is* the
+ * whole story: a record that omits `superseded_by` releases the demotion — consistently in live and
+ * replayed state, and silently.
+ *
+ * Beta has no verb that changes the fact a claim asserts (spec §6: content is never rewritten in
+ * place), so every flow carries the pointer forward: user `REVISE`, the `FORGET` tombstone,
+ * `REVIVE`'s restore from the last active snapshot, consolidation's input tombstones, scope
+ * offboarding, and retention expiry. Endorsement's cascade and `reflect.auto`'s fingerprint
+ * extension already carry it by spreading the version they build on.
+ *
+ * Per-flow decision, rationale and the honest limits: ADR-0003 → *Carry-forward across hand-built
+ * version records*.
+ */
+export function carryDemotion<T extends ClaimVersionRecord>(
+  next: T,
+  previous: ClaimVersionRecord,
+): T {
+  if (previous.superseded_by == null) return next;
+  return {
+    ...next,
+    superseded_by: previous.superseded_by,
+    // Mirror `claimVersionVals`: a record that predates the demotion timestamp still names the
+    // moment the claim's own version was committed.
+    superseded_at: previous.superseded_at ?? previous.version_at,
+  };
+}
 
 function monthFilename(commit_ts: string): string {
   return `${commit_ts.slice(0, 7)}.jsonl`; // YYYY-MM

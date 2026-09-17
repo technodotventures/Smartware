@@ -59,7 +59,7 @@ await memory.observe({
   content: { format: 'text/markdown', body: 'Acme wants quarterly payroll.' },
   scope: 'client:acme#1',
   visibility: 'scope',
-  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z', // `op_<ULID>` — a UUID is rejected; crash-safe OBSERVE
+  operation_id: crypto.randomUUID(), // crash-safe OBSERVE
 });
 
 const hits = await memory.recall({
@@ -89,11 +89,8 @@ or attach it to your own transport. Tools include the canonical verbs
 `smartware_observe`, `smartware_recall`, `smartware_reflect`,
 `smartware_revise`, `smartware_forget`, plus `smartware_context`, `read`,
 `explain`, `correct`, `quarantine_review`, `grant`/`revoke`, `session_*`,
-the owner-only Coffee operations `smartware_forget_scope`,
-`smartware_export_scope` and `smartware_restore_scope`, and the
-shared-workspace set
-`smartware_register_source`, `smartware_list_sources`, `smartware_ingest`,
-`smartware_sync_status`, `smartware_recall_federated`.
+and the two owner-only Coffee operations `smartware_forget_scope` and
+`smartware_export_scope`.
 
 ### 1c. Standalone MCP daemon (stdio)
 
@@ -150,35 +147,132 @@ Four things that will otherwise cost you an afternoon:
    ```ts
    const obs = await memory.observe({ /* … */ });
    if (obs.status === 'duplicate') return;      // same evidence, already in the brain
-   // and/or check the canonical key before minting:
-   //   canonicalKey(subjectId, predicate, scope, validityFrom)
+   // and/or resolve the fact before minting — see §1e:
+   const matches = store.findActiveFactMatches(subjectId, { predicate, scope, object });
    ```
 
-   `canonicalKey` is exported from the package root for exactly this check.
+   `ClaimStore.findActiveFactMatches` and `resolveFactMatches` are exported for exactly this check
+   (§1e). `canonicalKey` is not a substitute for it — see the trap in §1e.
 
 ### 1e. Corroboration, not duplication
 
 Re-observing the same fact must strengthen the claim that already asserts it, not mint a twin.
-Nothing inside Smartware wires identity to the corroboration helper for you — the host owns
-extraction, so the host owns identity. Skipped, every restatement accumulates: measured on a
-pilot, one billing preference restated twelve ways produced **14 recall results for 2 distinct
-facts**, and recall quality degrades the longer the product runs.
+Skipped, every restatement accumulates: measured on a pilot, one billing preference restated twelve
+ways produced **14 recall results for 2 distinct facts**, and recall quality degrades the longer the
+product runs.
+
+Smartware ships the identity rule **for this write path**, so you do not have to reimplement it
+there. Resolve the fact — the subject, predicate, scope and object value — rather than the canonical
+key:
 
 ```js
-import { canonicalKey } from 'smartware';
-import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
+import { resolveFactMatches } from 'smartware/layer1/corroboration';
 
-const existing = store.findByCanonicalKey(subjectId, predicate, scope, validityFrom);
-if (existing) {
-  addCorroborationEvidence(existing.id, observation.id, store);  // dedupes, recomputes confidence
-  syncSearchFromClaims(store, searchIndex, scope);                // recall must see the new confidence
+const matches = store.findActiveFactMatches(subjectId, { predicate, scope, object });
+if (matches.length > 0) {
+  const res = resolveFactMatches({ store, matches, observationId: observation.id });
+  // res = { claimId, ambiguous_matches, ambiguity_resolved, superseded_claims,
+  //         supporting_evidence, confidence }
+  syncSearchFromClaims(store, searchIndex, scope);   // recall must see the union
 } else {
-  store.insertClaim({ /* ...a new claim... */ });
+  store.insertClaim({ /* ...a new claim... */ });     // nothing asserts this fact yet
+  syncSearchFromClaims(store, searchIndex, scope);
 }
 ```
 
-`canonicalKey(subjectId, predicate, scope, validityFrom)` is the identity the store looks claims
-up by — the same value your `insertClaim` put in `validity.from`.
+`findActiveFactMatches(subjectId, { predicate, scope, object })` returns **every** active claim
+asserting that fact (same subject, predicate, scope and object value, `validity.to === null`), in
+survivor order — so `matches[0]` is the survivor even if you only need the id.
+
+`resolveFactMatches` then applies one rule, in both directions:
+
+- **One match is corroboration.** The new observation is more evidence for the claim that already
+  asserts the fact; its id is added to `supporting_evidence` and confidence is recomputed.
+- **Several matches is ambiguity, and it is resolved — never picked.** When a store already holds
+  two active claims for one fact, the survivor is the **lexicographically smallest claim id**. Claim
+  ids are ULIDs (time-ordered), so that means *earliest minted wins*, independent of the row order
+  the store happens to return.
+- **Evidence is unioned into the survivor before the losers are demoted.** A duplicate is the same
+  fact observed again, so dropping its observations would lose provenance the brain already has.
+- **Losers are demoted, never deleted** — `status: 'superseded'`, `superseded_by: <survivor>`,
+  timestamped. They stay auditable on disk and leave the recall-eligible set (`status === 'active'`),
+  which is what stops recall answering the same question twice. The demotion is recorded in the
+  demoted claim's own **canonical version records** (`superseded_by`, `superseded_at`) and the row is
+  re-derived from them, so it survives a compile-path row sync and a full canonical replay — it is
+  not a projection-only fact. **Every flow that touches the claim afterwards carries it forward**: a
+  user `REVISE` (whose result reports `superseded_by`, because the revision changes metadata and not
+  the asserted fact — so the claim stays out of the recall-eligible set), `FORGET`'s tombstone,
+  `REVIVE`'s restore, the endorsement cascade, consolidation's input tombstones, scope offboarding
+  and retention expiry. **Releasing** one is the deliberate user act described in §10 — a `REVISE`
+  **re-pick** — never a side effect of those flows.
+- **The decision is reported.** `ambiguous_matches` and `superseded_claims` come back to the caller
+  instead of a choice being made silently.
+
+Measured end to end on a brain seeded with the pre-fix duplicate shape: recall answered **2 results
+for one fact** before resolution and **1** after, with the duplicate superseded and its evidence
+unioned into the survivor. `scripts/saas-integration-smoke.mjs` reproduces that against the
+published package surface. The rule and the reasoning behind it are recorded in
+[ADR-0003](../adr/0003-claim-fact-identity.md).
+
+**Which surface this rule governs — read this if you also run the compile path.** The identity above
+is the rule for **the host write path**: the moment you decide whether an extracted fact restates a
+claim you already hold. Smartware carries a **second, different identity rule over the same `claims`
+rows**: the structured claim fingerprint
+(`computeStructuredClaimFingerprint` — `subject_name`, `predicate`, `object`, `scope` **and**
+`claim_type`), which `reflect.auto` uses for autonomous-creation idempotency (spec §193/§238). The
+two are **not reconciled**, and they disagree in both measured directions:
+
+- Two active rows asserting one fact that differ only in `claim_type` (say `'preference'` vs
+  `'finding'`) have **different** fingerprints — two claims to the compile path — while
+  `findActiveFactMatches` returns **2** and resolves them into one. A host that leaves `claim_type`
+  unset hits this: `reflect.auto` defaults it to `'hypothesis'`, `ClaimStore` to `'finding'`.
+- Two rows whose text values differ only in case (`'Quarterly'` vs `'quarterly'`) have the **same**
+  fingerprint — one claim to the compile path — while fact identity keeps them apart (it does not
+  case-fold a `text` value).
+
+So a host running both surfaces can end up with a duplicate the write path would have merged, or a
+demotion the compile path does not see. Nothing is silently wrong — `resolveFactMatches` reports what
+it merged — but do not build policy on the assumption that the two identity rules agree. The
+divergence, its measured cases and its reversal trigger are recorded in
+[ADR-0003](../adr/0003-claim-fact-identity.md) → *Known divergence*, and pinned by tests
+(`test/layer1/fact-identity.test.ts`); reconciliation is an open owner decision. The §1e sweep below
+converges duplicates whichever path minted them.
+
+**Do not do this** — it is what this guide used to teach:
+
+```js
+// WRONG: `getClaimsBySubject` has no ORDER BY, so this hands back whichever duplicate row SQLite
+// happens to return first. The survivor becomes row-order dependent, nothing reports that a choice
+// was made, the losers keep their evidence, and recall keeps answering twice for one fact.
+const existing = store.getClaimsBySubject(subjectId, 'active')
+  .find(c => c.predicate === predicate && c.scope === scope
+          && c.object.value === value && c.validity.to === null);
+```
+
+**The canonical key is not the fact identity.** `canonicalKey(subjectId, predicate, scope,
+validityFrom)` includes `validity_from` as an **exact string**. If your extractor stamps a fresh
+`new Date().toISOString()` on every write, no two writes ever produce the same key,
+`findByCanonicalKey` *silently never fires*, and you get duplicate accumulation back with the recipe
+apparently followed. Use the key only when `validity_from` is derived from the fact's own validity
+start (coarse enough to be stable). When the fact carries no date — the usual case for a preference
+or a decision extracted from a message — the fact *is* the identity:
+`findActiveFactMatches` + `resolveFactMatches` above. `scripts/saas-integration-smoke.mjs` asserts
+that two rows for one fact carry two different canonical keys.
+
+**Repairing a store that already accumulated duplicates.** The recipe above runs on the write path,
+so a brain built before this rule existed keeps its duplicates until the next write touching that
+fact. To converge one, sweep it — resolve every fact that has more than one active claim, with no
+new observation, so nothing is added to `supporting_evidence` that was not observed:
+
+```js
+for (const claim of store.getActiveClaims(scope)) {
+  const matches = store.findActiveFactMatches(claim.subject_id, {
+    predicate: claim.predicate, scope: claim.scope, object: claim.object,
+  });
+  if (matches.length > 1) resolveFactMatches({ store, matches });   // no observationId
+}
+syncSearchFromClaims(store, searchIndex, scope);                    // drop the demoted rows
+```
 
 **Confidence is derived, not stored input.** `addCorroborationEvidence` recomputes it from the
 claim's own fields (epistemic, evidence, recency, extraction), so a value you hand-set when
@@ -193,287 +287,6 @@ const claim = { /* ...fields... */ };
 claim.confidence = computeConfidence(claim);   // don't hand-set what the library will recompute
 store.insertClaim(claim);
 ```
-
-The trap below applies with it: identity includes `validity_from` as an **exact string**. If your extractor stamps a
-fresh `new Date().toISOString()` on every write, no two writes ever produce the same key and
-corroboration *silently never fires* — you get duplicate accumulation back, with the recipe
-apparently followed. Either derive `validity_from` from the fact's own validity start (coarse
-enough to be stable), or, when the fact carries no date, resolve to the active claim asserting the
-same object instead:
-
-```js
-const existing = store.getClaimsBySubject(subjectId, 'active')
-  .find(c => c.predicate === predicate && c.scope === scope
-          && c.object.value === value && c.validity.to === null);
-```
-
-### 1f. Conflicting facts: admit, don't arbitrate
-
-Two staff members (or an agent and a human) can report different values for the same fact.
-Smartware has one deterministic policy for that — no LLM, no "last write wins" — and exposes it as
-an admission seam so the host does not re-implement it (0.7.0 line, unreleased: the export is not
-in the published 0.6.x tarballs; `scripts/saas-integration-smoke.mjs` proves it resolves against
-this build):
-
-```js
-import { admitClaim } from 'smartware/layer1/conflicts';
-
-const admission = admitClaim(claim, store);
-// 'inserted'      first assertion for its canonical key
-// 'corroborated'  same key + same value → evidence folded into the existing claim, no twin
-// 'contested'     same key + different value → ALL sides retained and marked contested
-// 'superseded'    same subject/predicate/scope, later validity_from, target still active →
-//                 older claim superseded; validity.to closes at the new start and
-//                 t_invalidated records when the brain learned the replacement
-syncSearchFromClaims(store, searchIndex, scope);   // recall must see the new lifecycle state
-```
-
-Treat `contested` as a first-class product state: **recall returns both sides** with
-`status: 'contested'`, `epistemic_tag: 'contested'` and `contested_by` claim ids, so the UI can
-surface the disagreement instead of presenting one value as the truth. Superseded and stale claims
-never satisfy current recall — read them back with `include_superseded: true` / `include_stale:
-true`, or reconstruct a past instant with
-`recall({ …, temporal: { mode: 'as_of', axis: 'valid_time' | 'transaction_time', at: iso } })`.
-
-Resolving a contest is a *warranted user action* (REVISE admitting a `supersedes`/`corrects`
-edge). Recency never resolves it, and `admitClaim` never supersedes a contested or stale claim.
-
-Identity discipline decides which outcome you get: a restatement must reuse the original
-`validity_from` to corroborate, and a conflicting write with a *later* `validity_from` reads as a
-successor (superseded) rather than a disagreement (contested). Key `validity_from` to the fact's
-claimed validity start — not the extraction time — when you want disagreements detected.
-
-### 1g. Sources and connector ingestion (connectors, scheduled jobs)
-
-Coffee owns the OAuth dance, the scheduler and the connector credentials. The brain owns the
-**provenance origin** (a registered source) and one **ingestion contract** so a sync can be
-resumed, replayed and audited instead of being a loop of blind writes.
-
-Register the origin once (owner-only; `config.json` is the store, `created_at` is preserved on
-update, `paused`/`revoked` refuse new writes without touching old evidence):
-
-```ts
-memory.registerSource({
-  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },   // must be the owner
-  id: 'src_gmail_ava',                    // stable host-chosen id — also the observation `app`
-  kind: 'connector',                      // connector | meeting | note | agent | manual | system
-  display_name: 'Gmail — ava@harbor-lane',
-  external_ref: 'acct_ava_primary',       // opaque host handle (mailbox / account / calendar)
-  // actor_ids: ['substrate:connector-runner'],   // optional: who may claim this provenance
-});
-```
-
-Then sync one **page per batch** — actor, source, scope, the opaque cursor you reached, and an
-`operation_id`:
-
-```ts
-const receipt = await memory.ingest({
-  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },   // authenticated identity
-  source_id: 'src_gmail_ava',
-  scope: 'client:acme#1',                 // the actor still needs an observe grant here
-  cursor: 'hist/101',                     // opaque; stored verbatim, never parsed
-  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z', // `op_<ULID>`; the batch's idempotency key
-  items: page.items.map(item => ({
-    external_id: item.id,                 // the source's own id (dedup key)
-    type: 'message',
-    content: { format: 'text/plain', body: item.body },
-    observed_at: item.receivedAt,
-  })),
-});
-
-// receipt: { status, cursor, cursor_before, accepted, duplicated, quarantined, rejected, items }
-//   items[i]: { external_id, status: accepted|duplicate|quarantined|rejected, observation_id?, code? }
-```
-
-What the contract guarantees, and what it expects of you:
-
-- **Fail closed.** Missing source → `source_required`; unregistered → `source_unregistered`;
-  paused/revoked → `source_inactive`; actor outside the source's allow-list →
-  `insufficient_permission`; ungranted scope → the usual grant denial. All of these happen
-  **before anything is written**.
-- **Replay-safe.** Retry a batch with the same `operation_id` and you get the recorded receipt
-  back (`status: 'replayed'`) — nothing is written twice. Retry with a new `operation_id` (e.g.
-  after losing your local state) and stored items dedup per item. A crash *mid-batch* converges
-  on the retry: the written prefix dedups, the remainder completes.
-- **One item, one observation, per scope.** Dedup identity is `(source, external_id, scope)`, so
-  resending a page is safe, and the same message that matters to two clients lands in **both**
-  client memories instead of being silently shadowed by whichever scope saw it first. If an
-  item's content changes at the source, send it under a new `external_id` (e.g. `msg_123:2`) —
-  the brain keeps the original bytes and never rewrites history.
-- **A bad item does not wedge the batch.** A rejected item (e.g. `secret_detected`) is reported
-  with its code and counted; the batch still commits and the cursor advances. Alert on
-  `receipt.rejected` and on sync-status counts rather than assuming "ok" means "all stored".
-- **The cursor is yours.** Store it on your side too; `cursor_before` in the receipt tells you
-  the stream's previous checkpoint, and `syncStatus` (owner-only) reports, per source and scope,
-  the current cursor, last sync time, and accepted/duplicated/quarantined/rejected totals:
-
-```ts
-const [gmail] = memory.sourceSyncStatus({ actor: owner, source_id: 'src_gmail_ava' });
-// gmail.last_sync.cursor, gmail.scopes[i].cursor, gmail.totals.rejected, …
-```
-
-Batch size is capped at `MAX_INGEST_ITEMS` (500; exported from `smartware/ingestion`) — chunk
-bigger pages. The ledger of receipts/cursors is operational state: if it is ever lost (index
-wipe, restore into a fresh data dir), re-sending from your own last checkpoint is safe by
-construction; a missing cursor is never a lost write.
-
-Item bodies pass the same gates as any observation (secret detection, attachment safety,
-retention/sensitivity policy) — a connector does not get a bypass. Writes from an untrusted or
-review-held connector land `quarantined` (counted, hidden from the raw window until a review
-approves them), so treat "connector trusted" as a provisioning decision.
-
-### 1h. Multi-replica deployment: the lease, the write guard and the app-store outage
-
-A brain is **single-writer**. A SaaS runs replicas, so brain ownership must be arbitrated —
-the executable reference is the throwaway pilot (`brain-pilot`, Redis-backed, two replicas),
-and the patterns below are the ones the resilience gauntlet measured (`t_00a9df88`; evidence in
-`/opt/data/workspaces/brain-pilot-evidence/gauntlet-postfix2-20260914T165142Z/`).
-
-**Lease.** One key per brain, derived from the brain's own provisioning surface
-(`workspace_id` + `instance_id`), never from a mount path:
-
-```js
-await redis.set(leaseKey, instanceId, { NX: true, PX: 8000 });   // acquire
-// renew ONLY if we still own it — value-conditional, atomically:
-//   if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end
-```
-
-`SET key me XX PX ttl` is **wrong**: `XX` only checks that the key exists, so a replica whose
-lease has already been handed to another replica takes it back — both then believe they own the
-brain (the gauntlet handoff drill measured exactly this: the old owner kept writing after the
-new owner was serving).
-
-**Guard.** Re-verify ownership immediately before **every brain mutation**, not just on a timer
-— that guard caught a lost lease in **9 ms** where the control-loop tick would have taken
-~2.7 s. If the guard fails: demote, close the brain handle, refuse with
-`503 { retryable: true, partial_write: false }`. Ownership is settled **before either store is
-touched**: a write that cannot be completed in full must leave nothing to reconcile.
-
-**App-store outage.** Fail closed and stay alive:
-
-- create the Redis client with `disableOfflineQueue: true` — a command issued while the store is
-  unreachable must fail fast, not queue invisibly (the pilot died on an uncaught `TimeoutError`
-  from exactly that queue);
-- an owner that cannot reach the app store can no longer *prove* ownership: demote, stop
-  writing, keep serving an honest `/health` (`503`, `degraded: true`, `stores.redis.error`);
-- handle top-level rejections so a store outage degrades the service instead of killing the
-  process, and alert on it.
-
-Measured after those changes: writes during an outage → `503 app_store_unavailable`; recovery
-to the first acknowledged write after Redis returned → **2.8 s**; brain reads degraded to the
-app-store fallback with an explicit "provenance requires the brain" note and **never invent
-provenance**.
-
-**Fencing — the residual window is closed at the brain (ADR-0007).** A lease says who *should*
-own the brain; it cannot stop a process that passed its guard from committing after a handoff.
-The brain now validates a monotonic epoch at the mutation boundary, from the same arbiter as the
-lease — one token per ownership acquisition:
-
-```js
-const token = await redis.incr(`brainfence:${brainIdentity}`);   // once per ownership term
-const brain = await SmartwareCore.open({ dataDir, ownerId, fencingToken: token });
-// takeover without reopening the brain: brain.claimFence(token)
-```
-
-The brain persists the highest epoch it has seen (`writer_fence`, inside `smartware.db`) and,
-before any canonical artifact is written, refuses a mutation that presents an older epoch
-(`ProtocolError` `fencing_token_stale`) — or none at all, once the brain has been fenced
-(`fencing_token_missing`). Claim and guard are single SQLite statements against the brain's own
-database, so they serialise with every process that has the brain open. Refusals are counted and
-auditable via `brain.fencingState()`; the host should demote and answer
-`503 { retryable: true, code }` (the pilot does). A brain that never used fencing is unchanged;
-after the first claim, tokenless writes are refused (fail-closed).
-
-Measured before/after on the same harness (resilience gauntlet, drill `lease-loss-steal` phase A
-with a deterministic post-guard stall): the owner is stalled 12 s between its guard and the
-brain call, then frozen (SIGSTOP) for ~2.6 s while the lease is handed to the other replica.
-
-- **Before** (unfenced build `9cbe1fb`; the installed package is capability-probed on `/health`,
-  not just labelled — `fence_supported: false`): the new owner became owner in 2.55 s and
-  committed; on resume the stalled write **committed too** (`201`, accepted, its text present in
-  the canonical evidence JSONL) — the residual window, demonstrated end-to-end. Evidence:
-  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-fencing-before-20260915T083255Z/`.
-- **After** (fenced build `c65b302`, `fence_supported: true`): the new owner claimed epoch 2
-  (in 2 ms) and committed; on resume the stalled write was refused **before any artifact** —
-  `503 fencing_token_stale` (`details {op: observe, token: 1, high_water: 2}`), the evidence
-  JSONL unchanged, the refusal counted in `fencingState()` (`refusals: 1`) and visible in the
-  pilot's lease events — and the two probe writes issued right after the resume were refused as
-  well (zero acknowledged writes after the handoff; no dual-writer sample). Evidence:
-  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-fencing-after-20260915T083414Z/`.
-
-Latency of the fresh-token path (same-session alternated A/B, 5 pairs × 40 writes/arm, fenced vs
-unfenced pins): p50 median **15.96 ms vs 15.62 ms** (+0.34 ms, inside per-run spread; ranges
-12.7–17.8 vs 14.8–29.0 ms overlap), p95 noise-dominated (33.4 vs 47.6 ms medians). The guard is
-one indexed read per mutation; no measurable regression on this path. Evidence:
-`/opt/data/workspaces/brain-pilot-evidence/latency-ab-20260915T083526Z/`.
-
-What this closes: any mutation whose boundary check runs after a newer epoch is claimed —
-including a writer resumed from an arbitrarily long stall between the guard and the brain call.
-
-**The in-mutation window is closed at storage level (ADR-0010).** A process can also be paused
-*inside* a mutation — after the brain's boundary check and its first canonical artifact, before its
-commit signal. The commit signal is now epoch-gated: one immediate SQLite transaction validates the
-writer's epoch against the persisted high-water mark and records the authorization before the
-signal is appended, so a resumed stale writer is refused at the gate; and recovery **rejects —
-never finalizes, never merges** — an uncommitted artifact set from an epoch behind the mark,
-reporting it under `staleEpochRejected` (exposed on the pilot's `/health` as
-`recovery.stale_epoch_rejected`; zero committed mutations, zero manual-review escalations, no
-speculative repair).
-
-Measured on the same harness, drill `storage-fence-in-mutation` (pause inside OBSERVE after the L0
-artifact; process frozen ~2.2 s across a lease handoff; resumed):
-
-- **Before** (build `5d67409`, boundary-fenced but storage-blind — capability-probed
-  `storage_fence_supported: false`): on resume the stale write **committed** (`201`), and the new
-  owner's open-time recovery had already **finalized** the dead writer's set (`recovered: true`):
-  two commit signals for one operation — the merge this closes. Evidence:
-  `/opt/data/workspaces/brain-pilot-evidence/storage-fence-before-20260915T1018Z/`.
-- **After** (build `c852aae`, `storage_fence_supported: true`): the resumed write was refused at the
-  commit gate (`503 fencing_token_stale`, **zero** commit signals for the operation; the partial L0
-  artifact retained), and the new owner's recovery reported the set as
-  `stale_epoch_rejected: [{ reason: epoch_behind_high_water, epoch: 1, high_water: 2, artifacts: 1 }]`
-  — zero committed operations, zero pending, zero manual review. Evidence:
-  `/opt/data/workspaces/brain-pilot-evidence/storage-fence-after-20260915T1020Z/`.
-
-What is still **NOT proven**: artifact-level epoch stamps (attribution rides on the intent, which is
-written first and removed last — not on stamped artifact records); one narrow interleaving can leave
-a duplicate projection line (a pause between the gate and the append with recovery projecting first;
-consumers key on `operation_id` presence); writers without intents (session bookkeeping, `runCommit`
-without a fence) are not epoch-gated; fencing is only as strong as the token issuer: the arbiter
-must be monotonic per acquisition, and single-node Redis is not a consensus store. Full detail:
-ADR-0010.
-
-### 1i. Operate it: health, metrics and trial SLOs
-
-Poll `core.health({ actor, backup_dir? })` (or MCP `smartware_health`) instead of scraping
-logs. One report carries the lease state (`ownership.role` / holder epoch + age — the TTL
-stays yours, the brain enforces epochs, not expiry), brain-open state, compile queue
-depth/oldest-pending age/failures, ingestion cursor lag per `(source, scope)` stream,
-lane-explicit counts, drift records, denied-access counts, retention/forget receipts, storage
-bytes by area, backup freshness, recall/write latency histograms and recovery events.
-
-Read the SLO verdict first: `slo.status ∈ ok | breach | unknown`. **`unknown` is not `ok`** —
-it means an objective has no evidence yet (fewer than 20 latency samples, nothing synced, no
-backup directory configured). Alert on `breach`, on any `drift` record, and on
-`ownership.role === 'observer'` for a process that believes it is the writer.
-
-Authority fails closed: the owner sees the whole brain; a read-granted actor sees its readable
-scopes' counts and nothing else. The report is counts, states, ids and time — it cannot carry
-tenant content. Field definitions, the threshold table and the cost per block:
-[docs/integration/observability.md](observability.md); the decision record is
-[ADR-0008](../adr/0008-host-facing-health-contract.md).
-
-### 1i. Coffee reference adapter (a drop-in, executable contract)
-
-The deployment patterns above are assembled into a drop-in adapter with an
-executable local proof: `examples/coffee-adapter/adapter.mjs` (public package
-imports only, no Redis driver, no model credential), the tenant template
-`examples/coffee-adapter/config.template.json`, and
-`npm run verify:coffee-adapter` (53 deterministic checks, no network, no
-sleeps). Read [coffee-adapter.md](coffee-adapter.md) for the ports contract,
-the write/retry/degraded semantics, the migration and rollback staging, and the
-explicit not-yet-proven list. ADR:
-[ADR-0010](../adr/0010-coffee-reference-adapter.md).
 
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 
@@ -544,7 +357,7 @@ await memory.observe({
   scope: 'client:acme#1',
   visibility: 'scope',
   sensitive: false,
-  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z',
+  operation_id: crypto.randomUUID(),
 });
 ```
 
@@ -573,28 +386,6 @@ const hits = await memory.recall({
 Freshness is **state-based, never time-based**: a failed compile stays
 raw-searchable forever with `unverified`. There is no silent "ages out of
 memory" based on a clock.
-
-**Federated reads (owner and multi-client staff).** When the product needs one
-search across several client scopes, use `recallFederated` rather than looping
-`recall` and merging in the host:
-
-```ts
-const federated = await memory.recallFederated({
-  actor: owner,                      // or a staff actor holding several scopes
-  query: 'open threads',
-  scopes: ['client:acme#1', 'client:bcau#1'],   // optional; omit → actor's readable scopes
-});
-// federated.scopes      → the scopes actually queried
-// federated.results     → scope-tagged rows, ordered scope-major (ranked within each scope)
-// federated.per_scope   → { scope, total_found, returned }
-```
-
-Two rules are enforced, not advisory: **naming a scope the actor cannot read
-denies the whole read** (`insufficient_permission` / `actor_unregistered`) —
-a federated read never partially answers a request that named an unauthorized
-scope; and **omitting `scopes` queries exactly the actor's readable scopes**
-(the owner: every scope in the brain). Scores are comparable within a scope,
-not across scopes — do not re-rank the merged list as one scale.
 
 ---
 
@@ -651,77 +442,20 @@ never see the affordance.
   `observations/claims/evidence/operations/entities.jsonl` + `manifest.json`
   (per-file sha256 + aggregate, asserts `scope_exclusive: true`). Derived
   indexes excluded. **Idempotent** per `operation_id`.
-- **Restore one client** → `smartware_restore_scope` (ADR-0006). The return path
-  for a package: verifies the manifest checksums and declared counts, refuses a
-  package that crosses its scope boundary, refuses a non-empty target scope
-  (`scope_not_empty` — restore, never merge), and refuses a tampered package
-  (`package_corrupt`) **before writing anything**. The same package restored
-  twice is idempotent (`already_restored`; receipt under `<data_dir>/imports/`).
-  A post-erasure package (deletion certificate, no content) restores as an empty
-  package: erasure is never undone by a restore. Run it on the lease holder.
-
-  ```ts
-  const restored = await memory.restoreScope({
-    actor: owner,                          // owner-only
-    package_dir: '/var/lib/smartware/harbor-lane/exports/exp_01J8ZP…',
-    operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z',
-  });
-  // { status: 'restored' | 'already_restored' | 'empty_package',
-  //   export_id, scope, counts, manifest, receipt_path }
-  ```
-
-  Restored = exported, measurably: same claim ids, same `observation_ids`
-  provenance, same recall answers — including after the restored brain's derived
-  state is wiped and rebuilt (`test/protocol/restore-scope.test.ts`). Restore
-  rebuilds Layer 0 from the canonical log (a restored record can carry a
-  sequence below the receiving brain's replay watermark, so an incremental
-  catch-up would skip it), and scope-level `forget.scope` markers **travel with
-  the package** so a restored offboarded scope comes back retained (tombstoned
-  raw window, forgotten claims), never resurrected
-  (`test/conformance/q_lifecycle_composition.test.ts`).
 - **Offboarding (reversible)** → `FORGET.SCOPE { reason: 'offboarding' }`.
   Tombstones, revokes grants same-commit, records exact retraction counts, and
   persists an owner-approved non-PII `owner_pointer` for a later `#N` return.
 - **Erasure (terminal)** → `FORGET.SCOPE { reason: 'erasure' }`. Physical
   purge in every lane. **Erasure never fires under dispute** — the hold lane is
-  offboarding + export snapshot; erasure only after the hold is released. The
+  offboarding + export snapshot; erasure only after owner attestation. The
   audit marker is the deletion certificate.
-  **Decision (2026-09-15, ADR-0009 — supersedes ADR-0008): the substrate holds
-  legal-hold state and refuses on it.** Offboarding opens a hold in
-  `config.holds` in the same commit; while it is open, `erasure` throws
-  `legal_hold_open` (nothing mutates, the `operation_id` is not consumed) and
-  the retention sweep skips the scope (`details.skipped: 'legal_hold'` —
-  post-hold evidence is preserved, not tombstoned). Release it with the
-  owner-only, receipted act:
-
-```ts
-await memory.releaseHold({
-  actor: owner,                              // owner-only
-  scope: 'client:acme#1',
-  statement: 'no pending dispute / hold released',
-  operation_id: 'op_01J8ZP…',                // required: audit + idempotency key
-});
-// → { status: 'released', scope, released_at, released_by, statement, operation_id }
-```
-
-  The release is receipted: exactly one `hold.release` ops entry under that key
-  (a keyless release is refused `invalid_parameter` before any mutation). A retry
-  replays the recorded receipt and re-publishes the release into `config.holds`
-  if a lost config write left the hold reading open — for the hold that receipt
-  names (`hold_operation_id`); a hold opened afterwards is a new duty and is
-  never lifted by a stale replay.
-
-  Then run F1 (snapshot) and erase — the optional erasure `attestation` string
-  is still recorded for payload identity, but the release receipt is the
-  canonical hold-release record. Release does not revive the scope. A scope
-  offboarded before ADR-0009 has no hold entry and erases as before.
 
 ```ts
 await memory.forgetScope({
   actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
   scope: 'client:acme#1',
   reason: 'offboarding',          // or 'erasure'
-  operation_id: 'op_01J8ZP5N6Q7R8S9T0V1W2X3Y4Z',
+  operation_id: crypto.randomUUID(),
   owner_pointer: '{"relationship_length":"client since 2023","job_categories":["bookkeeping","tax"],"satisfaction":"positive"}',
 });
 ```
@@ -755,7 +489,7 @@ await memory.forgetScope({
 npm ci
 npm run build        # tsc → dist/
 npm run verify:schemas
-npm test             # 520 tests across 72 files, no skips
+npm test             # 493 tests across 69 files, no skips
 npm pack             # → smartware-0.7.0.tgz
 ```
 
@@ -765,11 +499,12 @@ tenant config example), README, and LICENSE. The `exports` map in
 `package.json` is the stable public surface:
 
 ```
-"."            → dist/core.js   (SmartwareCore)
+"."            → dist/core.js   (SmartwareCore, knownTime/nullTime/canonicalKey)
 "./mcp"        → dist/mcp.js    (createSmartwareMcpServer)
 "./render"     → dist/render/provenance.js
 "./layer0|1|3" → dist/layer*/…   (advanced escape hatches)
-"./ingestion"  → dist/ingestion/index.js (source registry + ingestion contract)
+"./layer1/corroboration" → addCorroborationEvidence, resolveFactMatches (§1e)
+"./layer1/confidence"    → computeConfidence (still exported — confidence is derived)
 "./schemas/v0.4.2/*" and "./schemas/v0.5.0/*"
 ```
 
@@ -784,15 +519,29 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 520 tests / 72 files, no skips. The Coffee-specific suites:
+- `npm test` — 519 tests / 71 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
-  `test/conformance/p0_sources_ingestion.test.ts` (24 tests: source registry,
-  fail-closed source context, ingestion cursors/replay/dedup, sync status,
-  federated grants, human+agent attribution),
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
-  indexes, erasure vs offboarding semantics, provenance integrity), and
-  `test/render/provenance-rendering.test.ts` (33 exact-string tests).
+  indexes, erasure vs offboarding semantics, provenance integrity),
+  `test/render/provenance-rendering.test.ts` (33 exact-string tests),
+  `test/layer1/fact-identity.test.ts` (22 tests: the §1e identity contract —
+  every duplicate found, earliest-minted survivor in both insertion orders,
+  evidence unioned, losers demoted not deleted, sweep without a new observation —
+  plus 3 tests pinning the *known divergence* from `computeStructuredClaimFingerprint`
+  recorded in ADR-0003),
+  `test/layer1/demotion-durability.test.ts` (8 tests: the §1e demotion is recorded
+  in canonical version records and reconstructed by a compile-path row sync and a
+  full canonical replay; live and replayed projections agree on the recall-eligible
+  set), and
+  `test/protocol/repick-survivor.test.ts` (11 tests: the user re-pick releases the
+  duplicate and demotes the survivor in one atomic commit — swap, stability under
+  the next §1e write, rescue after a forgotten survivor, multi-copy demotion, the
+  rejections, both crash legs and the torn-set fail-closed case — with the
+  rebuild-equivalence assertions).
+- `npm run verify:saas` — public-API smoke on the packaged surface, including the
+  §1e duplicate contract end to end: 2 recall results for one fact → 1 after
+  resolution, duplicate superseded with its evidence unioned.
 - `npm run benchmark:retrieval-kernel` — 9/9 scenarios, Hit@1 1.0, MRR 1.0,
   zero forbidden hits.
 - `npm run benchmark:retrieval-activation-contract` — expects **HOLD**; the
@@ -808,15 +557,37 @@ on the exact version you ship:
   recover after one process terminates and the operation is retried*, plus
   reason-aware scope erasure/offboarding with lane-exhaustive purge and
   exact-count audit.
-- **Ingestion** is one page per batch (≤ `MAX_INGEST_ITEMS` = 500) and
-  single-writer; its receipt/cursor ledger is documented operational state —
-  the canonical record of what a batch wrote is the evidence log. Losing the
-  ledger is safe (item dedup is content-safe); losing evidence is not, and
-  that is what backup/restore drills are for.
 - The suite does **not** prove concurrent multi-writer serialization or
   universal sudden-power-loss durability.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts
   remain available for manual review.
+- Duplicate-claim convergence is a **write-path or sweep** action, not a background
+  guarantee: a store that already holds two active claims for one fact keeps both
+  until a write touching that fact runs `resolveFactMatches`, or a host sweeps the
+  scope (`§1e`). Identity is `(subject, predicate, scope, object value)` — two rows
+  asserting the same fact in **different scopes** are never merged, so scope
+  isolation always wins over deduplication.
+- Demotion durability has **one** boundary left. A demotion written by a library version before the
+  durability fix was projection-only and is not reconstructible from canonical data. From that fix
+  on, the demotion lives in the demoted claim's own version records and **every** flow carries it
+  forward — user `REVISE` (which reports `superseded_by` on its result, because it changes metadata
+  and not the asserted fact), the `FORGET` tombstone, `REVIVE`'s restore from the snapshot, the
+  endorsement cascade, consolidation's input tombstones, scope offboarding and retention expiry. So
+  a claim demoted as a duplicate stays out of the recall-eligible set through all of them, including
+  a later `REVIVE`.
+- **Releasing a mechanical demotion is a user-only re-pick** — `smartware_revise` with
+  `repick_survivor: true` on the demoted duplicate (protocol v0.5.0): one atomic commit releases the
+  duplicate and demotes the fact's current active copy with a `superseded_by_origin: 'user'`
+  warrant, so exactly one copy stays recall-eligible. It works in **swap** mode (the survivor is
+  still active) and in **rescue** mode (the survivor was already forgotten — the fact returns from
+  audit-only visibility, `demoted: []`). In beta it is the operation's *only* action — the schema
+  and the handler both reject combining it with the metadata actions — and it deliberately does not
+  admit a `supersedes` edge, so `invalidate_relations` neither touches nor undoes it. A bare release
+  ("un-supersede the loser", leaving both copies active) is rejected as a design: the next write
+  touching that fact re-demotes the earliest-minted copy, measurably. Reasoning:
+  [`ADR-0003`](../adr/0003-claim-fact-identity.md) → *Releasing a demotion*. Pinned by
+  `test/protocol/repick-survivor.test.ts`, `test/layer1/demotion-durability.test.ts` plus the
+  FORGET.SCOPE and retention suites.
 - Passing schemas + behavioral invariants is **not** exhaustive
   requirement-by-requirement conformance to Specification v1.6.16.
 
@@ -841,6 +612,7 @@ Two host-triggered lifecycle surfaces, both owner/staff-gated and receipt-backed
 ## References
 
 - Specification v1.6.16: `docs/spec/smartware-spec-v1.6.16.md`
+- Claim fact identity (ADR-0003): `docs/adr/0003-claim-fact-identity.md`
 - Protocol v0.5.0: `docs/protocol/smartware-protocol-v0.5.0.md` (v0.4.2 retained)
 - Schemas v0.5.0: `schemas/v0.5.0/`
 - Config-shape proof: `scripts/verify-config-shape.mjs`

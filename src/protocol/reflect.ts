@@ -12,7 +12,7 @@ import { dirname } from 'node:path';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SearchIndex } from '../layer3/search.js';
-import type { SmartwareConfig } from '../config.js';
+import { substrateActorId, type SmartwareConfig } from '../config.js';
 import type { Actor, PreExtractedClaim } from '../layer0/types.js';
 import type { ClaimRole, ClaimType, EpistemicLabel } from '../layer1/types.js';
 import { compile, isContextOnlyObservation, type CompileResult, type CompileOptions } from '../layer2/compiler.js';
@@ -378,6 +378,8 @@ export async function produceObservationClaims(
         sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
       });
       if (!existingByFp.derived_from.includes(obs.id)) {
+        // The spread carries the substrate's demotion fields (ADR-0003): folding a restatement into
+        // an existing claim must not release a duplicate resolution.
         const extended: ActiveClaimVersion = {
           ...existingByFp,
           version: existingByFp.version + 1,
@@ -717,7 +719,7 @@ async function reflectAutoCreateClaims(
   fingerprintIndex?: FingerprintIndex,
   observations?: import('../layer0/types.js').Observation[],
 ): Promise<ReflectAutoCreateResult> {
-  const podActorId = `substrate:${config.instance_id.replace('smartware_', '')}`;
+  const podActorId = substrateActorId(config);
   let created = 0;
   let llmAttempted = 0;
   let llmFailed = 0;

@@ -20,8 +20,8 @@ import type { SmartwareConfig } from '../config.js';
 import { isScopeHeld, loadConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
-import { readLatestVersion, appendClaimVersion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
-import { appendCommittedOpLogEntry, OPERATION_ID_PATTERN, readAllOpLogEntries, type MutationFence } from '../ops_log/index.js';
+import { readLatestVersion, appendClaimVersion, carryDemotion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
+import { appendCommittedOpLogEntry, appendOpLogEntry, OPERATION_ID_PATTERN, readAllOpLogEntries, type MutationFence } from '../ops_log/index.js';
 import { SMARTWARE_VERSION } from '../version.js';
 
 /** Parse the ISO 8601 "PnD" duration emitted by `toRetentionDurationString`. */
@@ -227,7 +227,7 @@ export async function handleExpireRetention(
       if (otherEvidence.length > 0) continue;
       const latest = deps.dataDir ? readLatestVersion(deps.dataDir, claim.id) : null;
       if (!latest || latest.state !== 'active') continue;
-      const forgotten: ForgottenClaimVersion = {
+      const forgotten: ForgottenClaimVersion = carryDemotion({
         claim_id: latest.claim_id,
         version: latest.version + 1,
         state: 'forgotten',
@@ -251,7 +251,7 @@ export async function handleExpireRetention(
         tags: latest.tags,
         supersedes: latest.version,
         endorsement_source: latest.endorsement_source,
-      };
+      }, latest);
       appendClaimVersion(deps.dataDir, forgotten);
       deps.store.syncFromJsonlVersion(forgotten);
       claimsRetracted += 1;

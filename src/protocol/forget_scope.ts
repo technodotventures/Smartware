@@ -54,6 +54,7 @@ import type { SmartwareConfig } from '../config.js';
 import { loadConfig, saveConfig, isScopeHeld } from '../config.js';
 import {
   appendClaimVersions,
+  carryDemotion,
   iterAllClaimVersions,
   purgeClaimVersionsByScope,
   readLatestVersion,
@@ -521,7 +522,7 @@ export async function handleForgetScope(
     for (const claimId of activeJsonlClaims) {
       const latest = readLatestVersion(dataDir, claimId);
       if (!latest || latest.state !== 'active') continue;
-      versions.push({
+      versions.push(carryDemotion({
         claim_id: latest.claim_id,
         version: latest.version + 1,
         state: 'forgotten',
@@ -545,7 +546,7 @@ export async function handleForgetScope(
         tags: latest.tags,
         supersedes: latest.version,
         endorsement_source: latest.endorsement_source,
-      });
+      }, latest));
     }
     if (versions.length > 0) {
       appendClaimVersions(dataDir, versions);
