@@ -9,6 +9,14 @@
 // scalars, string arrays, and arrays of notice objects of scalar values. Shapes outside that
 // vocabulary are refused at the write boundary (`assertPageVocabulary`) rather than emitted in a
 // form the reader would silently flatten or drop (t_cf744a8e).
+//
+// The reader additionally accepts the block-scalar styles a *page author* plausibly writes even
+// though no in-tree writer emits them — `|` and `>` with the `-` (strip) / `+` (keep) chomping
+// indicators and the explicit indentation indicator, at the top level and as a block-array item —
+// and decodes a quoted key (`- "k": v`). Before t_6fc254cd each of those read as the literal marker
+// string (`summary: |-` → `'|-'`), which the contract types as a legal `string`, so nothing
+// downstream complained. What is still unread is stated with its measured behaviour at the branches
+// below; nothing is left to be discovered.
 
 import { toPageCategory } from './paths.js';
 
@@ -171,18 +179,23 @@ function parseYAML(yaml: string): Record<string, unknown> {
 
   while (i < lines.length) {
     const line = lines[i]!;
-    const colonIdx = line.indexOf(':');
+    const colonIdx = keyColonIndex(line);
     if (colonIdx === -1) { i++; continue; }
 
-    const key = line.slice(0, colonIdx).trim();
+    // A quoted KEY is one scalar however many colons it contains (`- "a: b": c` is the mapping
+    // `{'a: b': 'c'}` — real YAML), so the separator is found quote-aware and the key decoded,
+    // exactly as a quoted *value* already was (t_6fc254cd).
+    const key = unquote(line.slice(0, colonIdx).trim());
     const rest = line.slice(colonIdx + 1).trim();
 
-    if (rest === '|') {
-      // Literal block scalar — how `toYAML` writes any string containing a newline (`key: |`, the
-      // content indented under the key). Before t_cf744a8e this branch only looked for an array
-      // item next and then dropped the key, so a multi-line `summary` (or a notice's `message`)
-      // vanished from the parse.
-      const { text, next } = readBlockScalar(lines, i + 1, leadingSpaces(line));
+    const style = blockStyle(rest);
+    if (style) {
+      // Block scalar — literal (`|`) or folded (`>`), plus the chomping and indentation indicators.
+      // `|` is how `toYAML` writes any string containing a newline; every other form is
+      // hand-authored (no in-tree writer emits one). Before t_6fc254cd only the exact marker `|` was
+      // recognised, so `summary: |-` parsed as the literal string `'|-'` with the content dropped —
+      // a silent wrong value the contract accepts (`summary` is a bare `type: string`). Read them all.
+      const { text, next } = readBlockScalar(lines, i + 1, leadingSpaces(line), style);
       result[key] = text;
       i = next;
       continue;
@@ -194,6 +207,11 @@ function parseYAML(yaml: string): Record<string, unknown> {
       // is left where it is; otherwise YAML's value is null — the writer spells a real null
       // `key: null` and an empty string `key: ""` (t_cf744a8e), so this is a hand-authored bare
       // key, and reading it as null beats dropping it silently.
+      //
+      // Measured, and recorded rather than left to surprise the next reader (t_6fc254cd):
+      // `summary:\nmeta:\n  a: b` reads as `{'summary': null, 'a': 'b'}` — `meta` vanishes (its
+      // block is deeper than the reader models) and its only key leaks out as a top-level page key,
+      // which the contract's `additionalProperties: false` then rejects. No in-tree writer emits it.
       if (i + 1 < lines.length && lines[i + 1]!.match(/^\s*-/)) {
         const { items, next } = parseBlockArray(lines, i + 1);
         result[key] = items;
@@ -236,6 +254,54 @@ function unquote(s: string): string {
 const QUOTE_CHARS = new Set(['"', "'"]);
 
 /**
+ * The index of the colon that separates a `key:` from its value, ignoring colons inside a quoted
+ * key (`"a: b": c` separates at the colon *after* the closing quote). A line with no colon outside
+ * quotes falls back to the first colon it has — a malformed line keeps behaving as it did before
+ * (it stays a key) rather than vanishing from the parse entirely (t_6fc254cd).
+ */
+function keyColonIndex(line: string): number {
+  const first = line.indexOf(':');
+  if (first === -1) return -1;
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]!;
+    if (quote !== null) {
+      if (char === '\\' && quote === '"') { i++; continue; }
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (QUOTE_CHARS.has(char)) { quote = char; continue; }
+    if (char === ':') return i;
+  }
+  return first;
+}
+
+/** A block-scalar header's marker: `|` (literal) or `>` (folded), plus an optional chomping
+ * indicator (`-` strip / `+` keep) and an optional explicit indentation indicator (`1`-`9`), in
+ * either order — every header YAML allows. Anything else — `|0`, a value that merely *looks* like a
+ * marker (`summary: "|-"`) — is not a header. */
+const BLOCK_MARKER = /^([|>])(?:([+-])([1-9])?|([1-9])([+-])?)?$/;
+
+/**
+ * Read a block-scalar header (`|`, `|-`, `|+`, `>`, `>-`, `>+`, and the indentation-indicator forms
+ * `|2`, `|2-`, `|-2`, `>3+`, …) — null when the text after the colon is not one.
+ *
+ * The indentation indicator is modelled as YAML defines it: the block's content is indented
+ * `introduceIndent + N`, so leading spaces beyond that are *content*. Measured against two
+ * independent spec readers (`yaml@2.9.0`, `js-yaml@4.3.2` — `probes/probe-indent-indicator.mjs` in
+ * the t_6fc254cd workspace): all nine valid shapes agree exactly, including the block-item and
+ * nested-key columns. Before t_6fc254cd such a value read as the literal marker string (`|2`), a
+ * legal `string` in the page contract — i.e. silent, not loud.
+ */
+function blockStyle(rest: string): { folded: boolean; chomp: '' | '-' | '+' ; indent: number } | null {
+  const match = BLOCK_MARKER.exec(rest);
+  if (!match) return null;
+  const chomp = (match[2] ?? match[5] ?? '') as '' | '-' | '+';
+  const indent = Number(match[3] ?? match[4] ?? 0);
+  return { folded: match[1] === '>', chomp, indent };
+}
+
+/**
  * Split the inside of an inline array (`[a, "b, c"]`) into its raw elements: a comma inside a
  * quoted scalar belongs to that scalar, not to the separator set (t_cf744a8e — `["alpha, beta"]`
  * used to decode as two malformed values).
@@ -271,16 +337,48 @@ function splitInlineArray(inner: string): string[] {
 }
 
 /**
- * Read a literal block scalar introduced on the line before `start` (`key: |` or `- |`): the run
- * of lines indented deeper than the introducing line, blank lines in between kept, and the block's
- * common indentation stripped. This is the reader half of `toYAML`'s multi-line-string shape
- * (t_cf744a8e). Only `|` is understood — the serialiser never writes `|-`, `|+` or `>`.
+ * Read a block scalar introduced on the line before `start` (`key: |`, `key: |-`, `key: >`, or the
+ * block-array item form `- |`): the run of lines indented deeper than the introducing line, blank
+ * lines in between kept, and the block's common indentation stripped.
+ *
+ * This is the reader half of `toYAML`'s multi-line-string shape (`|`, t_cf744a8e), extended to the
+ * styles a *page author* writes (t_6fc254cd):
+ *
+ *   `|`   literal, no indicator — the block's lines verbatim, trailing blank lines included. This is
+ *         exactly the bytes `toYAML` emits, so the writer's round-trip is untouched by this change.
+ *   `|-`  literal, strip — the block's trailing blank lines are removed (that is what the marker is
+ *         for). Measured before the fix: the value was the marker string `'|-'`.
+ *   `|+`  literal, keep — the same as the unmarked style here. A spec reader distinguishes clip
+ *         (one trailing line break) from keep (all of them); this reader never adds the trailing
+ *         line terminator to a scalar (the documented deviation below), so both keep the block's
+ *         own lines and the marker changes nothing.
+ *   `>`   folded — single line breaks between plain lines become spaces, a run of blank lines is a
+ *         paragraph break of the same length, and a more-indented line keeps its own line breaks
+ *         (YAML's "more indented lines are not folded" rule). `>-`/`>+` chomp as above.
+ *   `|N`  explicit indentation indicator — the content is indented `introduceIndent + N`; the block
+ *         ends at the first non-blank line indented less than that. Every valid header YAML allows
+ *         is now read (measured against two spec readers). A content line *shallower* than the
+ *         declared indentation is a parse error in YAML; here it simply ends the block and is left
+ *         where it is (this reader has no error channel, and `parseFrontmatter`'s catch would make
+ *         a throw indistinguishable from "no frontmatter").
+ *
+ * Known deviation, documented rather than fixed here (it predates this change and applies to the
+ * writer's own `|` output too): a spec YAML reader applies *clip* chomping to a scalar with no
+ * chomping indicator and therefore returns exactly one more trailing line break than this reader
+ * does — measured identically on `yaml@2.9.0` and `js-yaml@4.3.2` across every non-strip case in
+ * `probes/probe-vs-reference.mjs` (t_6fc254cd workspace). This reader returns the block's lines
+ * verbatim, which is what makes `parse(serialise(fm))` exact for the writer's shape; the `-` forms
+ * are exact against a spec reader.
  */
 function readBlockScalar(
   lines: string[],
   start: number,
   introduceIndent: number,
+  style: { folded: boolean; chomp: '' | '-' | '+'; indent: number },
 ): { text: string; next: number } {
+  // The shallowest column that still belongs to the block: the declared one when the header carries
+  // an indentation indicator, otherwise anything deeper than the introducing line.
+  const minIndent = style.indent > 0 ? introduceIndent + style.indent : introduceIndent + 1;
   const collected: string[] = [];
   let i = start;
   while (i < lines.length) {
@@ -290,14 +388,53 @@ function readBlockScalar(
       i++;
       continue;
     }
-    if (leadingSpaces(line) <= introduceIndent) break;
+    if (leadingSpaces(line) < minIndent) break;
     collected.push(line);
     i++;
   }
   const indents = collected.filter(line => line.trim() !== '').map(line => leadingSpaces(line));
-  const strip = indents.length > 0 ? indents.reduce((min, n) => Math.min(min, n)) : 0;
-  const text = collected.map(line => (line.trim() === '' ? '' : line.slice(strip))).join('\n');
+  const strip = style.indent > 0
+    ? minIndent
+    : indents.length > 0 ? indents.reduce((min, n) => Math.min(min, n)) : 0;
+  const content = collected.map(line => (line.trim() === '' ? '' : line.slice(strip)));
+
+  if (style.chomp === '-') {
+    while (content.length > 0 && content[content.length - 1] === '') content.pop();
+  }
+  const text = style.folded ? foldLines(content) : content.join('\n');
   return { text, next: i };
+}
+
+/**
+ * Fold a `>` block's content lines: adjacent plain lines join with a space, a run of blank lines
+ * becomes a paragraph break of the same length, and a more-indented line (after the block's common
+ * indentation is stripped, a line that still starts with a space) keeps its own line breaks — YAML's
+ * "more indented lines are not folded" rule. Trailing blank lines of the block are kept as line
+ * breaks unless the marker's chomping already removed them.
+ */
+function foldLines(content: string[]): string {
+  const parts: string[] = [];
+  let breaks = 0;
+  let emitted = false;
+  let previousMoreIndented = false;
+  for (const line of content) {
+    if (line.trim() === '') { breaks++; continue; }
+    const moreIndented = line.startsWith(' ');
+    if (!emitted) {
+      parts.push(line);
+      emitted = true;
+    } else if (breaks > 0) {
+      parts.push('\n'.repeat(breaks) + line);
+    } else if (moreIndented || previousMoreIndented) {
+      parts.push('\n' + line);
+    } else {
+      parts.push(' ' + line);
+    }
+    previousMoreIndented = moreIndented;
+    breaks = 0;
+  }
+  if (emitted && breaks > 0) parts.push('\n'.repeat(breaks));
+  return parts.join('');
 }
 
 /** Whether the next non-blank line is indented deeper than the key that precedes it. */
@@ -349,9 +486,16 @@ function isQuotedScalar(content: string): boolean {
  * Both the standard shape this serialiser now emits and the mis-indented shape the pre-fix
  * serialiser wrote decode to the same object, so a page written by the broken writer is recovered
  * on read instead of silently degraded. A plain item (`- alpha`) stays a string, a quoted scalar
- * item (`- "a: b"`) stays the one string it is, and a block-scalar item (`- |` + deeper lines) is
- * the multi-line string it introduces (t_cf744a8e). A nested sequence — a construct no page field
- * admits — is still left where it is rather than silently swallowed.
+ * item (`- "a: b"`) stays the one string it is, and a block-scalar item (`- |`, `- |-`, `- >` +
+ * deeper lines) is the multi-line string it introduces (t_cf744a8e, t_6fc254cd).
+ *
+ * Still unread, and left where it is rather than silently swallowed: a nested sequence item
+ * (`- - a`), a construct no page field admits. Measured on this reader — recorded here so the next
+ * reader does not have to rediscover it — `sources:\n  - - a\n    - b` parses as
+ * `{'sources': ['- a', 'b']}`: the item's own content becomes a string and the deeper dash line a
+ * sibling item. The page contract types `sources` items as strings, so the outcome is two legal
+ * strings holding the wrong values, and no in-tree writer emits one
+ * (`probes/probe-unread-constructs.mjs` in the t_6fc254cd workspace carries the case).
  */
 function parseBlockArray(lines: string[], start: number): { items: unknown[]; next: number } {
   const items: unknown[] = [];
@@ -363,9 +507,12 @@ function parseBlockArray(lines: string[], start: number): { items: unknown[]; ne
     const content = match[3]!.trim();
     i++;
 
-    if (content === '|') {
-      // A block scalar as the item's own value: the block-array form of a multi-line string.
-      const { text, next } = readBlockScalar(lines, i, dashIndent);
+    const style = blockStyle(content);
+    if (style) {
+      // A block scalar as the item's own value (`- |`, `- |-`, `- >`): the block-array form of a
+      // multi-line string. Before t_cf744a8e the marker was kept as the value and the content
+      // dropped; before t_6fc254cd the chomping/folded markers read the same way.
+      const { text, next } = readBlockScalar(lines, i, dashIndent, style);
       items.push(text);
       i = next;
       continue;
