@@ -85,10 +85,16 @@ function toYAML(obj: Record<string, unknown>, indent = 0): string {
         lines.push(`${pad}${key}: []`);
       } else if (typeof val[0] === 'object') {
         lines.push(`${pad}${key}:`);
+        // Standard block YAML: the item's own lines follow the dash at the item's content column
+        // (`- key: value`, continuation keys aligned under the first one). The item indent must
+        // NOT be left inside the dash line: that shape (`-     key: value` with the continuation
+        // lines at a *shallower* column) is invalid YAML for a real reader and did not survive
+        // this file's own parser (t_4d84ff6b).
         for (const item of val) {
           const itemLines = toYAML(item as Record<string, unknown>, indent + 4).split('\n').filter(Boolean);
-          lines.push(`${pad}  - ${itemLines[0]}`);
-          for (const l of itemLines.slice(1)) lines.push(`  ${l}`);
+          const [first = '', ...rest] = itemLines;
+          lines.push(`${pad}  - ${first.slice(indent + 4)}`);
+          for (const l of rest) lines.push(l);
         }
       } else {
         lines.push(`${pad}${key}: [${(val as unknown[]).map(v => yamlString(String(v))).join(', ')}]`);
@@ -125,15 +131,9 @@ function parseYAML(yaml: string): Record<string, unknown> {
     if (rest === '' || rest === '|') {
       // Could be array or nested object — peek ahead
       if (i + 1 < lines.length && lines[i + 1]!.match(/^\s*-/)) {
-        // Array
-        const arr: unknown[] = [];
-        i++;
-        while (i < lines.length && lines[i]!.match(/^\s*-/)) {
-          const item = lines[i]!.replace(/^\s*-\s*/, '').trim();
-          arr.push(unquote(item));
-          i++;
-        }
-        result[key] = arr;
+        const { items, next } = parseBlockArray(lines, i + 1);
+        result[key] = items;
+        i = next;
         continue;
       }
     } else if (rest.startsWith('[') && rest.endsWith(']')) {
@@ -165,4 +165,62 @@ function unquote(s: string): string {
     return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
   }
   return s;
+}
+
+const BLOCK_ITEM = /^(\s*)-(\s*)(.*)$/;
+
+/** The number of leading whitespace characters on a line. */
+function leadingSpaces(line: string): number {
+  return line.length - line.replace(/^\s*/, '').length;
+}
+
+/** Whether a block item's content opens a mapping (`key: value`) rather than a plain scalar. */
+function isMappingItem(content: string): boolean {
+  // `- http://example.com` is a scalar, not `{ http: '//example.com' }`: the colon has to be
+  // followed by whitespace (or end the line) to separate a key from its value.
+  return /^[^\s:][^:]*:(\s|$)/.test(content);
+}
+
+/**
+ * Read a block-style array of `-`-prefixed lines starting at `start`.
+ *
+ * An item whose content opens a mapping (`- key: value`) decodes into an OBJECT together with its
+ * continuation lines — every line indented deeper than the item's dash. This is the `notices`
+ * shape (spec §9 / `page-frontmatter.schema.json`): a user-authored page carries an array of
+ * `{type, message, claim_id?, tombstone_id?, posted_at?}` objects, and before this the array
+ * branch read every dash line as a *string*, so `parse(serialise(fm))` returned
+ * `notices: ["type: staleness"]` and pushed the remaining item keys out as stray top-level
+ * frontmatter keys (which then fail the contract's `additionalProperties: false`) — t_4d84ff6b.
+ *
+ * Both the standard shape this serialiser now emits and the mis-indented shape the pre-fix
+ * serialiser wrote decode to the same object, so a page written by the broken writer is recovered
+ * on read instead of silently degraded. A plain item (`- alpha`) stays a string.
+ */
+function parseBlockArray(lines: string[], start: number): { items: unknown[]; next: number } {
+  const items: unknown[] = [];
+  let i = start;
+  while (i < lines.length) {
+    const match = BLOCK_ITEM.exec(lines[i]!);
+    if (!match) break;
+    const dashIndent = match[1]!.length;
+    const content = match[3]!.trim();
+    i++;
+
+    if (!isMappingItem(content)) {
+      // A plain item is a string, as before. A construct this minimal parser has never read (a
+      // block scalar, a nested sequence) is left where it is rather than silently swallowed.
+      items.push(unquote(content));
+      continue;
+    }
+
+    // `parseYAML` is indentation-agnostic (one `key: value` per line), so the item's whole block
+    // can be handed to it: the dash line's content first, then the continuation lines.
+    const block = [content];
+    while (i < lines.length && leadingSpaces(lines[i]!) > dashIndent) {
+      block.push(lines[i]!);
+      i++;
+    }
+    items.push(parseYAML(block.join('\n')));
+  }
+  return { items, next: i };
 }
