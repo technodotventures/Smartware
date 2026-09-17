@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `fix/b1-correction-durability` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/revise-fts-sync` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,25 +24,29 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-16-t_8ddfa350.md`](journal/2026-09-16-t_8ddfa350.md) — A warranted CORRECT is durable: the retraction reaches the canonical log, and recall serves the corrected value — composed onto the Coffee RC (B1 of the GATE review t_66f1dd7d) (2026-09-16)
-- **Journal entries:** 61 · tasks completed on board `smartware`: 85
+- **Journal:** [`2026-09-17-t_336ba0b9.md`](journal/2026-09-17-t_336ba0b9.md) — REVISE re-syncs the claim-FTS index: the process that performed a warranted revision serves what every restart serves (2026-09-17)
+- **Journal entries:** 62 · tasks completed on board `smartware`: 94
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/tech-head/remaining-personal-literals` | 82 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
+| `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
+| `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
 | `wip/neo/consent-change-scope` | 76 | 2026-09-16 | docs: regenerate the STATUS projection (branch row, journal count, in-flight tips) |
 | `wip/tech-head/l2-page-frontmatter-schema` | 74 | 2026-09-16 | docs(journal): correct the push-blocker paragraph — the branch is published as PR #22 |
 | `wip/smarty/l0-record-schema` | 73 | 2026-09-16 | docs(journal): name the published PR and the CI result (t_f1157ed4) |
-| `wip/tech-head/l1-claim-record-boundary` | 71 | 2026-09-16 | docs: regenerate STATUS projection (kanban t_11fed5bb) |
+| `wip/tech-head/l1-claim-record-boundary` | 73 | 2026-09-17 | docs: regenerate the STATUS projection at the round-1-correction tip (t_11fed5bb) |
 | `wip/smarty/canonical-schema-boundary` | 69 | 2026-09-16 | docs(journal): fix the pushed-tip clause in the t_74faf12d entry (review round 1, neo) |
+| `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
 | `wt/t_f2b584dc` | 64 | 2026-09-16 | docs: regenerate STATUS projection + journal sync for the round-4 text fix |
-| `fix/coffee-rc-emitted-record-conformance` | 62 | 2026-09-16 | fix(layer1): compose the demotion pointer into the record envelope the composed tests assert |
 | `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
 | `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
 | `wip/tech-head/l1-forgotten-carry-superseded` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
+| `fix/b1-correction-durability` | 59 | 2026-09-17 | docs(journal): the pre-rewrite ids are unreferenced objects, said plainly (t_3ee1ae37) |
 | `wip/tech-head/l1-replay-crockford-claim-id` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
 | `fix/status-projection-adr-bullet` | 58 | 2026-09-15 | fix(status): the ADR reader accepts the template's `- **Status:**` bullet |
 | `wip/neo/optype-derivation-guard` | 58 | 2026-09-15 | docs: STATUS projection refresh for t_0e732b96 (status:check current at commit time) |
@@ -95,9 +99,12 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_ba379812` [ready] BLOCKED (owner ops): the repository's GitHub credential is dead (401) — no lane can push, so no PR and no CI on the ADR-0013 fix branches (created 2026-09-16, assignee tech-head)
-- `t_4d84ff6b` [ready] FIX (low): a populated `notices` array does not round-trip the page YAML serialiser — parse drops the object and leaks stray top-level keys (measured; pre-existing) (created 2026-09-16, assignee tech-head)
-- `t_1cde6d63` [todo] VERIFY (independent): consent-change writers stamp the pod lane `self` — wip/neo/consent-change-scope @ 658c3cb (PR #24, base wip/smarty/l0-record-schema @ e0241d4) (created 2026-09-16, assignee tech-head)
+- `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
+- `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
+- `t_a54a4606` [ready] DECIDE (owner gate) + ADR: repair path for L1 canonical claim logs written pre-fix (B1 residual, measured on t_e833be91) (created 2026-09-17, assignee tech-head)
+- `t_cf744a8e` [ready] DECIDE (low): the page YAML serialiser's remaining lossy shapes — multi-line strings (top-level and in a notice item), nested object values, comma-bearing inline array items (measured; pre-existing) (created 2026-09-17, assignee neo)
+- `t_e9173766` [ready] TEXT FIX (verifier findings, from t_1cde6d63): the t_e6fce49a journal's frozen-surface line is false at the tip, its "nothing else consumes the lane" enumeration is incomplete, and the pre/post probe pair is not comparable (created 2026-09-17, assignee neo)
+- `t_efa8d5a8` [ready] MEASURE+DECIDE: a replayed `operation_id` re-runs the compile and writes fresh claims/pages, but returns the recorded `claims_created` (mixed recorded/fresh in one result; measured on t_27c73d58) (created 2026-09-17, assignee tech-head)
 
 ## Blockers and stale work
 
@@ -127,9 +134,9 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Health
 
-- ✅ declared block fresh (5d old)
-- ✅ kanban board readable (105 tasks, 8593 events)
-- ⚠️ 26 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ declared block fresh (6d old)
+- ✅ kanban board readable (114 tasks, 8911 events)
+- ⚠️ 34 completed task(s) have no journal entry — run: npm run journal:sync
 
 ## Canonical index
 

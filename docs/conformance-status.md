@@ -74,6 +74,24 @@ assertions pin `supersedes`, the `semantic` enum, the Crockford OperationId and 
 all carded elsewhere), the writer's `supersedes` pointer and the Crockford legacy OperationId (B2,
 `t_5ef44cc1`).
 
+Verified 2026-09-17 on Node v26.5.1 for the **REVISE half of the same re-sync** (kanban `t_336ba0b9`,
+lane `wip/neo/revise-fts-sync` off `fix/b1-correction-durability` @ `ab9cf2b` — one `src/core.ts`
+change: `revise` re-syncs the claim-FTS index after the mutation, the way `correct` and `consolidate`
+already did): **553 tests across 78 files**, `tsc` clean, `verify:schemas` 31 schema files OK,
+`verify:saas` `SMOKE_OUTCOME=pass`, and **`verify:coffee-gate` 85/85** against the packed artifact
+(`smartware-0.7.0.tgz` sha256
+`d1fc431046400d928e0f7b514eeb71b0d70172e837d1f46eec12769260c0c083`). Measured before the fix through
+the Coffee adapter (`scripts/coffee-revise-restart-probe.mjs`, three legs): recall served **1 row**
+in the process that had just performed a warranted REVISE while a restart and a genuine second
+process over the same brain served **2** — the revised claim was missing from the live claim-FTS
+lane until some later write re-synced the scope. The regression pin is
+`test/protocol/revise-search-sync.test.ts` (RED at `ab9cf2b`: in-process `[replacement]` vs fresh
+open `[original, replacement]`); the gate grew no fixture checks because the fixture has no REVISE
+surface (the Coffee adapter exposes `correctClaim` only). The re-sync is semantics-neutral — the live
+lane is made equal to whatever the store says is indexable — so it holds whether a REVISE leaves a
+superseded target `active` (this base) or still superseded (the demotion carry-forward decision on
+`t_742e31f9`, unmerged).
+
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
