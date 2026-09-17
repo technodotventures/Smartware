@@ -33,6 +33,7 @@ import { ScopeRegistry } from '../../src/scopes/registry.js';
 import { handleObserve } from '../../src/protocol/observe.js';
 import { handleCompile } from '../../src/protocol/reflect.js';
 import { handleQuery } from '../../src/protocol/query.js';
+import { resolveFactMatches } from '../../src/layer1/corroboration.js';
 import { computeConfidence } from '../../src/layer1/confidence.js';
 import { knownTime, nullTime } from '../../src/layer1/types.js';
 import type { Claim } from '../../src/layer1/types.js';
@@ -296,5 +297,65 @@ describe('reflect.auto consults fact identity before creating (ADR-0005 D7 / F1)
     expect(created.epistemic_tag).toBe('inference');
     expect(created.confidence).toBe('low');
     expect(created.derived_from.length).toBeGreaterThan(0);
+  });
+
+  it('a fingerprint match on a demoted duplicate does not receive the observation: corroboration routes to the surviving claim (F1b)', async () => {
+    seedEntity();
+    // The pre-F1 duplicate shape a deployment that ran before F1 already holds: two active
+    // claims for one fact — the host's (`claim_type` unset -> store default 'finding', and the
+    // §1e survivor by mint order) and the autonomous twin ('hypothesis').
+    const hostObs = await observe('Kickoff call with Acme went well.');
+    const host = buildHostClaim(hostObs, { id: 'claim_0001HOSTHOSTHOSTHOSTHOSTHOST' });
+    store.insertClaim(host);
+    const twinObs = await observe('Round 0 host note: kickoff call with Acme went well.');
+    const twin = buildHostClaim(twinObs, {
+      id: 'claim_0002AUTOAAAAUTOAUTOAUTOAUTO',
+      claim_type: 'hypothesis',
+    });
+    store.insertClaim(twin);
+
+    // The host converges the pair through guide §1e: the twin's evidence is unioned into the
+    // survivor, the twin is demoted — carried by the twin's own canonical record (F2).
+    const resolution = resolveFactMatches({
+      store,
+      matches: store.findActiveFactMatches(ENTITY_ID, { predicate: PREDICATE, scope: SCOPE, object: OBJECT }),
+      observationId: hostObs,
+    });
+    expect(resolution.superseded_claims).toEqual([twin.id]);
+    const twinVersionsAfterDemotion = versionsOf(twin.id);
+    const twinDemotionRecord = twinVersionsAfterDemotion[twinVersionsAfterDemotion.length - 1]!;
+    expect(twinDemotionRecord.superseded_by).toBe(host.id);
+    // F2: the demotion does not change the record's `state` — `superseded_by` is the carrier.
+    expect(twinDemotionRecord.state).toBe('active');
+
+    // The autonomous restatement whose extraction classification ('hypothesis') is exactly the
+    // DEMOTED twin's, so the fingerprint key matches the hidden duplicate. Measured on kanban
+    // t_6c39a895: the observation used to land on the demoted claim.
+    const restatementObs = await observe('Deadline: 2026-09-01.');
+    const compiled = await compile();
+
+    // Still no duplicate creation...
+    expect(compiled.claims_created).toBe(0);
+    // ...but the demoted duplicate gained nothing: no new version, no new evidence...
+    expect(versionsOf(twin.id)).toHaveLength(twinVersionsAfterDemotion.length);
+    expect(store.getClaim(twin.id)!.supporting_evidence).not.toContain(restatementObs);
+    // ...the observation extended the fact's surviving claim, where recall shows it...
+    const survivor = store.getClaim(host.id)!;
+    expect(survivor.supporting_evidence).toContain(restatementObs);
+    expect(versionsOf(host.id)[versionsOf(host.id).length - 1]!.derived_from).toContain(restatementObs);
+    // ...the demotion is untouched...
+    expect(store.getClaim(twin.id)!.status).toBe('superseded');
+    // ...and the fact still answers once.
+    const hits = await recall('deadline');
+    expect(hits.results.filter(result => result.claim?.predicate === PREDICATE)).toHaveLength(1);
+
+    // The routing is auditable: the receipt names the survivor, the classification the
+    // extraction would have used, and the demoted fingerprint match it was routed away from.
+    expect(receiptFor(restatementObs)?.['fact_identity_matches']).toEqual([{
+      claim_id: host.id,
+      decision: 'corroborated',
+      extraction_claim_type: 'hypothesis',
+      fingerprint_matched_demoted: twin.id,
+    }]);
   });
 });

@@ -35,23 +35,35 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-15 on Node v26.5.1 for the creation-side identity change (F1 of
-[ADR-0005](adr/0005-protocol-claim-identity.md): `reflect.auto` consults fact
-identity before creating), superseding the 2026-09-14 duplicate-claim-identity
-baseline (which recorded **493 tests across 69 files**): **497 tests across
-70 files**, 31 schema files, and the public-API smoke passing end to end (12/12
-PASS lines). The 4-test delta is `test/protocol/reflect-auto-fact-identity.test.ts`
-(see below); no other suite changed. The 2026-09-14 retrieval numbers (9/9
-retrieval-kernel scenarios, activation contract fails closed) were **not re-run**
-for this change — it touches no retrieval surface — and stand as recorded. (CI
-re-runs the same gate via `npm ci` from `package-lock.json` on Node 22 and 24,
-so the two runtime lines are verified by CI rather than by this local run.)
+Verified 2026-09-15 on Node v26.5.1 for the **composed identity tree** — the
+duplicate-claim-identity change (`fix/duplicate-claim-recipe` @ `93a7cfd`), both
+demotion-durability fixes on top of it (`wip/neo/demotion-durability` @ `e5f093e`,
+extended by the carry-forward through the flows that hand-build a version record on
+`wip/smarty/demotion-handbuilt-records` @ `3ae8a6b`), and the creation-side identity
+change (F1 of [ADR-0005](adr/0005-protocol-claim-identity.md): `reflect.auto`
+consults fact identity before creating) on one tree, `falsifier/t_e8bd6747`, plus
+F1b (ADR-0005 amendment: a fingerprint match on a demoted duplicate routes
+corroboration to the surviving claim) on `wip/neo/f1b-demoted-fingerprint` —
+superseding the 2026-09-14 duplicate-claim-identity baseline (which recorded **493
+tests across 69 files**) and the 2026-09-10 0.7.0 release-cut baseline (**446 tests
+across 64 files**): **512 tests across 71 files**, 31 schema files, and the
+public-API smoke passing end to end (12/12 PASS lines, `SMOKE_OUTCOME=pass`). The
+deltas over `93a7cfd` are 19 tests: the demotion-durability fixes (8 in
+`test/layer1/demotion-durability.test.ts` from the parent change — all still green —
+plus 4 more in that file, one in `test/protocol/forget-scope.test.ts` and one in
+`test/protocol/retention-expire.test.ts` from the carry-forward), F1's 4 and F1b's 1
+(`test/protocol/reflect-auto-fact-identity.test.ts`); no other suite changed. The
+retrieval-kernel contract (9/9 scenarios) and the activation
+contract (fails closed) were **not re-run** for this tree — it touches no retrieval
+surface — and stand as recorded. (CI re-runs the same gate via `npm ci` from
+`package-lock.json` on Node 22 and 24, so the two runtime lines are verified by CI
+rather than by this local run.)
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
   (15 files) still verifies.
-- The standalone suite passes **497 tests across 70 files** with no skips.
+- The standalone suite passes **512 tests across 71 files** with no skips.
 - The fact-identity suite (`test/layer1/fact-identity.test.ts`, 22 tests) pins the
   claim write-path identity contract documented in the integration guide §1e:
   `ClaimStore.findActiveFactMatches` returns **every** active claim asserting a
@@ -61,10 +73,16 @@ so the two runtime lines are verified by CI rather than by this local run.)
   'superseded'`, `superseded_by`, timestamped, never deleted), recomputing
   confidence with the library formula, and reporting `ambiguous_matches` /
   `superseded_claims`. Both insertion orders of a duplicate pair yield the same
-  survivor; a demoted duplicate is no longer matched. The same 6 fixtures as the
-  host-side pilot reference implementation are reproduced 1:1, and the pilot's own
-  deterministic suite was re-run unchanged against this change's package (6/6 pass,
-  evidence on `t_2996a3ab`), so the pilot cross-check remains valid.
+  survivor; a demoted duplicate is no longer matched, **and the demotion is
+  durable**: it is recorded in the demoted claim's own canonical version records
+  (`superseded_by`, `superseded_at`) and every materialisation derives the row
+  from them, so a compile-path row sync and a full canonical replay both keep the
+  duplicate out of the recall-eligible set (previously projection-only — measured
+  in `t_15bb0cd0` `evidence/23-demotion-durability.txt`; pinned by
+  `test/layer1/demotion-durability.test.ts`, which now also covers the flows that
+  hand-build a version record). The same 6 fixtures as the
+  host-side pilot reference implementation are reproduced 1:1, so the pilot's
+  deterministic suite remains a valid cross-check.
 - The same suite pins the **crossing between that write-path identity and the
   structured claim fingerprint** (`computeStructuredClaimFingerprint`,
   `reflect.auto` idempotency, spec §193/§238) in both measured directions: two
@@ -77,15 +95,21 @@ so the two runtime lines are verified by CI rather than by this local run.)
   crossing silently fails the suite (measured: dropping `claim_type` from the
   fingerprint fails 1 test, case-folding a text value in `normaliseValue` fails 3,
   making fact identity depend on `claim_type` fails 1).
-- `test/protocol/reflect-auto-fact-identity.test.ts` (4 tests) pins F1 of ADR-0005
+- `test/protocol/reflect-auto-fact-identity.test.ts` (5 tests) pins F1 of ADR-0005
   on the in-repo protocol surface: a host-held fact restated by an autonomous
   observation **under another classification** gets corroboration (`derived_from`
   extended, one active claim, recall answers once, receipt records the decision)
   instead of a second claim; a protected (`epistemic_owner: user`) claim is neither
   corroborated nor duplicated; the matching-classification control still converges
-  through the fingerprint key; and creation is unchanged when no claim holds the
-  fact. RED-first evidence: against pre-fix `src/` the suite reports
-  `Tests 2 failed | 2 passed (4)`, after the change `4 passed`.
+  through the fingerprint key; creation is unchanged when no claim holds the
+  fact; and F1b (ADR-0005 amendment) pins the **demoted** duplicate case — a
+  fingerprint match on a resolved loser does not receive the restatement: the
+  observation extends the fact's surviving claim, the demoted duplicate gains no
+  version and keeps its demotion, and the receipt names the matched demotion
+  (`fact_identity_matches[].fingerprint_matched_demoted`). RED-first evidence: F1
+  against pre-fix `src/` reports `Tests 2 failed | 2 passed (4)` (after: `4
+  passed`); F1b against the pre-amendment source reports `Tests 1 failed | 4
+  passed (5)` (after: `5 passed`).
 - `npm run verify:saas` (public-API smoke) exercises the same contract end to end
   against the packaged surface: a store seeded with two active claims for one fact
   answers **2** recall results for that fact and **1** after
@@ -187,6 +211,23 @@ The exact ordering and recovery state table are documented in
   a duplicate for a fact the store already holds (`reflect.auto` consults fact
   identity before creating and attaches corroboration instead — F1 of ADR-0005),
   but it does not retro-repair a store that already holds one.
+- The demotion is durable **from the version that records it** — a compile-path
+  row sync and a canonical replay both reconstruct it from the claim's canonical
+  version records — and **every flow that hand-builds a claim's next version
+  record carries it forward**: user `REVISE` (whose result reports `superseded_by`,
+  because a revise changes metadata and not the asserted fact), the `FORGET`
+  tombstone, `REVIVE`'s restore from the snapshot, the endorsement cascade,
+  consolidation's input tombstones, scope offboarding and retention expiry. Two
+  limits remain. A demotion written before this fix was projection-only and is not
+  reconstructible from canonical data. And **nothing in beta releases a mechanical
+  demotion**: `invalidate_relations` withdraws an *admitted* `supersedes`/`corrects`
+  edge, and the mechanical demotion is deliberately not an edge, so the vocabulary
+  needed is a new, explicitly user-only **re-pick the survivor** act (un-superseding
+  the loser would be re-demoted by the next write touching that fact). Until it
+  ships, a demoted duplicate stays demoted even if the survivor is later forgotten
+  — the fact is then audit-visible only. Reasoning and the rejected alternatives:
+  [ADR-0003](adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built
+  version records*.
 - **Two keys over the claim table, one fact-identity predicate.** The write-path
   identity above is the fact-identity predicate (`claim_type` excluded); the
   structured claim fingerprint (`claim_type` included, text lowercased) is the

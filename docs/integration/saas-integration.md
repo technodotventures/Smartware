@@ -196,7 +196,15 @@ survivor order — so `matches[0]` is the survivor even if you only need the id.
   fact observed again, so dropping its observations would lose provenance the brain already has.
 - **Losers are demoted, never deleted** — `status: 'superseded'`, `superseded_by: <survivor>`,
   timestamped. They stay auditable on disk and leave the recall-eligible set (`status === 'active'`),
-  which is what stops recall answering the same question twice.
+  which is what stops recall answering the same question twice. The demotion is recorded in the
+  demoted claim's own **canonical version records** (`superseded_by`, `superseded_at`) and the row is
+  re-derived from them, so it survives a compile-path row sync and a full canonical replay — it is
+  not a projection-only fact. **Every flow that touches the claim afterwards carries it forward**: a
+  user `REVISE` (whose result reports `superseded_by`, because the revision changes metadata and not
+  the asserted fact — so the claim stays out of the recall-eligible set), `FORGET`'s tombstone,
+  `REVIVE`'s restore, the endorsement cascade, consolidation's input tombstones, scope offboarding
+  and retention expiry. Nothing in beta *releases* a mechanical demotion; §10 names the boundary that
+  remains.
 - **The decision is reported.** `ambiguous_matches` and `superseded_claims` come back to the caller
   instead of a choice being made silently.
 
@@ -227,9 +235,14 @@ do not read one as evidence about the other.
 (`reflect.auto`) consults fact identity: when the store already holds the fact as an active claim it
 attaches the observation as corroboration (extending `derived_from`) instead of creating a second
 one — same protection rule as above, and against a protected (`epistemic_owner: user`) claim it
-writes nothing at all. That closes the *creation* path: it does not retro-repair a store that
-already holds duplicates (the §1e sweep above converges those), and it does not make the two rules
-one rule.
+writes nothing at all. A **demoted** duplicate is not an exception: when the fingerprint key
+matches a duplicate §1e already resolved, the observation is still routed to the fact's surviving
+claim — the demoted claim is never extended with evidence the recall surface cannot show (the
+receipt names the matched demotion, `fact_identity_matches[].fingerprint_matched_demoted`; and if
+no active claim asserts the fact, the matched claim receives the observation so the evidence is
+preserved rather than dropped). That closes the *creation* path: it does not retro-repair a store
+that already holds duplicates (the §1e sweep above converges those), and it does not make the two
+rules one rule.
 
 So a host running both surfaces must not assume the two agree: a Rule-B consumer can report
 differently from the write path on the same rows, and duplicates that predate the creation-side fix
@@ -521,7 +534,7 @@ on the exact version you ship:
 
 - `npm run verify:schemas` — all frozen schema files match their committed
   SHA-256 checksum manifest (31 files across v0.4.2 + v0.5.0).
-- `npm test` — 497 tests / 70 files, no skips. The Coffee-specific suites:
+- `npm test` — 512 tests / 71 files, no skips. The Coffee-specific suites:
   `test/conformance/coffee-company-brain.test.ts`,
   `test/conformance/v050-rebuild-forget-provenance.test.ts` (14 tests:
   rebuild-equivalence, FORGET.SCOPE zero-results-every-lane against *rebuilt*
@@ -531,11 +544,18 @@ on the exact version you ship:
   every duplicate found, earliest-minted survivor in both insertion orders,
   evidence unioned, losers demoted not deleted, sweep without a new observation —
   plus 3 tests pinning the *crossing* between fact identity and
-  `computeStructuredClaimFingerprint`, decided in ADR-0005), and
-  `test/protocol/reflect-auto-fact-identity.test.ts` (4 tests: the autonomous path
+  `computeStructuredClaimFingerprint`, decided in ADR-0005),
+  `test/layer1/demotion-durability.test.ts` (12 tests: the §1e demotion is recorded
+  in canonical version records and reconstructed by a compile-path row sync and a
+  full canonical replay, live and replayed projections agreeing on the
+  recall-eligible set, including through every flow that hand-builds a version
+  record — REVISE, FORGET → REVIVE, the endorsement cascade, consolidation's input
+  tombstones, scope offboarding, retention expiry), and
+  `test/protocol/reflect-auto-fact-identity.test.ts` (5 tests: the autonomous path
   consults fact identity before creating — corroboration instead of a duplicate,
-  protection respected, the fingerprint control, and creation unchanged when no
-  claim holds the fact).
+  protection respected, the fingerprint control, creation unchanged when no
+  claim holds the fact, and a fingerprint match on a **demoted** duplicate routed
+  to the surviving claim rather than extended onto the hidden duplicate).
 - `npm run verify:saas` — public-API smoke on the packaged surface, including the
   §1e duplicate contract end to end: 2 recall results for one fact → 1 after
   resolution, duplicate superseded with its evidence unioned.
@@ -566,6 +586,20 @@ on the exact version you ship:
   `(subject, predicate, scope, object value)` — two rows asserting the same fact in
   **different scopes** are never merged, so scope isolation always wins over
   deduplication.
+- Demotion durability has **one** boundary left. A demotion written by a library version before the
+  durability fix was projection-only and is not reconstructible from canonical data. From that fix
+  on, the demotion lives in the demoted claim's own version records and **every** flow carries it
+  forward — user `REVISE` (which reports `superseded_by` on its result, because it changes metadata
+  and not the asserted fact), the `FORGET` tombstone, `REVIVE`'s restore from the snapshot, the
+  endorsement cascade, consolidation's input tombstones, scope offboarding and retention expiry. So
+  a claim demoted as a duplicate stays out of the recall-eligible set through all of them, including
+  a later `REVIVE`. **Releasing** a mechanical demotion needs a new, explicitly user-only vocabulary
+  ("re-pick the survivor" — the loser cannot win, because the next write touching that fact would
+  re-demote it); until it ships, a demoted duplicate also stays demoted if the survivor is itself
+  forgotten, and the fact is then audit-visible only. Reasoning:
+  [`ADR-0003`](../adr/0003-claim-fact-identity.md) → *Carry-forward across hand-built version
+  records*. Pinned by `test/layer1/demotion-durability.test.ts` plus the FORGET.SCOPE and retention
+  suites.
 - Passing schemas + behavioral invariants is **not** exhaustive
   requirement-by-requirement conformance to Specification v1.6.16.
 

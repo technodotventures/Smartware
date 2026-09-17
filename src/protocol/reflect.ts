@@ -169,6 +169,14 @@ export interface FactIdentityDecision {
    * auditable. It is NOT a candidate: no admission path for claim classification exists in beta.
    */
   extraction_claim_type?: ClaimType;
+  /**
+   * The demoted duplicate the fingerprint (creation-key) lookup matched, when the observation was
+   * instead routed by fact identity to this claim (ADR-0005 F1b, kanban `t_6c39a895`). A demoted
+   * duplicate can still hold the fingerprint — the demotion lives in `superseded_by`, not in
+   * `state` — and it must not receive fresh corroboration the recall surface can never show.
+   * Names the matched claim so the routing decision is auditable rather than silent.
+   */
+  fingerprint_matched_demoted?: string;
 }
 
 /** Content-free replay checkpoint for one observation considered by REFLECT. */
@@ -409,6 +417,8 @@ export async function produceObservationClaims(
         sensitive: sensitive || existingClaim?.sensitive === true || existingHint?.sensitive === true,
       });
       if (existing.derived_from.includes(obs.id)) return;
+      // The spread carries the substrate's demotion fields (ADR-0003): folding a restatement into
+      // an existing claim must not release a duplicate resolution.
       const extended: ActiveClaimVersion = {
         ...existing,
         version: existing.version + 1,
@@ -426,7 +436,13 @@ export async function produceObservationClaims(
       ? ctx.fingerprintIndex.activeByFingerprint(fp)
       : findByFingerprint(ctx.dataDir, fp)
         ?? findSemanticMatch(ctx.dataDir, ctx.store, fp);
-    if (existingByFp) {
+    // A demoted duplicate can still hold the fingerprint (the demotion lives in `superseded_by`,
+    // not in the record's `state` — F2/ADR-0003). It must not be extended with fresh evidence:
+    // the recall surface can never show it, so the corroboration belongs to the fact's surviving
+    // claim, decided by fact identity below (ADR-0005 F1b, kanban `t_6c39a895`). Falling through
+    // keeps the creation key's job anyway — the fact-identity block never mints.
+    const fpMatchIsDemoted = existingByFp ? isDemotedDuplicate(ctx, existingByFp) : false;
+    if (existingByFp && !fpMatchIsDemoted) {
       if (existingByFp.epistemic_owner === 'user') continue;
       attachCorroboration(existingByFp);
       continue;
@@ -443,14 +459,17 @@ export async function produceObservationClaims(
     const factMatch = findFactIdentityMatch(ctx, obs.scope, claim, entityInfo.type);
     if (factMatch) {
       const latest = latestActiveVersion(ctx, factMatch.id);
+      const demotedFpNote = fpMatchIsDemoted && existingByFp
+        ? { fingerprint_matched_demoted: existingByFp.claim_id }
+        : {};
       if (factMatch.epistemic_owner === 'user' || latest?.epistemic_owner === 'user') {
         // Protected: agents append no version of it — no corroboration, and no duplicate
         // either (the fact is held; spec §9/§11). Recorded so the decision is auditable.
-        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'protected' });
+        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'protected', ...demotedFpNote });
       } else if (!latest) {
         // The store row says active, the canonical record does not. The record is the
         // authority: extend nothing, and mint nothing for a fact the store holds.
-        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'no_active_record' });
+        factIdentity.push({ claim_id: factMatch.id, decision: 'skipped', reason: 'no_active_record', ...demotedFpNote });
       } else {
         attachCorroboration(latest);
         factIdentity.push({
@@ -459,8 +478,21 @@ export async function produceObservationClaims(
           // Variant 1 consequence, made auditable: the extraction's classification is not
           // applied (the held claim's stands) and is not silently dropped either.
           ...(latest.claim_type !== claimType ? { extraction_claim_type: claimType } : {}),
+          ...demotedFpNote,
         });
       }
+      continue;
+    }
+
+    // ── F1b fallback (ADR-0005 amendment of 2026-09-15, kanban `t_6c39a895`): the fingerprint
+    // matched a demoted duplicate and NO active claim asserts the fact (the survivor was
+    // forgotten or erased, or subject resolution finds nothing). The creation key still
+    // suppresses a duplicate creation — extend the matched claim, as before the amendment:
+    // the evidence is preserved on the claim the store holds, the version spread carries the
+    // demotion forward (nothing releases it), and no third claim is minted for a fact whose
+    // exact creation already happened.
+    if (existingByFp && fpMatchIsDemoted) {
+      if (existingByFp.epistemic_owner !== 'user') attachCorroboration(existingByFp);
       continue;
     }
 
@@ -976,6 +1008,20 @@ function latestActiveVersion(ctx: ProduceObservationContext, claimId: string): A
     ? ctx.fingerprintIndex.activeByClaimId(claimId)
     : readLatestVersion(ctx.dataDir, claimId);
   return latest?.state === 'active' ? latest : null;
+}
+
+/**
+ * Is this canonical version a mechanically demoted duplicate? `resolveFactMatches` records the
+ * demotion on the demoted claim's own version records (`superseded_by` + `superseded_at`, F2 /
+ * ADR-0003 → *Carry-forward across hand-built version records*) and every materialisation derives
+ * the row from those records — so the record is the authority. The store row is consulted as
+ * well, so a tree without the F2 fix — where the demotion is projection-only and the record
+ * lacks the field — still routes fresh corroboration away from a claim the recall surface hides.
+ */
+function isDemotedDuplicate(ctx: ProduceObservationContext, version: ActiveClaimVersion): boolean {
+  if (version.superseded_by != null) return true;
+  const row = ctx.store.getClaim(version.claim_id);
+  return row?.superseded_by != null || row?.status === 'superseded';
 }
 
 function findByFingerprint(dataDir: string, fp: string): ActiveClaimVersion | null {
