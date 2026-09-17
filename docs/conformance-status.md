@@ -36,6 +36,31 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-17 on Node v26.5.1 for **the remaining `personal` literals outside the four writer
+sites** (`wip/tech-head/remaining-personal-literals`, kanban `t_574be8cd`, stacked on the
+consent-change lane `658c3cb`; carded out of `t_e6fce49a`): **81 files / 559 tests**, **32 schema
+files** (v0.4.2, v0.5.0, v0.5.1). The delta over the entry below is 4 files / 11 tests, all pins:
+`test/layer1/scope-half-life.test.ts` (4), `test/protocol/session-summariser-lane.test.ts` (3),
+`test/conformance/scope-example-vocabulary.test.ts` (2), `test/storage/data-dir-layout.test.ts` (2).
+Four items, one commit each: (1) `src/layer1/confidence.ts`'s half-life table was keyed on the
+pre-rename spellings, so **neither** declared staleness override reached the lane the `$defs/Scope`
+vocabulary names — measured by reading the applied half-life back out of the shipped
+`computeConfidence`, `self` decayed at 90 d while `personal` carried the declared 365 d, and
+`project:foo` at 90 d while `project/foo` carried 30 d; the table is now vocabulary-keyed, which moves
+canonical-ish values for `self`/`project:<id>` claims (on a 180-day claim: 0.3475 → 0.41657 and
+0.3475 → 0.31234) — **that item is this lane's owner-gated class**; (2) the session summariser default
+(`session.ts`) handed a host callback the literal `personal` for a session with `requested_scopes: []`
+— driven, and it now names the registered pod lane `self`; (3) the OBSERVE tool-description example
+read `(e.g. personal, project/foo)` — both off-vocabulary — and now reads
+`self, project:foo, client:acme#1`, pinned by a scan that validates every scope example in every tool
+description under `src/` against `$defs/Scope`; (4) init created `wiki/personal|workspace|project`,
+which appear in no normative layout and which nothing in `src/` reads or writes — init now creates the
+wiki root only, and the pin shows a compiled page still lands under `wiki/<category>/` with its
+`_index.md`. `forget_scope.ts`'s legacy-registry fallback is left exactly as written (card
+instruction); `reflect.ts`'s no-scope sentinel is carded separately (`t_27c73d58`). No published
+schema byte and no `SHA256SUMS` line moved (v0.5.0 `8d47a427…`, v0.5.1 `a7c3095d…`). A/B: the four pin
+files byte-identical at `658c3cb` → 8 failed | 3 passed; the same files at the fix → 11/11.
+
 Verified 2026-09-16 on Node v26.5.1 for **the lane the reference implementation's own consent-change
 records are written in** (`wip/neo/consent-change-scope`, kanban `t_e6fce49a`, stacked on the
 L0-record-schema lane `e0241d4`; carded out of `t_f1157ed4`'s writer sweep): **77 files / 548 tests**,
@@ -53,8 +78,10 @@ scopes, grants never read a record's `scope`, and both fallbacks are unreachable
 refused before any lane resolves). No published schema byte and no `SHA256SUMS` line moved (v0.5.0
 `8d47a427…`, v0.5.1 `a7c3095d…`). Pre-fix records keep the `personal` spelling — L0 is append-only.
 Adjacent `personal` literals (`reflect.ts`'s no-scope sentinel, `session.ts`'s summarizer default,
-`confidence.ts`'s half-life key, the OBSERVE tool-description example) are measured and carded, not
-fixed here.
+`confidence.ts`'s half-life key, the OBSERVE tool-description example) are measured and carded here;
+the summariser default, the half-life key, the description example and the vestigial `wiki/<lane>`
+directories are decided and pinned in the entry above (kanban `t_574be8cd`), while `reflect.ts`'s
+no-scope sentinel is carded separately (`t_27c73d58`).
 
 Verified 2026-09-16 on Node v26.5.1 for **the published L0 evidence record schema and the export
 manifest's schema label** (`wip/smarty/l0-record-schema`, kanban `t_f1157ed4`, ADR-0013 → *Delta
