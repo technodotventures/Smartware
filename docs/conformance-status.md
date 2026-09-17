@@ -151,7 +151,8 @@ lane carries the row. Pin `test/protocol/replay-catchup-lane-sync.test.ts` (RED 
 final content: **5 failed | 0 passed** → GREEN **5/5**). The two settled arms are unchanged by this fix
 — arm 1's kept-row counters and arm 3's demotion mechanism are identical pre/post (re-run either way),
 and arm 2's live leg now serves the replacement claim its catch-up admitted, which is the point; its
-remaining live-vs-fresh difference on this base is the unmerged demotion resurrection above, not the
+remaining live-vs-fresh difference on this base is the demotion resurrection above (`e5f093e`/`3ae8a6b`:
+contained in the local-only `integration/v0.8.0` today, not on this branch's base), not the
 catch-up. The repair lives in the **handlers**, so both dispatcher surfaces inherit it (`SmartwareCore`
 wrappers and `src/index.ts`'s MCP tools); `src/index.ts`'s *verb-level* repairs (e.g. `smartware_correct`
 still does no lane work of its own) are a separate gap, carded. Gate: **562 tests across 79 files**,

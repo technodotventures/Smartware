@@ -31,11 +31,12 @@
 //   replaces the shared lane.
 //
 // ARM 4 — a mid-session replayCatchUp materialises claim rows and touches no
-//   lane (kanban t_a6bf30a8). `replayCatchUp` runs INSIDE three verbs — FORGET
-//   (forget.ts:383), retention expiry (retention.ts:224, when something expired)
-//   and quarantine review (quarantine_review.ts:121) — and inside the compile
-//   pipeline (compiler.ts:138). It writes store rows for events this process has
-//   not replayed yet (a legacy/host-written claim_extracted, a correction from
+//   lane (kanban t_a6bf30a8). `replayCatchUp` runs INSIDE five call sites —
+//   four verbs: FORGET (forget.ts:383), retention expiry (retention.ts:224,
+//   when something expired), quarantine review (quarantine_review.ts:121) and
+//   CORRECT (_correct_legacy.ts) — plus the compile pipeline (compiler.ts:138).
+//   It writes store rows for events this process has not replayed yet (a
+//   legacy/host-written claim_extracted, a correction from
 //   another writer, another writer's tombstone) and re-syncs nothing: the
 //   claim-FTS lane is rebuilt only by syncSearchFromClaims. Live recall therefore
 //   misses the materialised claim until some re-syncing write happens.
@@ -44,7 +45,9 @@
 //   effect: (a) trigger = FORGET on a decoy observation; (b) trigger = the
 //   retention sweep; (c) trigger = quarantineReview approve; (d) trigger =
 //   COMPILE on scope A while the foreign event asserts into scope B (the compile
-//   path re-syncs options.scope at stage 4.5 only). Measured per case: the store
+//   path re-syncs options.scope at stage 4.5 only); (e) trigger = CORRECT on
+//   scope A while the foreign event asserts into scope B (its core wrapper
+//   re-synced the corrected claim's scope only). Measured per case: the store
 //   row (did the catch-up materialise it?), the lane rows, recall in-process, and
 //   recall after a fresh open of the same brain dir.
 //

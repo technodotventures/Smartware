@@ -1,11 +1,12 @@
 // A mid-session `replayCatchUp` materialises claim rows and touches no lane —
 // kanban t_a6bf30a8 (the class surveyed by t_12c79071).
 //
-// `replayCatchUp` runs INSIDE four call sites: FORGET (`forget.ts`, an
+// `replayCatchUp` runs INSIDE five call sites: FORGET (`forget.ts`, an
 // unconditional catch-up), retention expiry (`retention.ts`, when something
-// expired), quarantine review (`quarantine_review.ts`) and the compile pipeline
-// (`compiler.ts`, stage 3). It writes store rows for events this process has not
-// replayed yet — a legacy/host-written `claim_extracted` (OBSERVE itself rejects
+// expired), quarantine review (`quarantine_review.ts`), CORRECT
+// (`_correct_legacy.ts`) and the compile pipeline (`compiler.ts`, stage 3). It
+// writes store rows for events this process has not replayed yet — a
+// legacy/host-written `claim_extracted` (OBSERVE itself rejects
 // pre-extracted claims, `observe.ts`; this is the retained replay path for
 // logs another writer produced), a `correction` from another writer, another
 // writer's tombstone — and touches no search lane: the claim-FTS lane is rebuilt
@@ -25,7 +26,7 @@
 //
 // RED at the pre-fix revision: in-process recall serves NOTHING for the
 // materialised claim while a fresh open serves it (measured with
-// `scripts/kept-rows-settle-probe.mjs --arm 4`, which measures the same four
+// `scripts/kept-rows-settle-probe.mjs --arm 4`, which measures the same five
 // triggers out of tree).
 //
 // Run with `PROBE_OUT=<path>` to get the raw signatures as JSON lines (vitest
