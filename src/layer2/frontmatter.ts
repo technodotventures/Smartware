@@ -8,7 +8,11 @@
 // reads back unchanged for the page vocabulary (`schemas/v0.5.0/page-frontmatter.schema.json`):
 // scalars, string arrays, and arrays of notice objects of scalar values. Shapes outside that
 // vocabulary are refused at the write boundary (`assertPageVocabulary`) rather than emitted in a
-// form the reader would silently flatten or drop (t_cf744a8e).
+// form the reader would silently flatten or drop (t_cf744a8e). Two refinements from t_5768425d:
+// a string the reader would coerce to another type (`"123"`, `"true"`, `"null"`, the `0x10`/`1e3`/
+// `Infinity` spellings) is written quoted so it reads back as the string it was, and the guard
+// reaches every value position — a mapping nested at any depth, a mixed scalar/object array —
+// rather than only one level into a notice item.
 
 import { toPageCategory } from './paths.js';
 
@@ -35,9 +39,9 @@ export function parseFrontmatter(raw: string): { frontmatter: Record<string, unk
 /**
  * Serialise frontmatter + body back to a full markdown string.
  *
- * Refuses (throws on) a value the minimal reader cannot carry — a nested object anywhere in the
- * page vocabulary's value positions (t_cf744a8e) — instead of writing YAML that flattens or drops
- * it on the next read.
+ * Refuses (throws on) a value the minimal reader cannot carry — a mapping at any value position,
+ * at any depth, and a mixed scalar/object array (t_cf744a8e, t_5768425d) — instead of writing
+ * YAML that flattens or drops it on the next read.
  */
 export function serialiseFrontmatter(frontmatter: Record<string, unknown>, body: string): string {
   assertPageVocabulary(frontmatter);
@@ -58,21 +62,46 @@ function isObjectValue(value: unknown): value is Record<string, unknown> {
  * scalars: `schemas/v0.5.0/page-frontmatter.schema.json` declares no object-valued field and the
  * top level is `additionalProperties: false`. `toYAML` writes an object value as `key:` plus
  * indented lines, and `parseYAML` reads one `key: value` per line with no indentation model, so
- * those lines come back flattened into the *parent* — `{meta: {a: b}}` inside a notice item reads
- * as `{meta: …, a: b}`, and at the top level `a` leaks out as a stray page key. The value is lost,
- * not merely re-shaped (measured on t_cf744a8e). Refuse the write and name the offending field.
+ * an object at a *property position* comes back flattened into the nearest enclosing mapping with
+ * its own key lost — `{meta: {a: b}}` inside a notice item reads as `{meta: …, a: b}`, at the top
+ * level `a` leaks out as a stray page key, and inside a nested array both levels of keys are
+ * pulled up (`notices[0].links[0].meta` loses `meta`). The value is lost, not merely re-shaped
+ * (measured on t_cf744a8e; the deeper positions on t_5768425d). The walk below reaches every
+ * value position: refuse the write and name the offending field path.
  */
 function assertPageVocabulary(frontmatter: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(frontmatter)) {
     if (isObjectValue(value)) rejectNestedObject(key);
-    if (!Array.isArray(value)) continue;
-    value.forEach((item, index) => {
-      if (!isObjectValue(item)) return;
-      for (const [itemKey, itemValue] of Object.entries(item)) {
-        if (isObjectValue(itemValue)) rejectNestedObject(`${key}[${index}].${itemKey}`);
-      }
-    });
+    if (Array.isArray(value)) assertArrayCarriable(value, key);
   }
+}
+
+/**
+ * Walk one array the writer is about to emit. `toYAML` picks the array's form from its FIRST item
+ * (`typeof items[0] === 'object'` → block items, else an inline `[a, b]` of `String(item)`
+ * elements), so only a homogeneous array is carriable: all scalars inline, or all objects as
+ * block items. A mixed array is written through `String(item)` — `[a, {b: c}]` becomes
+ * `[a, [object Object]]`, `[{b: c}, a]` becomes `0: a` lines — and never reads back; it is
+ * refused. Each object item's properties are then value positions in their own right: a mapping
+ * there is the flattening case above (`notices[0].links[0].meta`), and an array there recurses —
+ * arrays of objects inside a notice item round-trip (t_5768425d, probe rows C2ctl1–C2ctl2).
+ *
+ * Left as-is, deliberately: an array of *arrays* (a nested sequence) is the out-of-vocabulary
+ * shape documented by t_cf744a8e — no page field admits one, it is still written through the
+ * block branch as `0: …` lines and still reads back garbled (`[["x", "y"]]` →
+ * `[{0: "x", 1: "y"}]`, measured as t_5768425d probe row C2g); it is not refused, keeping the
+ * pre-existing behaviour for that shape.
+ */
+function assertArrayCarriable(items: unknown[], path: string): void {
+  const objectItems = items.filter(isObjectValue);
+  if (objectItems.length === 0) return;
+  if (objectItems.length !== items.length) rejectMixedArray(path);
+  items.forEach((item, index) => {
+    for (const [itemKey, itemValue] of Object.entries(item as Record<string, unknown>)) {
+      if (isObjectValue(itemValue)) rejectNestedObject(`${path}[${index}].${itemKey}`);
+      if (Array.isArray(itemValue)) assertArrayCarriable(itemValue, `${path}[${index}].${itemKey}`);
+    }
+  });
 }
 
 function rejectNestedObject(field: string): never {
@@ -80,6 +109,14 @@ function rejectNestedObject(field: string): never {
     `serialiseFrontmatter: page field "${field}" holds a nested object, which the page YAML `
     + `vocabulary cannot carry (strings, string arrays, and notice objects of scalar values only); `
     + `flatten the value or extend the page contract (schemas/v0.5.0/page-frontmatter.schema.json) first`,
+  );
+}
+
+function rejectMixedArray(field: string): never {
+  throw new Error(
+    `serialiseFrontmatter: page field "${field}" mixes scalar and object items in one array, which `
+    + `the page YAML vocabulary cannot carry (write a string array or an array of objects, not both); `
+    + `split the value or extend the page contract (schemas/v0.5.0/page-frontmatter.schema.json) first`,
   );
 }
 
@@ -157,10 +194,35 @@ function yamlString(s: string): string {
   // The empty scalar is written `""`: `key: ` (or an empty array element) would read back as a
   // dropped key / YAML null instead of the empty string it was (t_cf744a8e).
   if (s === '') return '""';
-  if (/[:\[\]{},&*#?|<>=!%@`'"]/.test(s) || s.includes('\n') || s.startsWith(' ') || s.endsWith(' ')) {
+  // A string the reader's coercion would turn into another type is quoted too: written bare,
+  // `summary: "123"` read back as the number 123 and the page failed its own contract after a
+  // write it made itself (`/summary:type`; t_5768425d). `isCoercedScalar` is the reader's own
+  // predicate, so the two halves cannot drift.
+  if (isCoercedScalar(s) || /[:\[\]{},&*#?|<>=!%@`'\"]/.test(s) || s.includes('\n') || s.startsWith(' ') || s.endsWith(' ')) {
     return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
   return s;
+}
+
+/**
+ * The scalar spellings `readBareScalar` reads as a non-string value: `true`/`false`/`null`, or
+ * anything `Number` accepts (`123`, `1.50`, `0x10`, `1e3`, `Infinity`, `007`, `.5`, `5.`, …).
+ * Shared by the reader (which coerces them) and the writer (which quotes them, so a string that
+ * only looks like one of them reads back as the string it was) — one predicate, no drift
+ * (t_5768425d).
+ */
+function isCoercedScalar(raw: string): boolean {
+  return raw === 'true' || raw === 'false' || raw === 'null'
+    || (raw !== '' && !isNaN(Number(raw)));
+}
+
+/** Read one scalar with the type the coercion above implies. */
+function readBareScalar(raw: string): unknown {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === 'null') return null;
+  if (isCoercedScalar(raw)) return Number(raw);
+  return unquote(raw);
 }
 
 /** Minimal YAML parser — handles our specific frontmatter schema */
@@ -210,16 +272,8 @@ function parseYAML(yaml: string): Record<string, unknown> {
       // to the element (t_cf744a8e: `["alpha, beta"]` used to split into two malformed values).
       const inner = rest.slice(1, -1).trim();
       result[key] = inner === '' ? [] : splitInlineArray(inner);
-    } else if (rest === 'true') {
-      result[key] = true;
-    } else if (rest === 'false') {
-      result[key] = false;
-    } else if (rest === 'null') {
-      result[key] = null;
-    } else if (!isNaN(Number(rest)) && rest !== '') {
-      result[key] = Number(rest);
     } else {
-      result[key] = unquote(rest);
+      result[key] = readBareScalar(rest);
     }
     i++;
   }
