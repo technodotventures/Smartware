@@ -2,7 +2,7 @@
   "$id": "https://smartware.dev/schemas/v0.5.0/claim.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Claim Version",
-  "description": "One L1 claim version — one record on the canonical L1 JSONL surface (spec §5 'L1 — Claim Store'): \"L1 is a canonical, append-only JSONL store. Each line is a claim version.\" The field set below is the spec §6 claim version plus the record-envelope fields the reference implementation carries: the forget-specific fields, the demotion/release warrants, and the optional extraction materialization block (`semantic`). The required field set applies to all versions (active and forgotten). Forgotten versions inherit non-content metadata from the prior active version; the content field is only required when state is active. Forgotten versions add additional required fields per the if/then below.",
+  "description": "One L1 claim version — one record on the canonical L1 JSONL surface (spec §5 'L1 — Claim Store'): \"L1 is a canonical, append-only JSONL store. Each line is a claim version.\" The field set below is the spec §6 claim version plus the record-envelope fields the reference implementation carries: the forget-specific fields, the demotion/release warrants, and the optional extraction materialization block (`semantic`). The required field set applies to all versions (active and forgotten). Forgotten versions inherit non-content metadata from the prior active version; the content field is only required when state is active. Forgotten versions add the forget-specific fields per the if/then below, and `supersedes` follows the version rule (required of every version > 1 in any state, absent on a version-1 record).",
   "type": "object",
   "required": [
     "claim_id",
@@ -109,7 +109,7 @@
     "supersedes": {
       "type": "integer",
       "minimum": 1,
-      "description": "Prior version number this one supersedes. Required for version > 1."
+      "description": "Prior version number this version supersedes. Required for version > 1, in every state; not required on a version-1 record, which replaces nothing — including a version-1 forgotten record (a claim can be born forgotten on the legacy/migration and replay paths)."
     },
     "tombstone_id": {
       "$ref": "common.schema.json#/$defs/TombstoneId",
@@ -383,10 +383,9 @@
         "required": [
           "tombstone_id",
           "forgotten_at",
-          "forgotten_by",
-          "supersedes"
+          "forgotten_by"
         ],
-        "description": "Forgotten versions add forget-specific fields; the core required field set above still applies (metadata is inherited from prior active version)."
+        "description": "Forgotten versions add the forget-specific fields; the core required field set above still applies (non-content metadata is inherited from the prior active version). `supersedes` is deliberately NOT required here: a claim can be born forgotten — a legacy/migration row, or the retraction of a claim that has no canonical version of its own — and such a version-1 record names no prior version. The field remains required of every version > 1, in every state, through the third branch below (spec §6 lists it as 'when present'; this schema's own property description says 'Required for version > 1')."
       }
     },
     {

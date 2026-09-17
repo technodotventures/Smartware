@@ -35,192 +35,24 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-17 on Node v26.5.1 for **the page YAML serialiser's remaining write-boundary
-losses** (`wip/neo/frontmatter-write-residuals @ 4a30730`, stacked on the still-unmerged
-`wip/neo/frontmatter-coercion-depth @ c740511`; kanban `t_0e19036e` — a writer + guard change in
-one file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **572 tests across 80
-files**, 31 schema files. The delta over the entry below is 7 tests in one new file
-(`test/layer2/l2-frontmatter-write-residuals.test.ts`; one stale clause in the sibling pin's
-header comment is corrected to match). The independent VERIFY `t_5708fed6` (§4) measured six
-shapes still below this boundary — all pre-existing, identical on both arms it tested — and each
-is decided here, the guard now refusing every shape the writer cannot carry back and supporting
-the one it can:
-
-- a non-string scalar as an **array element** (`meta: [1, 2]`, `['b', true]`, `['a', null]`) was
-  written through `String(item)` and read back as a string, and a null *first* item additionally
-  raised a raw `TypeError: Cannot convert undefined or null to object` with no field name.
-  REFUSED, naming `path[index]` (`page field "meta[0]" holds a number, …`).
-- an **array as an array element** (`['b', []], ['b', ['x']]`, and the pure nested sequence
-  `[['x']]`) was mangled (`String([])` → `''`; `Object.entries` → `0: …` lines) and never read
-  back. REFUSED too — this **supersedes the nested-sequence half of the entry below's "remaining
-  limits"**, where it is still written and garbled: the shape is contract-legal only at
-  undeclared notice-item keys, which is exactly the class the guard refuses rather than flattens
-  (the C2 reasoning of `t_5768425d`). The `|-`/`|+`/`>` half of that sentence still stands and
-  stays with `t_6fc254cd`.
-- an **empty object item** (`notices: [{}]`) degraded to `''`. REFUSED, naming the item.
-- a **multi-line string as an array element** (`aliases: ['a\nb']`) is contract-legal
-  (`aliases.items` is a plain string) and was silently destroyed — the writer quoted the element
-  across lines and the whole array read back as one string. **SUPPORTED**: the writer now emits
-  the block form (the `- <str>` item form, and the `- |` block form for multi-line elements) that
-  the reader has decoded since `t_cf744a8e`'s shape 6, and a hand-authored block-array page is no
-  longer corrupted on re-serialise.
-
-Non-tautological: the pin file (sha256
-`8190c7821dc57e0f734789efe2c5f2942f0585a835a9f9682afaa13980c167b2`) is **5 failed | 2 passed (7)**
-in a worktree at `c740511` with the fix absent (the 5 feature pins fail; the 2 controls pass on
-both arms) and **7 passed (7)** on the fix; the independent probe's 5569 rows move exactly 208 —
-51 `LOSS → PASS` (every one a `S2.aliases_elem` newline string) and 157 `STATUS_MOVED_OTHER` (81
-`LOSS_UNEXPLAINED`, 36 `LOSS_nested_sequence`, 19 `LOSS_empty_object_item`, 8
-`LOSS_scalar_array_type_change`, 8 `MEASURED_LOSS`, 5 `THREW_UNNAMED` → `GUARDED`, every one
-naming a concrete path) — with **0 REGRESSIONS, 0 rows whose read-back moved without a status
-move, 0 OVER_REFUSED** (every must-work control still round-trips and validates) and the
-compile/endorse re-serialise path clean (the reader cannot produce a refused shape; 6/6
-`R.reserialise` rows CLEAN). A byte-level re-run of the same corpus shows emitted frontmatter
-byte-identical on 5256 rows; every byte change is on a row whose status moved, plus one row
-(`'a\n \nb'`) whose status was and stays LOSS. Remaining at this tip: that string loses the space
-on its whitespace-only line at four positions — pre-existing reader behaviour (`readBlockScalar`,
-identical on both arms; the C4 half of `t_6fc254cd`, not in this ancestry) — and `tags: ['123']`
-still fails the published `Tag` pattern (a contract refusal, not a serialiser defect). Gate:
-`npm run build` exit 0; focused `test/layer2` **5 files / 33 tests**; full suite **80 files / 572
-tests exit 0** (151 s); `verify:schemas` 31 files OK; `verify:saas` `SMOKE_OUTCOME=pass`;
-`npm audit --omit=dev` 0 vulnerabilities. Not run: `npm ci` (shared `node_modules` symlink policy
-— CI runs it on Node 22/24).
-
-Verified 2026-09-17 on Node v26.5.1 for **the page YAML serialiser's coerced scalars and the
-guard's value positions** (`wip/neo/frontmatter-coercion-depth @ 7ef9ab0`, stacked on the
-still-unmerged `wip/neo/frontmatter-lossy-shapes @ b10c77c`; kanban `t_5768425d` — a writer +
-guard change in one file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **565
-tests across 79 files**, 31 schema files. The delta over the entry below is 15 tests in two new
-files — this lane's 7 in `test/layer2/l2-frontmatter-coercion-depth.test.ts` and the t_cf744a8e
-lane's 8 in `test/layer2/l2-frontmatter-lossy-shapes.test.ts`. Two shapes a contract-legal page
-could still hit were measured lossy at `b10c77c` by the independent VERIFY `t_3e511c55` (rows
-A3a–A3d and A2b, its §8 "two shapes the decision does not enumerate") and fixed here:
-
-- a numeric/boolean/null-looking **string** at a bare `type: string` (`summary: "123"`, `"1.50"`,
-  `"true"`, `"null"`, the `0x10`/`1e3`/`Infinity`/`007`/`.5`/`5.` spellings) was written unquoted
-  and read back as another type, so the page failed its own published contract (`/summary:type`)
-  after a write it made itself. Fixed: the writer quotes any spelling the reader's coercion would
-  change; `isCoercedScalar` is shared by reader and writer so the two cannot drift. A
-  hand-authored bare `summary: 123` is still read as a number — the contract reports it loudly.
-- a **nested object deeper than one level inside a notice item**
-  (`notices[0].links = [{url, meta: {a: 'b'}}]`) was neither refused nor preserved (the reader
-  flattens `meta` into the links item). Fixed: `assertPageVocabulary` walks every value position —
-  an object at any *property* position, at any depth, is refused naming the path (`page field
-  "notices[0].links[0].meta"`), and a mixed scalar/object array (previously written through
-  `String(item)` as `[object Object]` / `0: a` lines) is refused too. Note for integrators: the
-  refused C2 input is **contract-legal** per the published schema (notice items carry no
-  `additionalProperties: false`), so this guard is deliberately **stricter than the published
-  contract** at undeclared item keys — where the contract allows a key the minimal serialiser
-  cannot carry, the honest failure is a loud refusal, not silent flattening.
-
-Non-tautological: the 4 feature pins fail 4/4 on `b10c77c` (`Test Files 1 failed | 3 passed (4)`,
-`Tests 4 failed | 22 passed (26)` — the 3 pre-existing layer2 files pass) and pass 4/4 on the fix;
-the lane's probe goes 24 SILENT_LOSS → 0 (final 31 PASS / 7 GUARDED / 1 MEASURED), and the
-reviewer's own probe re-run against the fix build flips exactly A3a–A3d (→ PASS) and A2b (→
-GUARDED) with no other row moved. Gate: `npm run build` exit 0; focused `test/layer2` 4 files / 26
-tests; full suite 79 files / 565 tests exit 0 (130.97 s); `verify:schemas` 31 files OK;
-`verify:saas` `SMOKE_OUTCOME=pass`; `npm audit --omit=dev` 0 vulnerabilities. Not run: `npm ci`
-(shared `node_modules` symlink policy — CI runs it on Node 22/24). Remaining limits of the same
-serialiser, pre-existing and carded onward (`t_6fc254cd`): a nested **sequence** item (`[["x"]]`)
-is still written as `0: …` lines and garbled on read, and the `|-`/`|+`/`>` block styles are
-still not read; both are recorded in the code comment on the fix.
-
-Verified 2026-09-17 on Node v26.5.1 for **the L2 page `notices` array through the hand-rolled page YAML
-serialiser** (`fix/tech-head/notices-frontmatter-roundtrip`, stacked on the still-unmerged
-`wip/tech-head/l2-page-frontmatter-schema @ 5a1c58c`; kanban `t_4d84ff6b` — a writer + reader fix in one
-file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **550 tests across 77 files**, 31
-schema files. The delta over the entry below is 6 tests in one new file,
-`test/layer2/l2-notices-frontmatter-roundtrip.test.ts`. Spec §9 / `page-frontmatter.schema.json` declare
-`notices` as an array of objects (the slot a *user-authored* page carries its notice in); the serialiser
-emitted that branch with the item's indent left inside the dash line (`-     type: staleness`, the
-continuation keys at a *shallower* column) and the parser read every dash line as a **string**, so
-`parse(serialise(fm))` returned `notices: ["type: staleness"]` and pushed `message`/`posted_at` out as
-stray top-level keys — which the frozen contract rejects on `additionalProperties: false`. Measured by the
-`t_8d6f4a5c` reviewer at `5a1c58c` (5/7 probe checks); the fix makes the writer emit standard block YAML
-(`- key: value`, continuation keys at the item's content column) **and** the reader decode mapping items,
-including the mis-indented bytes the old writer left on disk, so a page already written by the broken
-writer is recovered on read and converges on its next write. Non-tautological: the pin fails 6/6 on
-`5a1c58c` (`Test Files 1 failed (1) | Tests 6 failed (6)`) and passes 6/6 on the fix; the last test drives
-compile → ENDORSE → notice attached to the user's own page → **recompile** through the real compiler and
-asserts the notice survives with an empty Ajv error list. Gate: `npm run build` exit 0;
-`test/layer2` + `f_l2_voice_protection` + `g_endorsement` 4 files / 24 tests; full suite 77 files / 550
-tests exit 0 (82.06 s); `verify:schemas` 31 files OK; `verify:saas` pass; `npm audit --omit=dev` 0
-vulnerabilities. Not run: `npm ci` (the worktree symlinks the shared `node_modules`, so a reinstall would
-hit every sibling lane — CI runs it on Node 22/24). **This entry also corrects the entry below** on one
-clause: it states a user page's `notices` is preserved verbatim through a rewrite — the frontmatter field
-was carried by both writers, but the serialiser corrupted it on the way to disk. Measured after the fix,
-four neighbouring shapes of the same minimal serialiser still degrade (a multi-line string anywhere, a
-nested object inside a notice item, a single inline-array element containing a comma) — all pre-existing,
-all latent (no in-tree verb writes one), none in this card's scope, carded as `t_cf744a8e`. No published
-schema byte, `SHA256SUMS` line, or spec/protocol text moves with this change.
-
-Verified 2026-09-16 on Node v26.5.1 for **the compiled L2 page frontmatter against
-`page-frontmatter.schema.json`** (`wip/tech-head/l2-page-frontmatter-schema`, stacked on the ADR-0013 lane
-`wip/smarty/canonical-schema-boundary @ 6ed7a93`; kanban `t_8d6f4a5c`, ADR-0013 → D2 — a **writer** fix, so
-**no published schema byte moves**, `SHA256SUMS` unchanged): **544 tests across 76 files**, 31 schema
-files. The delta over the entry below is 3 tests, all in `test/layer2/l2-page-frontmatter-boundary.test.ts`,
-whose assertions **inverted**: the compiled page's raw frontmatter now validates with an **empty** error
-list where it previously rejected with exactly 19 (`required` ×2 — `created`, `epistemic_tag`;
-`additionalProperties` ×12; `/category:enum`, `/sources/0:pattern`, `/updated:format`,
-`/confidence:type`, `/confidence:enum`), and the same file now also pins the **endorsed** page (ENDORSE is
-a second writer of this artifact), the voice-protected surface across a recompile of an endorsed page
-(prose, locked `sources`, `created`, endorsement metadata — driven through the real compiler), and the
-pre-fix read path. The writer emits spec §9's field set verbatim;
-the compile envelope (`entity_id`, `entity`, `type`, `sensitive`, `compiled_at`, `compiled_by`, `model`,
-`supersedes`, `related`, and ENDORSE's recovery metadata) renders into the page's derived **Evidence
-Timeline** region as a `smartware-envelope` block instead of into the frozen contract, and READ derives
-sensitivity from L1 and resolves entity → page from the L1 entity record rather than from removed
-frontmatter. A/B with one probe over both revisions: 19 errors at `6ed7a93` → 0 errors at the fix, and the
-old pin passes at `6ed7a93` (2/2) while failing loudly at the fix (1 failed | 1 passed) — the inverted pin
-is not tautological. Pages already on disk are read through the compatibility accessor
-(`src/layer2/envelope.js`) and upgraded deterministically in place on their next compile or endorsement;
-no user prose, locked `sources`, `created`, or user `tags`/`aliases`/`notices` is rewritten. Not covered:
-the page `scope` value is the substrate's own string, so a page in a scope outside the v0.5.0 `Scope`
-pattern stays an ADR-0015 boundary rather than a page-vocabulary claim. Fixtures in
-`f_l2_voice_protection`, `g_endorsement` and `demotion-durability` moved to the published vocabulary;
-`e2e/smoke` and `protocol/query` assert the published fields. No other suite changed.
-
-Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
-evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
-`t_0920aa1d`, ADR-0013 — schema/contract accuracy plus a disclosed boundary; **no published schema byte
-moves**, `SHA256SUMS` unchanged): **541 tests across 76 files** (540 passed; the single failure is
-`mcp_smoke`'s 10 s stdio-transport hook under a load average of 23–27 with five sibling lanes running
-vitest — re-run alone on the same tree: 4/4 pass, exit 0), 31 schema files. The delta over the entry below is 4
-tests in two new files — `test/layer0/l0-record-wire-boundary.test.ts` (2) and
-`test/layer2/l2-page-frontmatter-boundary.test.ts` (2) — which pin, for the first time, which schema
-belongs to which artifact: no `src/` file referenced either schema, and no normative text assigned one
-to a surface (the contract prints the OBSERVE payload in prose without naming `observation.schema.json`,
-and mentions `page-frontmatter` only in its Scope-vocabulary list). Measured on the
-protocol-native flow (`observe → reflect → compile → exportScope`, raw bytes + Ajv 2020):
-`observation.schema.json` accepts the contract's OBSERVE payload plus the stamped identity and rejects
-the on-disk **record envelope** by construction (4 `required`, 9 `additionalProperties`,
-`/source:type` — the record's nested `source`, `status`, `visibility`, `version`, `policy` and
-`integrity` chain have no place in a closed wire schema), **including the byte-identical copies
-`EXPORT.SCOPE` ships in `observations.jsonl`/`evidence.jsonl` while its manifest declares
-`"schemas": "v0.5.0"`**; `page-frontmatter.schema.json` accepts the spec §9 projection of the frontmatter
-the compiler itself writes and rejects the raw form with 19 errors (2 `required`, 12
-`additionalProperties`, `category` enum, `sources/0` pattern, `updated` format, `confidence`
-type+enum), so there the writer is the side that is wrong. Both divergences are **disclosed** in
-`schemas/v0.5.0/README.md` → *Which schema covers which surface*, not silently relaxed; the two fixes
-(the L2 page writer, and a published record schema plus an honest export-manifest label) are carded with
-their measured evidence (`t_8d6f4a5c`, `t_f1157ed4`). No other suite changed.
-
-Verified 2026-09-15 on Node v26.5.1 for the **substrate ActorId and the host-lane scope disclosure**
-(`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0015 — a writer-identity fix plus a stated
-conformance boundary; no schema byte moves, `SHA256SUMS` unchanged): **537 tests across 74 files**, 31
-schema files. The delta over the entry below is 5 tests — a new `test/layer1/pod-profile-conformance.test.ts`
-(4: the pod-profile record's complete Ajv error list is exactly `["/scope:pattern"]` with a conformant
-actor id equal across claims and operations-log entries, the protocol-native control record's list is
-empty, reflect.auto and dream carry the same `substrateActorId`, and the slug rule for named/ULID
-instances) and one fixture in `test/schemas-v0.5.0.test.ts` (host-lane spellings are not `Scope`
-values) — while `test/semantic-materialization.test.ts` substitutes only the scope now, because the
-actor id it used to substitute is written conformant. One instance now mints exactly one substrate
-identity (`substrate:<slug>`; `smartware_coffee` → `substrate:coffee`), where reflect.auto / the
-compile queue previously wrote `substrate:<ULID>` (uppercase, rejected by the published pattern) and
-`dream` a second spelling. `pod/<pod>/<lane>` scopes are disclosed as **host-registered lanes** outside
-the v0.5.0 `Scope` vocabulary and the schema-conformance claim (see *Remaining limits*). Mutation
-checks: reverting the writer mint fails 4 tests; widening the Scope pattern to admit host lanes fails
-the new closed-vocabulary fixture. No other suite changed.
+Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's `supersedes` and the forgotten
+branch that required it** (`wip/smarty/l1-forgotten-supersedes`, kanban `t_3ba3ee39`, ADR-0014 — one
+`src/` line plus a published-schema relaxation, no wire change): **541 tests across 74 files**, 31
+schema files, `claim.schema.json` the only schema file changed (`SHA256SUMS` regenerated;
+`supersedes` removed from one `required` array, every other property and branch unchanged). The delta
+over the entry below is 9 tests — 8 in the new `test/layer1/claim-record-conformance.test.ts` (every
+state `insertClaim` can write, read as raw JSONL bytes, asserting the complete Ajv error list is empty:
+v1/v2 active, v2 demoted, v1/v2 forgotten, the born-forgotten legacy shape through `backfillTombstones`,
+and the replay tombstone-retirement path) plus one schema-level fixture group in
+`test/schemas-v0.5.0.test.ts` for the forgotten branch. The writer now emits `supersedes: version - 1`
+whenever `version > 1` (it had derived the number and dropped it — measured invalid on the v2 active and
+v2 demoted shapes too, not only the forgotten one the card named), and a version-1 forgotten record no
+longer has to name a prior version that does not exist. LC-04 reconstruction from a backfilled
+tombstone was measured: `valid=false` before, `valid=true` after. Three same-class divergences were
+measured while deciding and stay open (ADR-0014 → *Explicitly not decided here*): `replay.ts`'s
+correction path writes `state: 'active'` for a retracted claim (`t_ef77c695`), replay mints ids the
+published `ClaimId`/`TombstoneId` patterns reject (`t_0b079fbf`), and `insertClaim` drops a
+caller-supplied demotion pointer on the forgotten path (`t_8098b097`). No other suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **claim record's extraction materialization block**
 (`wip/tech-head/claim-record-semantic`, kanban `t_229601e4`, ADR-0011 — schema/contract accuracy, not a
@@ -237,9 +69,7 @@ is optional, not a wire field, and no conformance claim depends on it. Two same-
 measured while deciding this and stay open, carded with their evidence (ADR-0011 → *Known
 divergences*): `insertClaim`'s forgotten path omits `supersedes` that the schema's forgotten branch
 requires (`t_3ba3ee39`), and pod-profile records carry `pod/<pod>/<lane>` scopes and
-`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed` — both halves
-settled in the entry above: the ActorId defect fixed in the writers, the host-lane scope disclosed as
-outside the v0.5.0 `Scope` vocabulary, ADR-0015). No other
+`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed`). No other
 suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
@@ -299,53 +129,6 @@ change touches Layer 1 version records only, not the retrieval kernel or the
 extractor. (CI re-runs the same gate via `npm ci` from `package-lock.json` on Node
 22 and 24, so the two runtime lines are verified by CI rather than by this local
 run.)
-
-Verified 2026-09-17 on Node v26.5.1 for the **claim-FTS lane survey** (kanban `t_12c79071`, lane
-`wip/tech-head/mutation-fts-sync` off `fix/b1-correction-durability` @ `ab9cf2b` — one `src/core.ts`
-change: `revive` re-syncs the claim-FTS index after the mutation, the way `correct` and `consolidate`
-already did and `revise` does on PR #29): **557 tests across 78 files**, `tsc` clean, `verify:schemas`
-31 schema files OK, `verify:saas` `SMOKE_OUTCOME=pass`, **`verify:coffee-gate` 85/85** against the
-packed artifact (`smartware-0.7.0.tgz` sha256
-`c58be3116a44df71eb17175d88e2706722e7297e63356f69b050fe150f2333d2`). What the pass measured: **REVIVE
-is the third verb of the class** the CORRECT and REVISE fixes closed, on **both** FORGET target shapes
-— after forget → a later write in the scope → revive, the live process served **0 rows** while a
-restart and a genuine second process over the same brain served the re-admitted claim (canonical
-`v3 active`; instrument `scripts/mutation-restart-probe.mjs`, three legs, three scenarios). Measured
-**clean** with the mechanism asserted rather than assumed: FORGET alone, retention expiry alone,
-ENDORSE, and QUARANTINE_REVIEW approve (identical served rows; the lanes' deliberately kept rows show
-up only in the counters, `total_found/filtered_out` `1/1` in-process vs `0/0` after a rebuild, and the
-raw observation window needs no reconcile because `searchObservations` re-checks Layer 0 per hit).
-**Retention + revive is clean in a different sense worth not misreading**: every view agrees and none
-serves the re-admitted claim, because `isEffectiveCurrent` keeps a claim out of every read interface
-while none of its source observations is `accepted` — REVIVE restores the record after an
-evidence-tombstone retraction, not retrievability, and does so consistently after a restart too. The
-pin is `test/protocol/claim-mutation-search-sync.test.ts` (RED at `ab9cf2b`: 1 failed | 5 passed, only
-the revive composition → GREEN 6/6).
-
-Settled 2026-09-17 for the **kept-rows settle + async-compile mirror probe** (kanban `t_8779781f`,
-lane `wip/neo/kept-rows-settle` off `wip/tech-head/mutation-fts-sync` @ `8f2f362`; comment/doc-only
-`src/` change — the FORGET keep-rows design comment now states the counter difference it previously
-overclaimed, RECALL's counter fields document their raw-lane semantics, and `docs/retrieval.md`
-carries the same for integrators): the **decision is (a) — keep the rows**. Nothing served is wrong
-(the authorized snapshot filters forgotten claims at query time; the divergence is exactly the kept
-rows — measured `1/1` in-process vs `0/0` fresh); option (b) (drop the rows at FORGET/retention)
-would only move work onto two hot paths, and option (c) (redefine the counters) would hide the
-lane's real state. Probe results, same lane: the async compile worker's incremental mirror
-(`worker.ts:212-217`) is **store-faithful for the claims it hands over** and does not reconcile rows
-it did not touch (a second drain batch changes nothing; `core.compile`'s re-sync does), so the drain
-is not a divergence source; the survey's predicted counters-only shape is **confirmed on a
-demotion-durable base** (cross-check on the unmerged demotion lanes' tip `3ae8a6b`: served ids
-equal, counters `+1`). On this card's base the prediction is falsified in the opposite direction,
-and not by the lane: a replay-admission demotion (`replay.ts:194 → conflicts.ts:123`) is written to
-its own canonical record as `state: 'active'` with no pointer, so the next open's re-materialisation
-(`ClaimStore.setDataDir`) **erases** it — a fresh open serves the demoted claim again (measured
-`false` here, `true` on `e5f093e`/`3ae8a6b`: the unmerged demotion lanes fix this entry point;
-reported to `t_30732060`'s verification record). A second, independent gap measured on both bases is
-routed to `t_a6bf30a8`: a mid-session `replayCatchUp` inside FORGET/retention/quarantineReview
-materialises claims without re-syncing the claim-FTS lane, so live recall misses them until a
-re-syncing write. Gate at `901861e`: **557 tests across 78 files**, `tsc` clean, `verify:schemas` 31
-files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz`
-sha256 `1aeea8ed…8111`), `npm audit` 0 vulnerabilities.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
@@ -472,35 +255,6 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
-- **The L0 evidence record's field shape is not published in v0.5.0.** `observation.schema.json` covers the
-  observation object *on the wire* (the OBSERVE payload plus the stamped identity), not the record the
-  substrate appends to `<data_dir>/evidence/<date>.jsonl` — which carries the same information under
-  different names plus `status`, `visibility`, `version`, `policy` and the `integrity` chain, none of
-  which a closed wire schema can hold. **This includes the copies `EXPORT.SCOPE` ships** in
-  `observations.jsonl` / `evidence.jsonl`, in a package whose manifest declares `"schemas": "v0.5.0"`.
-  An integrator validating raw evidence — or a third-party implementation claiming v0.5.0 — has no
-  published contract for the record until the carded record schema lands (`t_f1157ed4`). Disclosed in
-  `schemas/v0.5.0/README.md` → *Which schema covers which surface*; decided in
-  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md); pinned by
-  `test/layer0/l0-record-wire-boundary.test.ts` (the record envelope, the wire projection validating,
-  the record's exact 14-error rejection, and the export package carrying the same bytes).
-- **The reference implementation's compiled page frontmatter does not yet validate against
-  `page-frontmatter.schema.json`** — 19 Ajv errors (`created`/`epistemic_tag` missing, plural `category`,
-  ISO `updated`, numeric `confidence`, observation ids under `sources`, plus the compile envelope). The
-  schema is the contract for that artifact (spec §9 prints the same field set); the writer fix is carded
-  (`t_8d6f4a5c`), disclosed in the same README section, and pinned by
-  `test/layer2/l2-page-frontmatter-boundary.test.ts`.
-- **Host-registered lanes are outside the v0.5.0 `Scope` vocabulary.** The reference implementation's
-  pod-profile helper registers `pod/<pod>/<lane>` ids — a host's own lanes, and the live Pod product's
-  scope ids — and the published vocabulary admits no host-lane form. A canonical record written in a
-  host lane therefore does not meet this contract's conformance boundary ("schema validity on every
-  canonical write"); hosts that need v0.5.0 schema-conformant records write protocol-native lanes
-  (`self` / `workspace` / `project:<slug>` / `agent:<slug>` / `client:<id>[#n]`). Decided, with the
-  measured evidence and the recommendation to define a host-lane form in a later protocol revision:
-  [ADR-0015](adr/0015-host-registered-lanes-and-the-substrate-actor-id.md). Pinned by
-  `test/schemas-v0.5.0.test.ts` (the vocabulary rejects host lanes) and
-  `test/layer1/pod-profile-conformance.test.ts` (a pod-profile record's only Ajv error is
-  `/scope:pattern`; a protocol-native record's complete error list is empty).
 - Legacy direct calls without an operation ID are outside the recovery
   guarantee.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts

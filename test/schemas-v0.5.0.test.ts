@@ -565,4 +565,66 @@ describe('Smartware v0.5.0 schemas', () => {
       assert.equal(snapshotProperties[field], undefined);
     }
   });
+
+  test('claim.schema.json: a forgotten version names the version it replaces only when there is one', () => {
+    // ADR-0014. The forgotten branch used to require `supersedes` unconditionally, which made a
+    // version-1 forgotten record unrepresentable — but a claim can be *born* forgotten: the legacy /
+    // migration shape (`status: 'retracted'`, no prior canonical line) is what `ClaimStore.insertClaim`
+    // appends on the retraction paths, what `src/layer1/tombstone-backfill.ts` reads, and what LC-04
+    // reconstruction rebuilds from a backfilled tombstone. Measured on kanban t_3ba3ee39: the writer
+    // has no valid value to write there (`supersedes: 0` violates `minimum: 1`), so the branch, not the
+    // writer, was the wrong side. The version rule is untouched: every version > 1 still names its
+    // predecessor, in every state.
+    const ajv = createAjv();
+    const claim = validator(ajv, 'claim.schema.json');
+    const readClaimSchema = (): Record<string, any> =>
+      JSON.parse(readFileSync(path.join(schemaDir, 'claim.schema.json'), 'utf8')) as Record<string, any>;
+
+    const forgottenOf = (version: number, extra: Record<string, unknown> = {}) => ({
+      ...activeClaim(),
+      version,
+      state: 'forgotten',
+      tombstone_id: TOMBSTONE_A,
+      forgotten_at: NOW,
+      forgotten_by: 'user:owner',
+      ...extra,
+    });
+    const withoutContent = (record: Record<string, unknown>) => {
+      const { content: _content, ...rest } = record;
+      return rest;
+    };
+
+    // 1. A version-1 forgotten record is conformant with and without the field...
+    assert.equal(claim(withoutContent(forgottenOf(1))), true, JSON.stringify(claim.errors));
+    assert.equal(claim(withoutContent(forgottenOf(1, { supersedes: 1 }))), true,
+      JSON.stringify(claim.errors));
+    // ...and the field keeps its published domain when it is present: `supersedes: 0` is not a way to
+    // satisfy the old requirement, which is why the writer could not have fixed this half.
+    assert.equal(claim(withoutContent(forgottenOf(1, { supersedes: 0 }))), false);
+
+    // 2. Every version > 1 still requires it — forgotten or not (the third branch).
+    assert.equal(claim(withoutContent(forgottenOf(2))), false,
+      'a v2 forgotten record must name the version it replaced');
+    assert.equal(claim(withoutContent(forgottenOf(2, { supersedes: 1 }))), true,
+      JSON.stringify(claim.errors));
+    assert.equal(claim({ ...activeClaim(), version: 2 }), false, 'a v2 active record must name it too');
+    assert.equal(claim({ ...activeClaim(), version: 2, supersedes: 1 }), true,
+      JSON.stringify(claim.errors));
+
+    // 3. The branch relaxed exactly one entry: the forget-specific fields stay required, and the
+    //    published property description still states the version rule the branches enforce.
+    const branches = readClaimSchema().allOf as Array<Record<string, any>>;
+    const forgottenBranch = branches.find(
+      branch => branch.if?.properties?.state?.const === 'forgotten')!;
+    assert.ok(forgottenBranch, 'the forgotten branch must still exist');
+    assert.deepEqual(forgottenBranch.then.required, ['tombstone_id', 'forgotten_at', 'forgotten_by']);
+    for (const field of ['tombstone_id', 'forgotten_at', 'forgotten_by']) {
+      const incomplete = withoutContent(forgottenOf(1));
+      delete (incomplete as Record<string, unknown>)[field];
+      assert.equal(claim(incomplete), false, `${field} must stay required on a forgotten version`);
+    }
+    const described = (readClaimSchema().properties as Record<string, any>)
+      .supersedes.description as string;
+    assert.match(described, /Required for version > 1/);
+  });
 });

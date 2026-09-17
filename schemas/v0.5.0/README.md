@@ -55,6 +55,15 @@ recommendation to define a host-lane form in a later protocol revision) is
 `test/schemas-v0.5.0.test.ts` pins the closed vocabulary and
 `test/layer1/pod-profile-conformance.test.ts` pins what the writers emit.
 
+`supersedes` is required of every version > 1, in every state (its own
+`allOf` branch, matching the property's description). It is **not** required on a
+version-1 record, including a version-1 *forgotten* record: a claim can be born
+forgotten — a legacy/migration row, or a retraction of a claim that has no
+canonical version of its own — and there is no prior version for it to name.
+[ADR-0014](../adr/0014-forgotten-version-supersedes.md) settled both halves of
+that (the writer now names the prior version it replaces; the forgotten branch
+stopped requiring a field the writer had no valid value for).
+
 Changes vs v0.4.2 (schema-surface only):
 
 - `common.schema.json` `$defs/Scope` widened to admit `client:<id>` and
@@ -118,9 +127,11 @@ invariants are unchanged in v0.5.0.
 
 The repository schema test compiles every file with AJV 2020 and exercises
 positive and negative fixtures for claim protection, relation admission,
-REVISE, context bundles, the widened Scope pattern, FORGET.SCOPE requests, and
-the claim record's extraction materialization block (optional, closed, and
-required-field-complete when present).
+REVISE, context bundles, the widened Scope pattern, FORGET.SCOPE requests, the
+claim record's extraction materialization block (optional, closed, and
+required-field-complete when present), and the forgotten-version `supersedes`
+rule (version 1 free, version > 1 required, forget-specific fields still
+mandatory).
 
 ## Delivery-planning profile
 

@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/neo/kept-rows-settle` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/smarty/l1-forgotten-supersedes` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,44 +24,23 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-17-t_8779781f.md`](journal/2026-09-17-t_8779781f.md) — The kept rows stay (decided, documented); the drain's mirror is not the divergence — and the demotion it needs is not durable on this base (2026-09-17)
-- **Journal entries:** 63 · tasks completed on board `smartware`: 104
+- **Journal:** [`2026-09-15-t_3ba3ee39.md`](journal/2026-09-15-t_3ba3ee39.md) — The L1 record writer names the version it replaces; the forgotten branch stops requiring it (ADR-0014) (2026-09-15)
+- **Journal entries:** 37 · tasks completed on board `smartware`: 68
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
-| `integration/v0.8.0` | 88 | 2026-09-17 | fix: re-add releaseHold (ADR-0009) + hold_release import dropped by snapshot |
-| `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
-| `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
-| `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
-| `wip/neo/frontmatter-coercion-depth` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
-| `wip/neo/frontmatter-write-residuals` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
-| `wip/neo/frontmatter-lossy-shapes` | 80 | 2026-09-17 | docs: regenerate the STATUS projection (t_cf744a8e, tight check window) |
-| `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
-| `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
-| `wip/neo/consent-change-scope` | 76 | 2026-09-16 | docs: regenerate the STATUS projection (branch row, journal count, in-flight tips) |
-| `wip/tech-head/l2-page-frontmatter-schema` | 74 | 2026-09-16 | docs(journal): correct the push-blocker paragraph — the branch is published as PR #22 |
-| `wip/smarty/l0-record-schema` | 73 | 2026-09-16 | docs(journal): name the published PR and the CI result (t_f1157ed4) |
-| `wip/tech-head/l1-claim-record-boundary` | 73 | 2026-09-17 | docs: regenerate the STATUS projection at the round-1-correction tip (t_11fed5bb) |
-| `wip/smarty/canonical-schema-boundary` | 69 | 2026-09-16 | docs(journal): fix the pushed-tip clause in the t_74faf12d entry (review round 1, neo) |
-| `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
-| `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
-| `wt/t_f2b584dc` | 64 | 2026-09-16 | docs: regenerate STATUS projection + journal sync for the round-4 text fix |
-| `wip/neo/revise-fts-sync` | 62 | 2026-09-17 | docs: journal entry, conformance-status paragraph, STATUS regen (t_336ba0b9) |
-| `wip/tech-head/mutation-fts-sync` | 62 | 2026-09-17 | docs: regenerate the STATUS projection (t_12c79071) |
-| `wip/tech-head/pre-fix-l1-repair-adr` | 62 | 2026-09-17 | docs(adr): ADR-0017 — tighten three citations to the exact lines they name (t_a54a4606) |
-| `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
-| `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
-| `wip/tech-head/l1-forgotten-carry-superseded` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
-| `fix/b1-correction-durability` | 59 | 2026-09-17 | docs(journal): the pre-rewrite ids are unreferenced objects, said plainly (t_3ee1ae37) |
+| `wip/neo/host-lane-identity` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0015 before merge (t_201cdca8) |
+| `fix/l1-replay-correction-state` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
+| `wip/smarty/canonical-schema-boundary` | 59 | 2026-09-15 | docs: state the ADR-0012 delta — verified baseline, remaining limits, journal entry |
 | `wip/tech-head/l1-replay-crockford-claim-id` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
 | `fix/status-projection-adr-bullet` | 58 | 2026-09-15 | fix(status): the ADR reader accepts the template's `- **Status:**` bullet |
-| `wip/neo/optype-derivation-guard` | 58 | 2026-09-15 | docs: STATUS projection refresh for t_0e732b96 (status:check current at commit time) |
-| `wip/smarty/retention-cross-op-id` | 57 | 2026-09-15 | fix(protocol): an OperationId spent on another op conflicts with the retention sweep |
 | `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
 | `wip/smarty/retention-payload-identity` | 56 | 2026-09-15 | fix(protocol): the retention sweep matches the OperationId payload, not just the id |
+| `wt/t_f2b584dc` | 56 | 2026-09-15 | docs(adr-0012): tighten the context paragraph (scope spelling, amended-binding pointer) |
+| `wip/neo/optype-derivation-guard` | 55 | 2026-09-15 | docs: state delta for t_9f0f314c (gate evidence, STATUS projection) |
 | `wip/smarty/retention-op-id` | 55 | 2026-09-15 | fix(protocol): the retention sweep mints a contract-valid OperationId |
 | `wip/smarty/l1-legacy-op-id` | 54 | 2026-09-15 | fix(layer1): the L1 record writer stamps a Crockford-valid legacy OperationId |
 | `wt/t_9740ae98` | 54 | 2026-09-15 | docs: regenerate STATUS projection (board counters and branch tips moved while this lane ran; no content lines differ) |
@@ -88,11 +67,8 @@
 | `docs/protocol-identity-adr` | 41 | 2026-09-15 | docs: accept ADR-0005 — protocol claim identity decided; F1 released, F2 fixed on branches |
 | `fix/duplicate-claim-recipe` | 39 | 2026-09-14 | docs: state the measured numbers, not the remembered ones |
 | `wip/neo/p0-contradiction-temporal` | 38 | 2026-09-14 | contradiction: deterministic admission, contested recall, bi-temporal closure (P0-2/P0-4) |
-| `docs/adr-numbering-registry` | 37 | 2026-09-15 | docs(adr): number registry on main + the claiming/renumbering rule (t_201cdca8) |
 | `docs/saas-retention-ops-entry` | 37 | 2026-09-15 | docs: the retention sweep's ops entry is caller-supplied only (measured) |
-| `wip/neo/adr-numbering-rule` | 37 | 2026-09-15 | docs(adr): number registry on main + the claiming/renumbering rule (t_201cdca8) |
 | `wip/neo/p0-isolation-conformance` | 37 | 2026-09-14 | isolation: actor-bound raw window + activity lanes, explicit denials (P0-5/P0-7) |
-| `wip/tech-head/gate-under-load-policy` | 37 | 2026-09-15 | docs(adr): number registry on main + the claiming/renumbering rule (t_201cdca8) |
 | `feat/corroboration-reachable` | 33 | 2026-09-12 | feat: make corroboration reachable, and demonstrate it in the reference example |
 | `fix/concurrent-schema-migration` | 32 | 2026-09-11 | fix: make column migrations idempotent when two processes open one brain |
 | `fix/public-surface-and-docs` | 31 | 2026-09-11 | fix: make the public surface sufficient for host-side claim persistence |
@@ -108,15 +84,20 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
-- `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
-- `t_a6bf30a8` [todo] FIX (lead, measured): a mid-session `replayCatchUp` materialises claim rows without re-syncing the claim-FTS lane — live recall misses them until a re-syncing write (created 2026-09-17, assignee tech-head)
+- `t_46c4acce` [todo] GATE prepare: Smartware Coffee trial release candidate and Roham handoff (created 2026-09-13, assignee neo)
+- `t_864a5900` [todo] IMPL (ADR-0012): one grant row per (actor, client) + degraded-precheck union — close the FORGET.SCOPE multi-client access-loss finding (created 2026-09-15, assignee neo)
+- `t_8098b097` [ready] L1 writer: `insertClaim` drops a caller-supplied `superseded_by` on the forgotten path (measured, carded out of t_3ba3ee39) (created 2026-09-15, assignee tech-head)
+- `t_102f3dfa` [todo] REVIEW (independent): ADR-0012 — is option (a) the right call, and is the §10b amendment + re-grant requirement correctly recorded? (created 2026-09-15, assignee smarty-pants)
+- `t_8d6f4a5c` [todo] FIX: compiled L2 page frontmatter must validate against page-frontmatter.schema.json (19 Ajv errors; ADR-0013 D2) (created 2026-09-15, assignee tech-head)
+- `t_f1157ed4` [todo] FIX: publish a schema for the L0 evidence record shape, and stop labelling the EXPORT.SCOPE package schemas:v0.5.0 (ADR-0013 D1) (created 2026-09-15, assignee tech-head)
+- `t_73ea9510` [todo] DECIDE: ADR number allocation — 0008/0010/0011 are double-allocated and 0012 is triple-allocated across four in-flight branches (created 2026-09-15, assignee neo)
+- `t_598278eb` [ready] Retention sweep: an OperationId already consumed by another op is not matched, so the sweep reuses the id and the ops log ends up with two ops under one id (measured) (created 2026-09-15, assignee smarty-pants)
 
 ## Blockers and stale work
 
-- `t_a54a4606` DECIDE (owner gate) + ADR: repair path for L1 canonical claim logs written pre-fix (B1 residual, measured on t_e833be91)
-- `t_e9173766` TEXT FIX (verifier findings, from t_1cde6d63): the t_e6fce49a journal's frozen-surface line is false at the tip, its "nothing else consumes the lane" enumeration is incomplete, and the pre/post probe pair is not comparable
-- `t_89dc1c98` IMPLEMENT (gated on the owner's ADR-0017 ruling): offline L0-derived repair pass for pre-ADR-0016 canonical claim logs (record shape, audit artifact, derivation-rule pin)
+- `t_66f1dd7d` GATE review: independent Coffee company-brain release verdict
+- `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
+- `t_804449f1` DECIDE (owner): host-registered lanes in the next protocol revision, or hosts migrate onto the Scope vocabulary (ADR-0012 fork)
 
 ## Decisions
 
@@ -124,14 +105,11 @@ Unmerged work — read the branch before assuming this tree is current.
 |---|---|---|---|
 | [0001](adr/0001-retention-expiry-archival.md) | ADR-0001 — Retention, Expiry & Archival | Approved (owner sign-off 2026-09-10 — Tier-1 invariants §2.2 frozen; `staleness` block deprecated §2.4) | 2026-09-10 |
 | [0002](adr/0002-consolidation.md) | ADR-0002 — Consolidation of claim clusters | Approved (owner sign-off 2026-09-10 — Tier-1 invariant §2.2 frozen) | 2026-09-10 |
-| [0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md) | ADR-0004 — Contradiction and bi-temporal lifecycle | (no status line) |  |
-| [0005](adr/0005-sources-ingestion-and-federation.md) | ADR-0005 — Sources, connector ingestion and federated reads | (no status line) |  |
-| [0006](adr/0006-export-restore-return-path.md) | ADR-0006 — An export must have a return path: RESTORE.SCOPE | (no status line) |  |
-| [0007](adr/0007-fencing-token-at-the-mutation-boundary.md) | ADR-0007 — A fencing token validated at the brain mutation boundary | (no status line) |  |
-| [0008](adr/0008-host-facing-health-contract.md) | ADR-0008 — A host-facing health contract with a three-state SLO verdict | (no status line) |  |
-| [0010](adr/0010-coffee-reference-adapter.md) | ADR-0010 — Coffee reference adapter: public-surface ports, settle-before-write, and a deterministic local proof | (no status line) |  |
-| [0011](adr/0011-coffee-company-brain-acceptance-gate.md) | ADR-0011 — Coffee company-brain acceptance gate: the packaged artifact, a six-business fixture, and the surface it forced | (no status line) |  |
-| [0016](adr/0016-canonical-state-is-a-projection-of-status.md) | The canonical record's `state` is the writer's projection of `status`, not a caller input | (no status line) |  |
+| [0003](adr/0003-claim-fact-identity.md) | ADR-0003 — Fact identity on the claim write path: the library resolves the fact, not the key | (no status line) |  |
+| [0011](adr/0011-claim-record-materialization-block.md) | ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it | Proposed — owner approval is the gate before merge (an additive, optional property; the | 2026-09-15 |
+| [0014](adr/0014-forgotten-version-supersedes.md) | The L1 record writer names the version it replaces; the forgotten branch stops requiring it | (no status line) |  |
+
+**Pending decision:** 0011 (ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it)
 
 ## Verification state
 
@@ -142,9 +120,9 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Health
 
-- ✅ declared block fresh (6d old)
-- ✅ kanban board readable (124 tasks, 9256 events)
-- ⚠️ 43 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ declared block fresh (4d old)
+- ✅ kanban board readable (87 tasks, 3866 events)
+- ⚠️ 31 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index
