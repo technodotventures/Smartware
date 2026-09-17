@@ -63,13 +63,15 @@ Code facts this card re-read (not measured behaviour), which fix the decision's 
   is the separately-carded *superseded* class (B2/B3, `t_5ef44cc1` / `t_864a5900`), not this one. The correction
   observation itself carries `source.actor` and `source.captured_at`, and its body carries
   `target_claim_id` / `reason` / `changed_claim` / `change_time` (`src/protocol/_correct_legacy.ts:90-126`; the same
-  shape pre- and post-fix — `e937fab..1e3772b` touches only `src/core.ts` and `src/layer1/store.ts`).
+  shape pre- and post-fix — `e937fab..1e3772b` touches `src/core.ts` and `src/layer1/store.ts` and nothing else under
+  `src/`, so the L0 correction record the pass reads was not rewritten by the fix).
 - **CORRECT writes no ops entry.** `OpType` (`src/ops_log/types.ts`) has no `correct`; measured, the brain has no
   `operations/` directory at all and the exported package's `counts.operations` is 0. ADR-0001's "every mutating op
   writes exactly one ops entry" is therefore **already false for CORRECT** — this ADR does not restate it as an
   invariant, and the repair does not inherit an audit trail it can key on.
-- **REVIVE requires the latest record to be `forgotten`.** `src/protocol/forget.ts:541-557` throws
-  `ProtocolError('not_forgotten')` otherwise, then appends an `ActiveClaimVersion` stamped `revived_via`.
+- **REVIVE requires the latest record to be `forgotten`.** `src/protocol/forget.ts:541` throws
+  `ProtocolError('not_forgotten')` otherwise, then appends an `ActiveClaimVersion` stamped `revived_via`
+  (`:555`, `:592`).
   Read from code, not measured: on a defective brain the sanctioned re-admission verb is *unreachable* for the very
   claim that needs it.
 - **A file-level pass bypasses the fence.** Measured on a brain whose high-water is ahead of the caller:
@@ -159,9 +161,10 @@ The pass writes its own audit artifact instead:
   the plan (per claim: id, scope, latest version/state, the correction history, the action), the applied appends
   (version, `supersedes`, `tombstone_id`), the `sha256` of every `claims/*.jsonl` file touched before and after, and
   **the scopes that now need a recompile** (§4). Ids, counts and hashes only — no claim values, no PII.
-- The artifact is not a packaged surface: `EXPORT.SCOPE` ships `claims/`, `observations/`, `entities/` and
-  `operations/`, so a repaired brain's package is unchanged by it (measured, the package count that moves is
-  `counts.claims`, 4 → 5 after a repair: `out/R2b-export-rawlines.txt`).
+- The artifact is not a packaged surface: `EXPORT.SCOPE` writes the counted record sets as `<name>.jsonl`
+  (`observations`, `claims`, `evidence`, `operations`, `entities` — `src/protocol/export_scope.ts:269-277`), so a
+  repaired brain's package is unchanged by the artifact (measured, the count that moves is `counts.claims`, 4 → 5
+  after a repair: `out/R2b-export-rawlines.txt`).
 - **Honest statement of what the ops log gets: nothing.** The pass writes no operations entry, and it must not be
   described as doing so. CORRECT writes no entry either (§Context), so a repaired brain's `operations/` stays empty for
   this class — the audit trail is the migration artifact, and calling it anything else is how a project accumulates
