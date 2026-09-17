@@ -101,7 +101,7 @@ Verified 2026-09-17 on Node v26.5.1 for the **replay catch-up's missing lane re-
 **562 tests across 79 files** (+5 tests, +1 file — `test/protocol/replay-catchup-lane-sync.test.ts`),
 `tsc` clean, `verify:schemas` 31 schema files OK, `verify:saas` `SMOKE_OUTCOME=pass`,
 `verify:coffee-adapter` 53/53, **`verify:coffee-gate` 85/85** against the packed artifact
-(`smartware-0.7.0.tgz` sha256 `473c2ad276b1474e05a8b817fc33f7294cdb67a75e1371597f3a77e9ba907d4b`). The
+(`smartware-0.7.0.tgz` sha256 `dc5d66580f4ce29f44c337608d9e6360f0271b3febf96d6b80ccdbcecdbaf4c7`). The
 change, its five measured triggers and the RED/GREEN pair are described in the lane section below;
 the out-of-tree instrument is `scripts/kept-rows-settle-probe.mjs --arm 4`.
 
@@ -156,7 +156,7 @@ catch-up. The repair lives in the **handlers**, so both dispatcher surfaces inhe
 wrappers and `src/index.ts`'s MCP tools); `src/index.ts`'s *verb-level* repairs (e.g. `smartware_correct`
 still does no lane work of its own) are a separate gap, carded. Gate: **562 tests across 79 files**,
 `tsc` clean, `verify:schemas` 31 files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-adapter`
-53/53, `verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz` sha256 `473c2ad2…7d4b`), `npm audit` 0
+53/53, `verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz` sha256 `dc5d6658…af4c7`), `npm audit` 0
 vulnerabilities.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).

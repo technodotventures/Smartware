@@ -824,9 +824,10 @@ export function syncSearchFromClaims(store: ClaimStore, searchIndex: SearchIndex
  * replayed yet (a legacy/host-written `claim_extracted`, another writer's
  * `correction` or tombstone) and writes no index, so without this the live
  * process answers without those claims until some later re-syncing write runs
- * while every restart serves them — measured on all four call sites (FORGET,
- * retention expiry, quarantine review, the compile pipeline): kanban
- * `t_a6bf30a8`, instrument `scripts/kept-rows-settle-probe.mjs --arm 4`.
+ * while every restart serves them — measured on all five call sites (FORGET,
+ * retention expiry, quarantine review, CORRECT, and the compile pipeline, whose
+ * stage 4.5 re-syncs `options.scope` only): kanban `t_a6bf30a8`, instrument
+ * `scripts/kept-rows-settle-probe.mjs --arm 4`.
  *
  * Scoped on purpose: the re-sync is proportional to what the catch-up actually
  * materialised, and a catch-up that replayed nothing returns no scopes (no
