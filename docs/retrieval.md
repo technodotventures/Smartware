@@ -23,6 +23,18 @@ transaction-time reads use an authorized claim snapshot rather than the active
 search index, allowing a caller to reconstruct what Smartware knew at a
 specific time without exposing out-of-scope history.
 
+The `total_found` / `filtered_out` counts on a recall result are raw
+derived-lane hits taken *before* those eligibility filters, and the claim lane
+is updated incrementally rather than rebuilt on every mutation. Rows that are
+deliberately kept through a lifecycle change — FORGET's claim-FTS rows and the
+retention sweep's mirror of them (`src/protocol/forget_scope.ts`) — therefore
+still appear in the live counters as filtered hits, while a freshly rebuilt
+lane never holds them. The counters can differ from a restart by exactly those
+kept rows even though the served result set is rebuild-equivalent; any
+re-syncing write (or the next open) removes the difference. Treat the counters
+as lane diagnostics, not as an authorization or lifecycle signal — `results`
+is the contract.
+
 ## Semantic and hybrid retrieval
 
 Semantic retrieval is an opt-in Layer 3 capability. A host supplies an
