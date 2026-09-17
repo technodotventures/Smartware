@@ -6,6 +6,7 @@ import { assignIntegrity } from '../layer0/integrity.js';
 import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import { replayCatchUp } from '../layer1/replay.js';
+import { resyncCatchUpScopes, type SearchIndex } from '../layer3/search.js';
 import { inferredTime, nullTime } from '../layer1/types.js';
 import type { SmartwareConfig } from '../config.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
@@ -48,6 +49,16 @@ export async function handleCorrect(
   layer0: Layer0Index,
   store: ClaimStore,
   config: SmartwareConfig,
+  /**
+   * The caller's claim-FTS lane, when it owns one. The correction ends with a
+   * `replayCatchUp`, which materialises claim rows for events this process had
+   * not replayed yet (a legacy/host-written `claim_extracted`, or a `correction`
+   * from another writer — in ANY scope, since the catch-up replays the whole log
+   * tail) and writes no index. Passing the lane re-syncs exactly the scopes that
+   * catch-up touched; the corrected claim's own scope is covered by the same set
+   * (kanban t_a6bf30a8).
+   */
+  searchIndex?: SearchIndex,
 ): Promise<CorrectResult> {
   const original = store.getClaim(params.target_claim_id);
   if (!original) {
@@ -129,7 +140,8 @@ export async function handleCorrect(
   appendObservation(evidenceDir, withIntegrity);
   layer0.insertOrSkip(withIntegrity);
 
-  await replayCatchUp(evidenceDir, store, layer0, config);
+  const caughtUp = await replayCatchUp(evidenceDir, store, layer0, config);
+  resyncCatchUpScopes(searchIndex, store, caughtUp.touchedScopes);
 
   const spawnedClaim = store.getAllClaims().find(claim => claim.source_event_id === withIntegrity.id && claim.id !== original.id) ?? null;
 

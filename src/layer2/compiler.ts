@@ -21,7 +21,7 @@ import { serialiseFrontmatter, parseFrontmatter } from './frontmatter.js';
 import { buildOneliner, buildParagraph, buildFullPage } from './resolutions.js';
 import { commitWikiChanges, buildCommitMessage, ensureGitRepo } from './git.js';
 import type { SearchIndex } from '../layer3/search.js';
-import { syncSearchFromClaims } from '../layer3/search.js';
+import { syncSearchFromClaims, resyncCatchUpScopes } from '../layer3/search.js';
 import { SMARTWARE_VERSION } from '../version.js';
 
 const COMPILER_VERSION = SMARTWARE_VERSION;
@@ -135,8 +135,15 @@ export async function compile(
   // ── Stage 3 & 4: RECONCILE + TAG (via replay) ───────────────────────────
   const stageReconcileStart = Date.now();
   resetEntityTelemetry();
-  await replayCatchUp(evidenceDir, store, layer0, config, sourceObservations, statusMap);
+  const caughtUp = await replayCatchUp(evidenceDir, store, layer0, config, sourceObservations, statusMap);
   stageDurations['reconcile'] = Date.now() - stageReconcileStart;
+
+  // The catch-up replays the whole log tail (every scope), while stage 4.5
+  // re-syncs `options.scope` only — so a claim an event from another writer
+  // materialised in ANOTHER scope needs the lane there too, or the live process
+  // answers without it until a later re-syncing write (kanban t_a6bf30a8).
+  const extraCaughtUpScopes = caughtUp.touchedScopes.filter(scope => scope !== options.scope);
+  if (extraCaughtUpScopes.length > 0) resyncCatchUpScopes(searchIndex, store, extraCaughtUpScopes);
 
   // ── Stage 4.5: SEARCH INDEX (L3 from L1 — decoupled from L2) ──────────
   // Index claims into L3 immediately after replay. This ensures newly-

@@ -10,6 +10,7 @@ import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
+import { resyncCatchUpScopes, type SearchIndex } from '../layer3/search.js';
 import { requireGrant, requireRegisteredActor, ProtocolError } from '../auth/middleware.js';
 import { TERMINAL_STATES } from '../layer0/types.js';
 import {
@@ -93,6 +94,16 @@ export async function handleForget(
   config: SmartwareConfig,
   commitCtx?: CommitContext,
   commitHooks?: ForgetCommitHooks,
+  /**
+   * The caller's claim-FTS lane, when it owns one. FORGET ends with an
+   * unconditional `replayCatchUp` (below), which materialises claim rows for
+   * events this process had not replayed yet and writes no index — passing the
+   * lane here re-syncs exactly the scopes that catch-up touched, so live recall
+   * equals what a fresh open serves (kanban t_a6bf30a8). Optional: a caller
+   * without a lane (the protocol surface's own tests, a host that rebuilds) is
+   * unaffected.
+   */
+  searchIndex?: SearchIndex,
 ): Promise<ForgetResult> {
   const target = normaliseTarget(params);
   const actorIsUser = params.actor.id.startsWith('user:') || params.actor.id.startsWith('person_');
@@ -380,7 +391,8 @@ export async function handleForget(
     store.syncFromJsonlVersion(forgottenVersion);
     commitHooks?.afterClaimVersion?.(forgottenVersion);
   }
-  await replayCatchUp(evidenceDir, store, layer0, config);
+  const caughtUp = await replayCatchUp(evidenceDir, store, layer0, config);
+  resyncCatchUpScopes(searchIndex, store, caughtUp.touchedScopes);
 
   if (params.operation_id && commitCtx && intent) {
     appendOpLogEntry(commitCtx.opsDir, {

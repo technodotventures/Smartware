@@ -18,6 +18,7 @@ import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
+import { resyncCatchUpScopes, type SearchIndex } from '../layer3/search.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { readLatestVersion, appendClaimVersion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
 import { appendOpLogEntry, OPERATION_ID_PATTERN, readAllOpLogEntries } from '../ops_log/index.js';
@@ -64,6 +65,13 @@ export interface RetentionDeps {
   store: ClaimStore;
   config: SmartwareConfig;
   opsDir: string;
+  /**
+   * The caller's claim-FTS lane, when it owns one. The sweep ends with a
+   * `replayCatchUp` when something expired, which materialises claim rows for
+   * events this process had not replayed yet and writes no index — passing the
+   * lane re-syncs exactly the scopes that catch-up touched (kanban t_a6bf30a8).
+   */
+  searchIndex?: SearchIndex;
 }
 
 function buildTombstoneMutation(
@@ -221,7 +229,8 @@ export async function handleExpireRetention(
   }
 
   if (expired.length > 0) {
-    await replayCatchUp(deps.evidenceDir, deps.store, deps.layer0, deps.config);
+    const caughtUp = await replayCatchUp(deps.evidenceDir, deps.store, deps.layer0, deps.config);
+    resyncCatchUpScopes(deps.searchIndex, deps.store, caughtUp.touchedScopes);
   }
 
   if (params.operation_id) {
