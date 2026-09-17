@@ -1595,13 +1595,14 @@ export class SmartwareCore {
    * `active` and the derived row follows. The claim-FTS lane does not — it is
    * rebuilt only by `syncSearchFromClaims` — so without this re-sync the live
    * process answers without the re-admitted claim while every restart serves
-   * it. FORGET deliberately keeps its rows (forget_scope.ts:518-527: "keeping
-   * the rows is what makes REVIVE fully reversible — a revived claim becomes
-   * searchable again without waiting for a reindex"), but any later write in
-   * the scope replaces the lane with the store's indexable set and drops the
-   * forgotten claim's row, so the guarantee has to be re-established here
-   * rather than assumed from the keep. The scope comes from the store so
-   * `ReviveResult`'s shape is untouched.
+   * it. FORGET deliberately keeps its rows (forget_scope.ts:519-537: the
+   * authorized snapshot filters forgotten claims at query time, so served
+   * results are rebuild-equivalent without touching the lane; only the raw
+   * counters differ), but any later write in the scope replaces the lane with
+   * the store's indexable set and drops the forgotten claim's row, so the
+   * "searchable again without waiting for a reindex" guarantee has to be
+   * re-established here rather than assumed from the keep. The scope comes
+   * from the store so `ReviveResult`'s shape is untouched.
    */
   async revive(params: ReviveParams): Promise<ReviveResult> {
     this.fenceGuard('revive');
