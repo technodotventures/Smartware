@@ -1590,9 +1590,22 @@ export class SmartwareCore {
     this.searchIndex.removeObservation(obsId);
   }
 
+  /**
+   * REVIVE re-admits a forgotten claim's fact: the canonical record returns to
+   * `active` and the derived row follows. The claim-FTS lane does not — it is
+   * rebuilt only by `syncSearchFromClaims` — so without this re-sync the live
+   * process answers without the re-admitted claim while every restart serves
+   * it. FORGET deliberately keeps its rows (forget_scope.ts:518-527: "keeping
+   * the rows is what makes REVIVE fully reversible — a revived claim becomes
+   * searchable again without waiting for a reindex"), but any later write in
+   * the scope replaces the lane with the store's indexable set and drops the
+   * forgotten claim's row, so the guarantee has to be re-established here
+   * rather than assumed from the keep. The scope comes from the store so
+   * `ReviveResult`'s shape is untouched.
+   */
   async revive(params: ReviveParams): Promise<ReviveResult> {
     this.fenceGuard('revive');
-    return handleRevive(
+    const result = await handleRevive(
       params,
       this.dataDir,
       this.store,
@@ -1600,6 +1613,9 @@ export class SmartwareCore {
       { opsDir: this.opsDir },
       this.store.getDB(),
     );
+    const scope = this.store.getClaim(result.claim_id)?.scope;
+    if (scope) syncSearchFromClaims(this.store, this.searchIndex, scope);
+    return result;
   }
 
   async endorse(params: EndorseParams): Promise<EndorseResult> {
