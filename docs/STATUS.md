@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/neo/frontmatter-write-residuals` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/compile-page-refusal` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -25,7 +25,7 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-17-t_4d84ff6b.md`](journal/2026-09-17-t_4d84ff6b.md) — A populated `notices` array now round-trips the page YAML serialiser (2026-09-17)
-- **Journal entries:** 41 · tasks completed on board `smartware`: 107
+- **Journal entries:** 41 · tasks completed on board `smartware`: 108
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -33,6 +33,7 @@
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
 | `integration/v0.8.0` | 204 | 2026-09-17 | Merge branch 'wip/neo/adr-numbering-rule' into integration/v0.8.0 |
+| `wip/neo/frontmatter-write-residuals` | 86 | 2026-09-17 | docs(t_15b309f3): make the write-boundary lane's R2 and reachability claims true |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
 | `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
@@ -111,8 +112,8 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
 - `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
-- `t_5742162f` [ready] FIX (low, DECIDE-first): the COMPILE re-serialise throws on a page whose `notices` array mixes mapping and non-mapping items — the mixed-array write refusal is reachable from the reader (measured end-to-end, pre-existing on both arms) (created 2026-09-17, assignee neo)
 - `t_dae50f51` [todo] FIX (lead, read-only evidence): the MCP dispatcher surface (`src/index.ts`) never got the verb-level claim-FTS lane repairs — `smartware_correct` answers [] over MCP until a restart (created 2026-09-17, assignee neo)
+- `t_cee7412a` [ready] VERIFY (independent): the t_15b309f3 text fix — corrected pin/claims at a415578 (PR #37) (created 2026-09-17, assignee tech-head)
 
 ## Blockers and stale work
 
@@ -143,8 +144,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (128 tasks, 9351 events)
-- ⚠️ 66 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (129 tasks, 9404 events)
+- ⚠️ 67 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index
