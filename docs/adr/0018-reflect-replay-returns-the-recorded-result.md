@@ -41,7 +41,7 @@ One result object described two different runs; a retry wrote claim versions, pa
 caller did not ask for; and the numbers a caller can act on contradicted what the call had just written. The
 same-revision case is worse than it looks: on a brain whose observations are all already processed, re-running
 the compile happens to produce the same *counts* (pair B: recorded 4/4, fresh 4/4) while still rewriting every
-page's bytes (`page_digest 559ea367… → 1f4ead29…`) — the defect was invisible in the numbers that were being
+page's bytes (`page_digest dcbc302a… → 3a3aa2f8…`) — the defect was invisible in the numbers that were being
 looked at.
 
 ## Decision
