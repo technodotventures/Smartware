@@ -392,7 +392,18 @@ export class ClaimStore {
     // Spec-conformant fields default to spec-compliant values when the
     // caller hasn't supplied them. Legacy callers continue to work; new
     // emitters (PR-5+) populate explicitly.
-    const state: ClaimState = claim.state ?? statusToState(claim.status);
+    //
+    // `state` is the one field that is NOT a caller input: it is this record envelope's projection
+    // of `status`, and deriving it here is what keeps a claim's row and its canonical line telling
+    // the same story. `statusToState` is total and many-to-one (`retracted` → `forgotten`,
+    // everything else → `active`), and `claimVersionVals` rebuilds `status` from a record's `state`
+    // — so a caller-supplied `state` that contradicts the `status` beside it describes a row that
+    // disagrees with its own canonical line, and silently discards whichever of the two the caller
+    // meant. It did exactly that on the replay correction path: `handleCorrection` (`reason:
+    // 'wrong'` / `'extraction_error'`) mutates `status` on a claim it read back with `getClaim`,
+    // whose explicit `state` is stale by construction, so the retraction never reached the log
+    // (measured, kanban t_ef77c695 → ADR-0016). Callers that set both consistently see no change.
+    const state: ClaimState = statusToState(claim.status);
     const author: ClaimAuthor = claim.author ?? 'agent';
     const epistemicOwner: ClaimAuthor = claim.epistemic_owner ?? author;
     const claimType: ClaimType = claim.claim_type ?? 'finding';

@@ -34,7 +34,7 @@ ignored by the comparison; everything else must match.
 | Area | Command | Contract |
 |---|---|---|
 | Coffee reference adapter | `npm run verify:coffee-adapter` | Drop-in contract in `docs/integration/coffee-adapter.md` (53 deterministic checks: routing, retries, degraded reads, fencing, isolation, attribution) |
-| Coffee company-brain acceptance | `npm run verify:coffee-gate` | ADR-0011 + the contract doc: packs and installs the artifact into a scratch app, then 79 checks on six businesses (lifecycle, corrections, erasure/retention, export/restore, failover + degraded reads, guard/fence drills, restart during load, ~180 unauthorized fuzz requests, soak with p50/p95 + resource accounting). **A partial pass is a failed release gate** |
+| Coffee company-brain acceptance | `npm run verify:coffee-gate` | ADR-0011 + the contract doc: packs and installs the artifact into a scratch app, then 85 checks on six businesses (lifecycle, corrections — including a restart drill where a second process must still serve the corrected value — erasure/retention, export/restore, failover + degraded reads, guard/fence drills, restart during load, ~180 unauthorized fuzz requests, soak with p50/p95 + resource accounting). **A partial pass is a failed release gate** |
 | Retrieval kernel | `npm run benchmark:retrieval-kernel` | `benchmarks/retrieval/kernel-contract-v1.json` |
 | Retrieval arena | `npm run benchmark:retrieval-arena` | `benchmarks/retrieval/arena-contract-v1.json` |
 | Retrieval activation | `npm run benchmark:retrieval-activation-contract` | Fails **closed** unless held-out evidence clears the gates (`--expect-hold`) |

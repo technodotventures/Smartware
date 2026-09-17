@@ -30,11 +30,12 @@ pass is a failed release gate.
 ## Decision
 
 **1. The gate is a fixture plus a runner, and both live in this repository.**
-`scripts/coffee-company-brain-fixture.mjs` is the acceptance fixture (79 checks,
+`scripts/coffee-company-brain-fixture.mjs` is the acceptance fixture (85 checks,
 one `PASS`/`FAIL` line each). `scripts/coffee-company-brain-gate.mjs` packs the
 build (`npm pack`), installs the tarball into a scratch app (`npm install`), copies
-the adapter and the fixture next to that install, and runs the fixture so every
-import resolves through the installed package's own `exports` map. `npm run
+the adapter, the fixture and the second-process reader the fixture spawns next to
+that install, and runs the fixture so every import resolves through the installed
+package's own `exports` map. `npm run
 verify:coffee-gate` is the entry point; the run writes `results.json`,
 `summary.json`, `README.md` and the raw log into an evidence directory.
 
@@ -90,13 +91,18 @@ attached, and the report labels it as such.
 
 - **Release evidence is now reproducible**: one command, one evidence directory,
   artifact sha256 pinned, checks enumerated. The verdict is a gate count, not a
-  summary: **79/79 checks pass** against `smartware-0.7.0.tgz` (sha256 in the
-  run's `summary.json`) on this machine.
+  summary: **85/85 checks pass** against the packed artifact (sha256 in the
+  run's `summary.json`) on this machine. (The 2026-09-15 GATE run recorded
+  **79/79** on `smartware-0.7.0.tgz`; checks 3j–3o were added by the
+  correction-durability fix, kanban `t_8ddfa350`.)
 - **Restart-under-load is modelled in-process** (replica stop → standby takeover
   → rejoining standby; plus a process-death window between the two stores and its
   replay). The primitive was proved cross-process with real Redis and SIGKILL in
   the resilience gauntlet (`t_00a9df88`); an adapter-level cross-process drill
   over real Redis remains NOT YET PROVEN and is carried as such in the run notes.
+  Check 3n closes the *process* half of that gap for the correction path: it
+  spawns a real second process over the same brain directory, with its own host
+  ports (the epoch still comes from the shared arbiter, as Redis would supply it).
 - **The gate does not replace the conformance suite**: it is additive, runs in
   ~1 minute on the packaged artifact, and touches no normative text except this
   ADR and the adapter contract doc it extends.

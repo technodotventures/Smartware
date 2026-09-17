@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
@@ -251,6 +252,42 @@ function evidenceCount(dir) {
     const body = fs.readFileSync(path.join(ev, name), 'utf8');
     return total + body.split('\n').filter(Boolean).length;
   }, 0);
+}
+
+// The canonical L1 claim log as the writer left it: one JSON object per line under
+// `<brain>/claims/<month>.jsonl`. This is the durable surface — recovery, restoreScope,
+// index rebuilds and export→import all read it, so a lifecycle value that never reaches
+// these lines comes back on the next replay no matter what the derived tables say.
+function canonicalClaimRecords(dir) {
+  const claimsDir = path.join(dir, 'claims');
+  if (!fs.existsSync(claimsDir)) return [];
+  const records = [];
+  for (const name of fs.readdirSync(claimsDir).filter(n => n.endsWith('.jsonl')).sort()) {
+    for (const line of fs.readFileSync(path.join(claimsDir, name), 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      let record; try { record = JSON.parse(line); } catch { continue; }
+      const id = record?.claim_id ?? record?.id;
+      if (typeof id !== 'string' || !id.startsWith('claim_')) continue;
+      records.push({
+        file: name,
+        id,
+        version: record.version ?? null,
+        state: record.state ?? null,
+        value: record.semantic?.object?.value ?? null,
+      });
+    }
+  }
+  return records;
+}
+
+/** The version a replay reads as current: for each claim id, its highest canonical version. */
+function latestCanonicalVersions(records) {
+  const latest = new Map();
+  for (const record of records) {
+    const current = latest.get(record.id);
+    if (!current || (record.version ?? 0) >= (current.version ?? 0)) latest.set(record.id, record);
+  }
+  return [...latest.values()];
 }
 
 function dirBytes(dir) {
@@ -533,10 +570,17 @@ try {
     const recallCorrected = await avaReplicas.a.handleRecall({ actor: ava.owner, client: 'acme', query: 'Acme renewal', limit: 10 });
     const stillWrong = recallCorrected.results.filter(r => r.claim?.predicate === 'renewal_date'
       && String(r.claim.object?.value ?? r.claim.object) === '2026-12-15');
+    // The positive half, asserted alongside the negative one: "stops serving the wrong
+    // value" is satisfied by an empty result set, which a user cannot tell apart from data
+    // loss (measured through this adapter, t_66f1dd7d §3 B1: recall answered [] until some
+    // later write re-synced the scope). A correction must SERVE the corrected value.
+    const servedCorrected = recallCorrected.results.filter(r => r.claim?.predicate === 'renewal_date'
+      && r.claim.id === corrected.new_claim_id
+      && String(r.claim.object?.value ?? r.claim.object) === facts.ava.value);
     check('3f a correction is recorded, auditable and stops serving the wrong value',
       corrected.ok === true && corrected.status === 'corrected' && typeof corrected.new_claim_id === 'string'
-      && audit?.ok === true && stillWrong.length === 0,
-      J({ corrected, audit: audit?.ok, stillWrong: stillWrong.map(r => r.claim?.object?.value ?? r.claim?.object) }));
+      && audit?.ok === true && stillWrong.length === 0 && servedCorrected.length === 1,
+      J({ corrected, audit: audit?.ok, stillWrong: stillWrong.map(r => r.claim?.object?.value ?? r.claim?.object), served: servedCorrected.map(r => [r.claim?.id, r.claim?.object?.value ?? r.claim?.object]) }));
     findings.push({
       id: 'correction-leaves-counterpart-contested',
       severity: 'product',
@@ -579,6 +623,130 @@ try {
       agentWrite.ok === true && agentDenied.ok === false && agentDenied.status === 403
       && agentDenied.results === undefined && agentDenied.degraded === false,
       J({ write: agentWrite.ok, denied: agentDenied }));
+
+    // ── 3j–3o — a warranted correction is DURABLE (B1 of the independent GATE review t_66f1dd7d)
+    //
+    // A correction's whole point is that a belief stops being served. Measured through this
+    // adapter before the fix: recall answered [] immediately after CORRECT, and every restart
+    // — i.e. every replay of the canonical log, SmartwareCore.open catches the evidence log up
+    // into the derived rows — served BOTH the corrected value and the corrected-away value as
+    // `active`, because the retraction never reached the canonical claim line (the record took
+    // its `state` from the claim read back out of the store instead of the `status` the
+    // correction had just set). Restore, index rebuild and export→import read that same line,
+    // so the canonical record IS the durable surface, not a cache. Checks 3f/3h only ever saw
+    // the in-process, post-write view; these assert what survives a restart.
+    //
+    // Dedicated subject and predicate: the assertions are about which row answers, so the
+    // drill must not share a fact with the contradiction drill above.
+    const DRILL_SUBJECT = 'B1 Restart Probe Co';
+    const DRILL_PREDICATE = 'b1_probe_date';
+    const DRILL_STALE = '2030-01-01';
+    const DRILL_CORRECTED = '2030-02-02';
+    const DRILL_QUERY = 'Restart Probe';
+    const drillRows = (recall) => (recall.results ?? [])
+      .filter(hit => hit.claim?.predicate === DRILL_PREDICATE)
+      .map(hit => ({ id: hit.claim.id, value: String(hit.claim.object?.value ?? hit.claim.object), status: hit.claim.status }));
+
+    const drillWrite = await avaReplicas.a.handleWrite({
+      actor: ava.staff[0].actor, client: 'acme',
+      text: `${DRILL_SUBJECT} renewal date is ${DRILL_STALE} ${marker('ava', 'acme', 'b1restart')}`,
+      claims: claimOf(DRILL_STALE, '2026-08-01T00:00:00.000Z', DRILL_PREDICATE, DRILL_SUBJECT),
+    });
+    const drillBefore = drillRows(await avaReplicas.a.handleRecall({ actor: ava.owner, client: 'acme', query: DRILL_QUERY, limit: 10 }));
+    check('3j the correction drill starts from exactly one served row',
+      drillWrite.ok === true && drillWrite.claims.outcomes[0]?.outcome === 'inserted'
+      && drillBefore.length === 1 && drillBefore[0].value === DRILL_STALE,
+      J({ write: drillWrite.ok, outcomes: drillWrite.claims.outcomes, rows: drillBefore }));
+
+    const drillCorrection = await avaReplicas.a.correctClaim({
+      actor: ava.staff[0].actor, target_claim_id: drillBefore[0]?.id,
+      corrected_object: { type: 'text', value: DRILL_CORRECTED }, reason: 'wrong',
+    });
+    const drillAfterCorrect = drillRows(await avaReplicas.a.handleRecall({ actor: ava.owner, client: 'acme', query: DRILL_QUERY, limit: 10 }));
+    check('3k CORRECT serves the corrected value in the same process',
+      drillCorrection.ok === true && drillCorrection.status === 'corrected'
+      && drillAfterCorrect.length === 1 && drillAfterCorrect[0].value === DRILL_CORRECTED
+      && drillAfterCorrect[0].id === drillCorrection.new_claim_id,
+      J({ correct: drillCorrection.status, new_claim_id: drillCorrection.new_claim_id, rows: drillAfterCorrect }));
+
+    // 3l — restart: stop the owner and bring up a NEW adapter instance over the same brain
+    // directory (what a supervisor does; the process-local variant of 9h). stop() releases the
+    // lease and closes the brain; start() re-opens the core, replays the evidence log and
+    // re-syncs the claim index.
+    const canonicalBeforeRestart = canonicalClaimRecords(tenantFor(ava).data_dir);
+    await avaReplicas.a.stop();
+    const restarted = replica(byKey.ava, 'inst_ava_a_restarted');
+    await restarted.start();
+    avaReplicas.a = restarted;
+    const afterRestart = drillRows(await restarted.handleRecall({ actor: ava.owner, client: 'acme', query: DRILL_QUERY, limit: 10 }));
+    check('3l the corrected value survives a brain restart and the corrected-away value does not come back',
+      restarted.role === 'owner' && afterRestart.length === 1
+      && afterRestart[0].value === DRILL_CORRECTED && afterRestart[0].id === drillCorrection.new_claim_id
+      && !afterRestart.some(row => row.value === DRILL_STALE),
+      J({ role: restarted.role, rows: afterRestart }));
+
+    // 3m — the canonical log itself. Version 1 of the retracted claim stays `active`: it was,
+    // when it was written, and an append-only log is never rewritten. What the correction must
+    // fix — and did not — is the version a replay reads as *current*: before the fix BOTH
+    // versions of the retracted claim were `active`, so every replay re-materialised the value
+    // a human had retired.
+    const canonicalAfterRestart = canonicalClaimRecords(tenantFor(ava).data_dir);
+    const retractedLineage = canonicalAfterRestart.filter(record => record.id === drillCorrection.original_claim_id);
+    const latestRetracted = retractedLineage.reduce(
+      (latest, record) => ((record.version ?? 0) >= (latest.version ?? 0) ? record : latest),
+      retractedLineage[0] ?? { state: null, version: null },
+    );
+    const liveCanonicalValues = latestCanonicalVersions(canonicalAfterRestart)
+      .filter(record => record.state === 'active').map(record => record.value);
+    check('3m the canonical record for the retracted claim is not active, so no replay can resurrect it',
+      retractedLineage.length >= 2 && latestRetracted.state !== 'active'
+      && !liveCanonicalValues.includes(DRILL_STALE),
+      J({ lineage: retractedLineage, latest_state: latestRetracted.state, live_values_has_stale: liveCanonicalValues.includes(DRILL_STALE) }));
+
+    // 3n — the same question from a genuinely separate process. A restart is a replay, and the
+    // in-process restart above could in principle take a warm path; a second process cannot.
+    // Only the brain directory is shared: the child brings its own host ports, and the epoch
+    // the brain fence requires is minted by the SHARED arbiter (this fixture's), exactly as a
+    // Redis-backed host arbiter would — the child takes the next epoch, and this process
+    // re-acquires a newer one after it, so neither side is ever the stale owner.
+    const childEpoch = await arbiter.nextEpoch(fenceEpochKeyFor(brainIdentity({ brainDir: tenantFor(ava).data_dir }), 'coffee'));
+    const probePath = path.join(HERE, 'coffee-correction-restart-probe.mjs');
+    const probePayloadPath = path.join(dataRoot, 'restart-probe-payload.json');
+    fs.writeFileSync(probePayloadPath, JSON.stringify({
+      adapterUrl: new URL(ADAPTER_SPEC, import.meta.url).href,
+      tenant: tenantFor(ava), actor: ava.owner, client: 'acme',
+      query: DRILL_QUERY, limit: 10, instanceId: 'inst_ava_second_process',
+      leaseTtlMs: 8000, namespace: 'coffee', fenceEpoch: childEpoch,
+    }));
+    const probeRun = spawnSync(process.execPath, [probePath, probePayloadPath], {
+      cwd: HERE, encoding: 'utf8', timeout: 120_000, env: process.env,
+    });
+    let child = null;
+    try { child = JSON.parse(String(probeRun.stdout ?? '').trim().split('\n').pop()); } catch { child = null; }
+    const childRows = (child?.rows ?? []).filter(row => row.predicate === DRILL_PREDICATE);
+    check('3n a SECOND process over the same brain dir serves only the corrected value',
+      probeRun.status === 0 && child?.ok === true && child?.role === 'owner'
+      && child?.degraded === false && child?.source === 'brain'
+      && childRows.length === 1 && childRows[0].value === DRILL_CORRECTED
+      && childRows[0].id === drillCorrection.new_claim_id
+      && !childRows.some(row => row.value === DRILL_STALE),
+      J({ status: probeRun.status, epoch: childEpoch, role: child?.role, degraded: child?.degraded, source: child?.source,
+        rows: childRows, error: String(child?.error ?? '').slice(0, 200), stderr: String(probeRun.stderr ?? '').slice(0, 200) }));
+
+    // The child left the brain's fence at its own epoch, so this process takes the next one
+    // (a supervisor's restart after another replica has held the lease — the ordinary case).
+    await avaReplicas.a.stop();
+    const reacquired = replica(byKey.ava, 'inst_ava_a_after_probe');
+    await reacquired.start();
+    avaReplicas.a = reacquired;
+
+    // 3o — and the restarts add nothing: a correction that is durable by *duplicating* the
+    // canonical log would resurrect the value on the next replay just as surely.
+    const canonicalAfterChild = canonicalClaimRecords(tenantFor(ava).data_dir);
+    check('3o the restart and the second process append no canonical claim record',
+      child?.ok === true && canonicalAfterRestart.length === canonicalBeforeRestart.length
+      && canonicalAfterChild.length === canonicalAfterRestart.length,
+      J({ before: canonicalBeforeRestart.length, after_restart: canonicalAfterRestart.length, after_child: canonicalAfterChild.length }));
   }
 
   // ═══ P4 — replica failover and degraded reads ═════════════════════════════

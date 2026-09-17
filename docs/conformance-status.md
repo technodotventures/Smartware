@@ -53,6 +53,27 @@ results. Re-measured a fifth time 2026-09-15 after the host health contract and
 Coffee-trial SLOs landed (ADR-0008): **550 tests across 77 files**, build clean
 (`tsc`), same schema and kernel results.
 
+Verified 2026-09-16 on Node v26.5.1 for the **correction path, composed onto the Coffee release
+candidate** (`fix/b1-correction-durability` off `wt/t_9740ae98` @ `e937fab`, kanban `t_8ddfa350`,
+ADR-0016 — two `src/` changes: `ClaimStore.insertClaim` derives the canonical record's `state` from
+`status`, and `SmartwareCore.correct` re-syncs the claim-FTS index after the mutation, the way
+`consolidate` already did): **551 tests across 77 files**, `tsc` clean, `verify:schemas` 31 schema
+files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-adapter` 53/53, and **`verify:coffee-gate`
+85/85** against the packed artifact (`smartware-0.7.0.tgz` sha256
+`874a898b8f944a40701cd1478a5a17e6662811383e4d60c763ad7b6b60c22db7`). The gate grew by six checks
+(79 → 85): 3f gains its positive half (the corrected value must be *served*, not merely "not the wrong
+one" — the missing half that let this defect through), and 3j–3o drill write → CORRECT → restart as a
+new adapter instance → the same question from a **second process**: exactly one row, the corrected value,
+the retracted claim's latest canonical version not `active`, and no canonical record appended by the
+restarts. Both halves are separately load-bearing under mutation (reverting the `state` derivation fails
+3l/3m/3n; reverting the index re-sync fails 3f/3k). Measured before the composition at `e937fab`: recall
+`[]` after CORRECT, and a fresh process serving **both** the corrected and the corrected-away value as
+`active`, with the retracted claim canonicalised as `v1 active` + `v2 active`. Not composed with this
+change and still open: the lane's unit test `test/layer1/replay-correction-state.test.ts` (four of its
+assertions pin `supersedes`, the `semantic` enum, the Crockford OperationId and the demotion pointer —
+all carded elsewhere), the writer's `supersedes` pointer and the Crockford legacy OperationId (B2,
+`t_5ef44cc1`).
+
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
