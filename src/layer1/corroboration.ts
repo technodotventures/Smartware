@@ -30,11 +30,16 @@ export function addCorroborationEvidence(
  * After removal:
  * - If supporting_evidence is now empty AND source or extraction provenance depended on it → retract
  * - If supporting_evidence is non-empty → recalculate confidence only
+ *
+ * `touchedScopes`, when given, collects the scope of every claim whose row this
+ * call writes — the caller (replay) reports it so the claim-FTS lane can be
+ * re-synced for exactly those scopes (kanban t_a6bf30a8).
  */
 export function removeEvidenceFromClaims(
   removedObsId: string,
   store: ClaimStore,
   invalidatedAt?: ClaimTimeValue,
+  touchedScopes?: Set<string>,
 ): string[] {
   const retracted: string[] = [];
   const allClaims = store.getActiveClaims();
@@ -48,6 +53,7 @@ export function removeEvidenceFromClaims(
       continue;
     }
 
+    touchedScopes?.add(claim.scope);
     const remaining = claim.supporting_evidence.filter(id => id !== removedObsId);
     store.updateClaimSupportingEvidence(claim.id, remaining);
 

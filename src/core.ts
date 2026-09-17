@@ -1425,7 +1425,17 @@ export class SmartwareCore {
 
   async correct(params: CorrectParams): Promise<CorrectResult> {
     this.fenceGuard('correct');
-    const result = await handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
+    const result = await handleCorrect(
+      params,
+      this.evidenceDir,
+      this.layer0,
+      this.store,
+      this.getConfig(),
+      // The correction's catch-up materialises claim rows for events this process
+      // has not replayed, in any scope — the lane re-syncs the scopes it touched
+      // (in addition to the corrected scope's re-sync below; kanban t_a6bf30a8).
+      this.searchIndex,
+    );
     // Keep the claim-FTS surface truthful, exactly as `consolidate()` does below:
     // CORRECT retracts the target claim and spawns a replacement, and both halves
     // live in the derived rows the index is built from. A verb that appends claim
@@ -1459,6 +1469,12 @@ export class SmartwareCore {
       this.store,
       this.getConfig(),
       { opsDir: this.opsDir },
+      undefined,
+      // FORGET ends with a catch-up that materialises claim rows for events
+      // this process has not replayed (a legacy/host claim_extracted, another
+      // writer's correction or tombstone). Without the lane it re-syncs
+      // nothing and live recall misses them until some later write (t_a6bf30a8).
+      this.searchIndex,
     );
     // Keep the raw-search window truthful after mutations: a terminal
     // observation (tombstone/redaction → tombstoned/redacted) must leave the
@@ -1553,6 +1569,10 @@ export class SmartwareCore {
       store: this.store,
       config,
       opsDir: this.opsDir,
+      // The sweep's catch-up (it runs when something expired) materialises claim
+      // rows for events this process has not replayed; the lane re-syncs the
+      // scopes it touched (kanban t_a6bf30a8).
+      searchIndex: this.searchIndex,
     });
   }
 
@@ -1641,6 +1661,10 @@ export class SmartwareCore {
       this.layer0,
       this.store,
       this.getConfig(),
+      // The review ends with a catch-up that materialises claim rows for events
+      // this process has not replayed; the lane re-syncs the scopes it touched
+      // (kanban t_a6bf30a8).
+      this.searchIndex,
     );
     // Quarantine approval flips quarantined → accepted: the row must move
     // into the raw-search window; rejection removes it.

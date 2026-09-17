@@ -12,6 +12,7 @@ import type { Layer0Index } from '../layer0/index.js';
 import type { ClaimStore } from '../layer1/store.js';
 import type { SmartwareConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
+import { resyncCatchUpScopes, type SearchIndex } from '../layer3/search.js';
 import { requireOwner, ProtocolError } from '../auth/middleware.js';
 import { TERMINAL_STATES } from '../layer0/types.js';
 import { SMARTWARE_VERSION } from '../version.js';
@@ -39,6 +40,13 @@ export async function handleQuarantineReview(
   layer0: Layer0Index,
   store: ClaimStore,
   config: SmartwareConfig,
+  /**
+   * The caller's claim-FTS lane, when it owns one. The review ends with a
+   * `replayCatchUp`, which materialises claim rows for events this process had
+   * not replayed yet and writes no index — passing the lane re-syncs exactly
+   * the scopes that catch-up touched (kanban t_a6bf30a8).
+   */
+  searchIndex?: SearchIndex,
 ): Promise<QuarantineReviewResult> {
   // Only the owner can approve or reject quarantined evidence.
   requireOwner(params.actor.id, config);
@@ -118,7 +126,12 @@ export async function handleQuarantineReview(
   //
   // Rejection is terminal — no further action required; replay's
   // effective-status guard already filters it out everywhere.
-  replayCatchUp(evidenceDir, store, layer0, config);
+  //
+  // Awaited (it was fire-and-forget before): the lane re-sync below must happen
+  // after the replay, and an un-awaited catch-up would also let its failures
+  // escape the handler.
+  const caughtUp = await replayCatchUp(evidenceDir, store, layer0, config);
+  resyncCatchUpScopes(searchIndex, store, caughtUp.touchedScopes);
 
   return {
     target_obs_id: params.target_obs_id,

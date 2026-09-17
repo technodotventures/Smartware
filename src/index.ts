@@ -567,6 +567,10 @@ async function start(): Promise<void> {
         layer0,
         store,
         freshConfig,
+        // The correction's catch-up materialises claim rows for events this
+        // process has not replayed (any scope); the lane re-syncs the scopes it
+        // touched (kanban t_a6bf30a8).
+        searchIndex,
       );
     }, 'correct'),
   );
@@ -633,6 +637,11 @@ async function start(): Promise<void> {
         store,
         freshConfig,
         { opsDir },
+        undefined,
+        // FORGET ends with a catch-up that materialises claim rows for events
+        // this process has not replayed; the lane re-syncs the scopes it touched
+        // (kanban t_a6bf30a8).
+        searchIndex,
       );
       reconcileObservationIndexRow(searchIndex, layer0, args.target_obs_id);
       return result;
@@ -730,6 +739,10 @@ async function start(): Promise<void> {
         layer0,
         store,
         freshConfig,
+        // The review ends with a catch-up that materialises claim rows for
+        // events this process has not replayed; the lane re-syncs the scopes it
+        // touched (kanban t_a6bf30a8).
+        searchIndex,
       );
       reconcileObservationIndexRow(searchIndex, layer0, args.target_obs_id);
       return result;

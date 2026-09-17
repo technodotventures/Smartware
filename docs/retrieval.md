@@ -35,6 +35,14 @@ re-syncing write (or the next open) removes the difference. Treat the counters
 as lane diagnostics, not as an authorization or lifecycle signal — `results`
 is the contract.
 
+The lane is also re-synced by the replay catch-up that FORGET, retention expiry,
+quarantine review, CORRECT and the compile pipeline run at the end of their work:
+any claim row that catch-up materialises from an event this process has not
+replayed (a host- or second-writer-written `claim_extracted`, a foreign
+`correction` or tombstone) is written into the lane for exactly the scopes it
+touched, so in-process recall equals what a fresh open serves after those verbs
+— including for events another writer introduced mid-session.
+
 ## Semantic and hybrid retrieval
 
 Semantic retrieval is an opt-in Layer 3 capability. A host supplies an

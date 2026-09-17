@@ -818,6 +818,31 @@ export function syncSearchFromClaims(store: ClaimStore, searchIndex: SearchIndex
 }
 
 /**
+ * Re-sync the claim-FTS lane for the scopes a replay catch-up touched.
+ *
+ * `replayCatchUp` materialises claim rows from events this process had not
+ * replayed yet (a legacy/host-written `claim_extracted`, another writer's
+ * `correction` or tombstone) and writes no index, so without this the live
+ * process answers without those claims until some later re-syncing write runs
+ * while every restart serves them — measured on all four call sites (FORGET,
+ * retention expiry, quarantine review, the compile pipeline): kanban
+ * `t_a6bf30a8`, instrument `scripts/kept-rows-settle-probe.mjs --arm 4`.
+ *
+ * Scoped on purpose: the re-sync is proportional to what the catch-up actually
+ * materialised, and a catch-up that replayed nothing returns no scopes (no
+ * work). `SmartwareCore.open` re-syncs the whole lane after its own catch-up —
+ * this is the same repair, narrowed to the scopes that moved.
+ */
+export function resyncCatchUpScopes(
+  searchIndex: SearchIndex | undefined,
+  store: ClaimStore,
+  touchedScopes: readonly string[],
+): void {
+  if (!searchIndex || touchedScopes.length === 0) return;
+  for (const scope of touchedScopes) syncSearchFromClaims(store, searchIndex, scope);
+}
+
+/**
  * Sync the raw-observation FTS index from the evidence JSONL.
  *
  * Regenerable artifact (spec §10a rebuild-equivalence): wipe and rebuild from

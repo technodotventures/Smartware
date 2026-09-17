@@ -96,6 +96,15 @@ evidence-tombstone retraction, not retrievability, and does so consistently afte
 pin is `test/protocol/claim-mutation-search-sync.test.ts` (RED at `ab9cf2b`: 1 failed | 5 passed, only
 the revive composition → GREEN 6/6).
 
+Verified 2026-09-17 on Node v26.5.1 for the **replay catch-up's missing lane re-sync** (kanban
+`t_a6bf30a8`, lane `wip/tech-head/catchup-lane-sync` off `wip/neo/kept-rows-settle` @ `fd55cc2`):
+**562 tests across 79 files** (+5 tests, +1 file — `test/protocol/replay-catchup-lane-sync.test.ts`),
+`tsc` clean, `verify:schemas` 31 schema files OK, `verify:saas` `SMOKE_OUTCOME=pass`,
+`verify:coffee-adapter` 53/53, **`verify:coffee-gate` 85/85** against the packed artifact
+(`smartware-0.7.0.tgz` sha256 `473c2ad276b1474e05a8b817fc33f7294cdb67a75e1371597f3a77e9ba907d4b`). The
+change, its five measured triggers and the RED/GREEN pair are described in the lane section below;
+the out-of-tree instrument is `scripts/kept-rows-settle-probe.mjs --arm 4`.
+
 Settled 2026-09-17 for the **kept-rows settle + async-compile mirror probe** (kanban `t_8779781f`,
 lane `wip/neo/kept-rows-settle` off `wip/tech-head/mutation-fts-sync` @ `8f2f362`; comment/doc-only
 `src/` change — the FORGET keep-rows design comment now states the counter difference it previously
@@ -120,6 +129,35 @@ materialises claims without re-syncing the claim-FTS lane, so live recall misses
 re-syncing write. Gate at `901861e`: **557 tests across 78 files**, `tsc` clean, `verify:schemas` 31
 files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz`
 sha256 `1aeea8ed…8111`), `npm audit` 0 vulnerabilities.
+
+Settled 2026-09-17 for the **catch-up's missing lane re-sync** (kanban `t_a6bf30a8`, lane
+`wip/tech-head/catchup-lane-sync` off `wip/neo/kept-rows-settle` @ `fd55cc2`; `src/` change):
+`replayCatchUp` materialises claim rows for events this process has not replayed (a legacy/host-written
+`claim_extracted`, another writer's `correction` or tombstone) and touches no search lane, so **every**
+call site that ends with one — FORGET, retention expiry, quarantine review, CORRECT and the compile
+pipeline — left live recall missing the claims it had just materialised while every restart served
+them. The catch-up now **reports the scopes it materialised** (`ReplayCatchUpResult.touchedScopes` —
+layer 1 stays lane-free and reports, the layer that owns the lane repairs) and each call site re-syncs
+exactly those scopes through `resyncCatchUpScopes` (`src/layer3/search.ts`). Two of the five sites were
+found by enumerating the catch-up's callers rather than by the card: COMPILE re-synced `options.scope`
+only while its catch-up replays the whole log tail, and CORRECT's core wrapper re-synced the corrected
+claim's scope only (both measured RED before the change). The quarantine-review catch-up is also
+`await`ed now — it was fire-and-forget, which let its failures escape the handler and made the
+ordering of the repair unspecified. Measured with `scripts/kept-rows-settle-probe.mjs` **arm 4** (five
+triggers, demotion-free: one foreign event asserting a NEW fact, so no fact match and no supersession
+is involved): pre-fix every trigger served `[]` in-process against the fresh open's `[claim]`, with the
+materialised row present in the store and absent from the lane; post-fix all five serve equal and the
+lane carries the row. Pin `test/protocol/replay-catchup-lane-sync.test.ts` (RED at `fd55cc2` with the
+final content: **5 failed | 0 passed** → GREEN **5/5**). The two settled arms are unchanged by this fix
+— arm 1's kept-row counters and arm 3's demotion mechanism are identical pre/post (re-run either way),
+and arm 2's live leg now serves the replacement claim its catch-up admitted, which is the point; its
+remaining live-vs-fresh difference on this base is the unmerged demotion resurrection above, not the
+catch-up. The repair lives in the **handlers**, so both dispatcher surfaces inherit it (`SmartwareCore`
+wrappers and `src/index.ts`'s MCP tools); `src/index.ts`'s *verb-level* repairs (e.g. `smartware_correct`
+still does no lane work of its own) are a separate gap, carded. Gate: **562 tests across 79 files**,
+`tsc` clean, `verify:schemas` 31 files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-adapter`
+53/53, `verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz` sha256 `473c2ad2…7d4b`), `npm audit` 0
+vulnerabilities.
 
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
