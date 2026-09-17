@@ -62,10 +62,14 @@ sequences / `|-` are the reader lane's decision, not this fix's):
   the same flow proceed (pinned).
 
 Non-tautological: the pin (sha256
-`50067424f5c255ebe8701633f212f9a96dd467788602e0ce531fbc075ff989ac`) is **2 failed | 1 passed (3)**
+`89f8744e86f5bebdaafdf1d93a1098cc5d4ac2285c76cbec431d25cfa2d849b5`) is **2 failed | 1 passed (3)**
 in a worktree at `a415578` with the fix absent (byte-identical pin; the two feature tests fail on
 `Error` / no page named / the wrapper not exported; the write-boundary control passes on both
-arms) and **3 passed (3)** on the fix. Controls on the compile path: a homogeneous object array
+arms) and **3 passed (3)** on the fix. The reader half is asserted structurally (a mixed
+object/non-object array) rather than as exact values: on a combined tree that also carries the
+reader lane's `- |-` fix (`t_6fc254cd`, PR #34) the item parses as its content (`"text"` instead
+of the marker `"|-"`) while the array stays mixed and the refusal stands — the pin passes on both
+ancestries (measured). Controls on the compile path: a homogeneous object array
 and a bare string array both compile and are carried — the refusal is the *mixed* shape only, no
 over-refusal added. Gate: `npm run build` exit 0; focused `test/layer2` **6 files / 36 tests**;
 full suite **81 files / 575 tests exit 0** (133 s); `verify:schemas` 31 files OK; `verify:saas`

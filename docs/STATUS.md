@@ -33,6 +33,7 @@
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
 | `integration/v0.8.0` | 204 | 2026-09-17 | Merge branch 'wip/neo/adr-numbering-rule' into integration/v0.8.0 |
+| `tmp/t_5742162f-mix` | 93 | 2026-09-17 | tmp: combined tree for t_5742162f merge-order measurement |
 | `wip/neo/frontmatter-write-residuals` | 86 | 2026-09-17 | docs(t_15b309f3): make the write-boundary lane's R2 and reachability claims true |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
@@ -42,10 +43,10 @@
 | `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
 | `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
 | `wip/neo/consent-change-scope` | 76 | 2026-09-16 | docs: regenerate the STATUS projection (branch row, journal count, in-flight tips) |
+| `wip/tech-head/catchup-lane-sync` | 75 | 2026-09-17 | docs: regenerate the STATUS projection at this round's tip (t_a6bf30a8) |
 | `wip/tech-head/l2-page-frontmatter-schema` | 74 | 2026-09-16 | docs(journal): correct the push-blocker paragraph — the branch is published as PR #22 |
 | `wip/smarty/l0-record-schema` | 73 | 2026-09-16 | docs(journal): name the published PR and the CI result (t_f1157ed4) |
 | `wip/tech-head/l1-claim-record-boundary` | 73 | 2026-09-17 | docs: regenerate the STATUS projection at the round-1-correction tip (t_11fed5bb) |
-| `wip/tech-head/catchup-lane-sync` | 72 | 2026-09-17 | docs: regenerate the STATUS projection at the final tip (t_a6bf30a8) |
 | `wip/smarty/canonical-schema-boundary` | 69 | 2026-09-16 | docs(journal): fix the pushed-tip clause in the t_74faf12d entry (review round 1, neo) |
 | `wip/neo/kept-rows-settle` | 66 | 2026-09-17 | docs(journal): exact completion timestamp; STATUS regenerated at the final tip (t_8779781f) |
 | `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
@@ -144,7 +145,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (129 tasks, 9404 events)
+- ✅ kanban board readable (129 tasks, 9411 events)
 - ⚠️ 67 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 

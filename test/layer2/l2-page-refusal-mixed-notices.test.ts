@@ -54,8 +54,13 @@ const ACTOR = { type: 'person' as const, id: 'user:local', display_name: 'Owner'
 const BODY = '# Graphiti API\n\nProse.\n';
 
 /**
- * The three hand-authored blocks the reader produces a mixed array from, with the parse each one
- * yields (all three measured first-party; the same rows as the VERIFY's `N1.notices-*`).
+ * The three hand-authored blocks the reader produces a mixed array from. `parsed` records what each
+ * one parses to on this ancestry (measured first-party; the same rows as the VERIFY's
+ * `N1.notices-*`) — the loop below asserts the *mixed* property structurally rather than these
+ * exact values, because the reader lane (`t_6fc254cd`, PR #34) reads a `- |-` item as the block's
+ * content (`"text"`) instead of the marker string (`"|-"`) once the two lanes are on one tree; the
+ * array stays mixed (mapping + string) and the refusal stands. Measured on a combined tree
+ * (`evidence/named-shapes-combined.json` in the task's bundle); the pin passes on both ancestries.
  */
 const MIXED_NOTICE_BLOCKS: Array<{ label: string; block: string; parsed: unknown[] }> = [
   {
@@ -261,10 +266,18 @@ describe('L2 page frontmatter — the re-serialise refuses by page, not by seria
       const bytes = afterEndorse.replace('notices: []\n', shape.block);
       assert.ok(bytes.includes(shape.block), `fixture (${shape.label}): the block was spliced in`);
       writeFileSync(pagePath, bytes, 'utf8');
-      assert.deepEqual(
-        parseFrontmatter(readFileSync(pagePath, 'utf8'))!.frontmatter['notices'],
-        shape.parsed,
-        `${shape.label}: the reader yields the mixed array (the reachable half)`,
+      // The reachable half, asserted as the property the refusal keys off (a mixed object /
+      // non-object array — see the shape table for this ancestry's exact values).
+      const mixedItems = parseFrontmatter(readFileSync(pagePath, 'utf8'))!.frontmatter['notices'] as unknown[];
+      assert.ok(Array.isArray(mixedItems), `${shape.label}: the reader yields an array`);
+      const mappingItems = mixedItems.filter(item => typeof item === 'object' && item !== null && !Array.isArray(item));
+      assert.ok(
+        mappingItems.length > 0 && mappingItems.length < mixedItems.length,
+        `${shape.label}: the reader yields a mixed object/non-object array (the reachable half) — got ${JSON.stringify(mixedItems)}`,
+      );
+      assert.ok(
+        mappingItems.some(item => (item as { type?: unknown }).type === 'staleness'),
+        `${shape.label}: the notice mapping survives the parse — got ${JSON.stringify(mixedItems)}`,
       );
 
       const core = await SmartwareCore.open({ dataDir });
