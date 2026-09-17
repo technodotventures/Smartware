@@ -1441,13 +1441,28 @@ export class SmartwareCore {
 
   async revise(params: ReviseParams): Promise<ReviseResult> {
     this.fenceGuard('revise');
-    return handleReviseSpec(
+    const result = await handleReviseSpec(
       params,
       this.dataDir,
       this.store,
       this.getConfig(),
       { opsDir: this.opsDir },
     );
+    // Keep the claim-FTS surface truthful, exactly as `correct()` above and
+    // `consolidate()` below do: REVISE appends a claim version through the
+    // store, and the derived rows the index is built from move with it. A verb
+    // that resyncs nothing answers a warranted revision with a claim the search
+    // lane cannot see — the other half of the corrected claim keeps answering,
+    // the revised one does not, until some later write happens to re-sync the
+    // scope (measured through the Coffee adapter, kanban t_336ba0b9: in-process
+    // recall served one row while every restart — the canonical surface —
+    // served two). The re-sync is semantics-neutral on purpose: it makes the
+    // live lane equal whatever the store says is indexable, so it holds
+    // whether a REVISE leaves the target active or (per the demotion
+    // carry-forward decision, t_742e31f9) still superseded.
+    const revisedScope = this.store.getClaim(result.claim_id)?.scope;
+    syncSearchFromClaims(this.store, this.searchIndex, revisedScope);
+    return result;
   }
 
   async forget(params: ForgetParams): Promise<ForgetResult> {
