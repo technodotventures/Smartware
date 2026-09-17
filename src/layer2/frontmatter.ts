@@ -8,7 +8,15 @@
 // reads back unchanged for the page vocabulary (`schemas/v0.5.0/page-frontmatter.schema.json`):
 // scalars, string arrays, and arrays of notice objects of scalar values. Shapes outside that
 // vocabulary are refused at the write boundary (`assertPageVocabulary`) rather than emitted in a
-// form the reader would silently flatten or drop (t_cf744a8e).
+// form the reader would silently flatten or drop (t_cf744a8e). Refinements from t_5768425d:
+// a string the reader would coerce to another type (`"123"`, `"true"`, `"null"`, the `0x10`/`1e3`/
+// `Infinity` spellings) is written quoted so it reads back as the string it was, and the guard
+// reaches every value position — a mapping nested at any depth, a mixed scalar/object array —
+// rather than only one level into a notice item. t_0e19036e closes the array positions: a
+// non-string scalar or an array as an array element and an empty object item are refused (the
+// t_cf744a8e nested-sequence carve-out is superseded on the write side — it was the same
+// uncarriable class), and a multi-line string as an array element is supported by emitting the
+// block form (`- |`) the reader already decodes.
 
 import { toPageCategory } from './paths.js';
 
@@ -35,9 +43,11 @@ export function parseFrontmatter(raw: string): { frontmatter: Record<string, unk
 /**
  * Serialise frontmatter + body back to a full markdown string.
  *
- * Refuses (throws on) a value the minimal reader cannot carry — a nested object anywhere in the
- * page vocabulary's value positions (t_cf744a8e) — instead of writing YAML that flattens or drops
- * it on the next read.
+ * Refuses (throws on) a value the minimal reader cannot carry — a mapping at any value position,
+ * a mixed scalar/object array, a non-string scalar or an array as an array element, an empty
+ * object item (t_cf744a8e, t_5768425d, t_0e19036e) — instead of writing YAML that flattens,
+ * drops or retypes it on the next read. A multi-line string inside a string array is carried in
+ * the block form, not refused.
  */
 export function serialiseFrontmatter(frontmatter: Record<string, unknown>, body: string): string {
   assertPageVocabulary(frontmatter);
@@ -58,21 +68,70 @@ function isObjectValue(value: unknown): value is Record<string, unknown> {
  * scalars: `schemas/v0.5.0/page-frontmatter.schema.json` declares no object-valued field and the
  * top level is `additionalProperties: false`. `toYAML` writes an object value as `key:` plus
  * indented lines, and `parseYAML` reads one `key: value` per line with no indentation model, so
- * those lines come back flattened into the *parent* — `{meta: {a: b}}` inside a notice item reads
- * as `{meta: …, a: b}`, and at the top level `a` leaks out as a stray page key. The value is lost,
- * not merely re-shaped (measured on t_cf744a8e). Refuse the write and name the offending field.
+ * an object at a *property position* comes back flattened into the nearest enclosing mapping with
+ * its own key lost — `{meta: {a: b}}` inside a notice item reads as `{meta: …, a: b}`, at the top
+ * level `a` leaks out as a stray page key, and inside a nested array both levels of keys are
+ * pulled up (`notices[0].links[0].meta` loses `meta`). The value is lost, not merely re-shaped
+ * (measured on t_cf744a8e; the deeper positions on t_5768425d). The walk refuses it and names the
+ * offending field path; `assertArrayCarriable` below adds the array-only shapes — a non-string
+ * element, an array element, an empty object item (t_0e19036e).
  */
 function assertPageVocabulary(frontmatter: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(frontmatter)) {
     if (isObjectValue(value)) rejectNestedObject(key);
-    if (!Array.isArray(value)) continue;
-    value.forEach((item, index) => {
-      if (!isObjectValue(item)) return;
-      for (const [itemKey, itemValue] of Object.entries(item)) {
-        if (isObjectValue(itemValue)) rejectNestedObject(`${key}[${index}].${itemKey}`);
+    if (Array.isArray(value)) assertArrayCarriable(value, key);
+  }
+}
+
+/**
+ * Walk one array the writer is about to emit. `toYAML` has two carriable array forms and picks
+ * between them by item kind: an all-string array — inline `[a, b]`, or the block form (`- a`,
+ * `- |` + lines) when an element contains a newline — and an all-object array, written as block
+ * items (`- key: value`). Two rules keep the forms honest, both refusing a value rather than
+ * emitting bytes the reader cannot bring back (t_5768425d, t_0e19036e):
+ *
+ * - A **mixed** array (some object items, some not) is refused: the writer would write the
+ *   non-object items through `String(item)` (`[a, [object Object]]`, or `0: a` lines
+ *   object-first), and nothing reads back.
+ * - An array with no object items can carry **strings only**: the inline form writes every
+ *   element as a string and the reader reads every element back as one, so a number, boolean or
+ *   null element silently changes type (`[1, 2]` → `["1","2"]`, `[null]` → `["null"]`), and a
+ *   null *first* element additionally sent the pre-fix writer down the block branch into a raw
+ *   `Object.entries(null)` TypeError with no field name (t_5708fed6, `X.number_array` /
+ *   `X.null_first_item_array`). An **array** element is never carriable at all (`String([])` →
+ *   `''`; `Object.entries` → `0: …` lines) — including the pure nested sequence, whose
+ *   t_cf744a8e "written, still garbled, documented" carve-out this supersedes: it is the same
+ *   uncarriable class the mixed-array rule refuses, and the honest failure is a loud refusal, not
+ *   silent flattening (t_5768425d's C2 reasoning; `[["x"]]` inside a notice item is
+ *   contract-legal — notices items carry no `additionalProperties: false` — which is exactly why
+ *   the write boundary, not the contract, has to catch it).
+ *
+ * Each object item's properties are value positions in their own right: a mapping there is the
+ * flattening case above (`notices[0].links[0].meta`), an array there recurses — arrays of objects
+ * inside a notice item round-trip (t_5768425d, probe rows C2ctl1–C2ctl2) — and an object item
+ * with no properties is refused too, because a block item is written from its `key: value` lines
+ * and an empty item reads back as an empty string.
+ */
+function assertArrayCarriable(items: unknown[], path: string): void {
+  if (items.length === 0) return;
+  const objectItems = items.filter(isObjectValue);
+  if (objectItems.length === items.length) {
+    items.forEach((item, index) => {
+      const entries = Object.entries(item as Record<string, unknown>);
+      if (entries.length === 0) rejectEmptyItem(`${path}[${index}]`);
+      for (const [itemKey, itemValue] of entries) {
+        const propertyPath = `${path}[${index}].${itemKey}`;
+        if (isObjectValue(itemValue)) rejectNestedObject(propertyPath);
+        if (Array.isArray(itemValue)) assertArrayCarriable(itemValue, propertyPath);
       }
     });
+    return;
   }
+  if (objectItems.length > 0) rejectMixedArray(path);
+  items.forEach((item, index) => {
+    if (Array.isArray(item)) rejectNestedArrayItem(`${path}[${index}]`);
+    if (typeof item !== 'string') rejectArrayItem(`${path}[${index}]`, item);
+  });
 }
 
 function rejectNestedObject(field: string): never {
@@ -80,6 +139,49 @@ function rejectNestedObject(field: string): never {
     `serialiseFrontmatter: page field "${field}" holds a nested object, which the page YAML `
     + `vocabulary cannot carry (strings, string arrays, and notice objects of scalar values only); `
     + `flatten the value or extend the page contract (schemas/v0.5.0/page-frontmatter.schema.json) first`,
+  );
+}
+
+function rejectMixedArray(field: string): never {
+  throw new Error(
+    `serialiseFrontmatter: page field "${field}" mixes scalar and object items in one array, which `
+    + `the page YAML vocabulary cannot carry (write a string array or an array of objects, not both); `
+    + `split the value or extend the page contract (schemas/v0.5.0/page-frontmatter.schema.json) first`,
+  );
+}
+
+/** A non-string scalar as an array element: the inline form would read it back as a string. */
+function rejectArrayItem(field: string, value: unknown): never {
+  const kind = value === null ? 'null'
+    : typeof value === 'number' ? 'a number'
+      : typeof value === 'boolean' ? 'a boolean'
+        : typeof value === 'undefined' ? 'undefined'
+          : `a ${typeof value}`;
+  throw new Error(
+    `serialiseFrontmatter: page field "${field}" holds ${kind}, which the page YAML vocabulary `
+    + `cannot carry as an array item (an array is written as a string array; the reader reads every `
+    + `inline element back as the string it is); write the element as a string or extend the page `
+    + `contract (schemas/v0.5.0/page-frontmatter.schema.json) first`,
+  );
+}
+
+/** An array as an array element (a nested sequence): `String`/`Object.entries` it, never read back. */
+function rejectNestedArrayItem(field: string): never {
+  throw new Error(
+    `serialiseFrontmatter: page field "${field}" holds an array item (a nested sequence), which `
+    + `the page YAML vocabulary cannot carry (an array is a string array or an array of objects — `
+    + `an element is never itself an array); flatten the value or extend the page contract `
+    + `(schemas/v0.5.0/page-frontmatter.schema.json) first`,
+  );
+}
+
+/** An object item with no properties: the block form writes a bare dash, read back as `''`. */
+function rejectEmptyItem(field: string): never {
+  throw new Error(
+    `serialiseFrontmatter: page field "${field}" is an object item with no properties, which the `
+    + `page YAML vocabulary cannot carry (a block item is written from its key: value lines, so an `
+    + `empty item reads back as an empty string); drop the item or extend the page contract `
+    + `(schemas/v0.5.0/page-frontmatter.schema.json) first`,
   );
 }
 
@@ -135,15 +237,35 @@ function toYAML(obj: Record<string, unknown>, indent = 0): string {
         // (`- key: value`, continuation keys aligned under the first one). The item indent must
         // NOT be left inside the dash line: that shape (`-     key: value` with the continuation
         // lines at a *shallower* column) is invalid YAML for a real reader and did not survive
-        // this file's own parser (t_4d84ff6b).
+        // this file's own parser (t_4d84ff6b). The guard has already refused every item that is
+        // not an object, so the cast is sound.
         for (const item of val) {
           const itemLines = toYAML(item as Record<string, unknown>, indent + 4).split('\n').filter(Boolean);
           const [first = '', ...rest] = itemLines;
           lines.push(`${pad}  - ${first.slice(indent + 4)}`);
           for (const l of rest) lines.push(l);
         }
+      } else if ((val as string[]).some(item => item.includes('\n'))) {
+        // A string array with a multi-line element: the inline form cannot carry a newline — the
+        // quoted element would span lines and the whole array would read back as one string
+        // (measured on t_0e19036e, probe S2.aliases_elem rows). Write the block form instead:
+        // `- item` lines, and `- |` plus the indented content for each multi-line element. The
+        // reader already decodes both (t_cf744a8e's block-scalar item branch); this is also the
+        // form the writer uses for a multi-line mapping value. The guard has already refused
+        // every non-string element, so the cast is sound.
+        lines.push(`${pad}${key}:`);
+        for (const item of val as string[]) {
+          if (!item.includes('\n')) {
+            lines.push(`${pad}  - ${yamlString(item)}`);
+            continue;
+          }
+          lines.push(`${pad}  - |`);
+          for (const contentLine of item.split('\n')) lines.push(`${pad}    ${contentLine}`);
+        }
       } else {
-        lines.push(`${pad}${key}: [${(val as unknown[]).map(v => yamlString(String(v))).join(', ')}]`);
+        // All-string and single-line: the inline form (the guard has already refused every
+        // non-string element, so `yamlString` sees strings only).
+        lines.push(`${pad}${key}: [${(val as string[]).map(v => yamlString(v)).join(', ')}]`);
       }
     } else if (typeof val === 'object') {
       lines.push(`${pad}${key}:`);
@@ -157,10 +279,35 @@ function yamlString(s: string): string {
   // The empty scalar is written `""`: `key: ` (or an empty array element) would read back as a
   // dropped key / YAML null instead of the empty string it was (t_cf744a8e).
   if (s === '') return '""';
-  if (/[:\[\]{},&*#?|<>=!%@`'"]/.test(s) || s.includes('\n') || s.startsWith(' ') || s.endsWith(' ')) {
+  // A string the reader's coercion would turn into another type is quoted too: written bare,
+  // `summary: "123"` read back as the number 123 and the page failed its own contract after a
+  // write it made itself (`/summary:type`; t_5768425d). `isCoercedScalar` is the reader's own
+  // predicate, so the two halves cannot drift.
+  if (isCoercedScalar(s) || /[:\[\]{},&*#?|<>=!%@`'\"]/.test(s) || s.includes('\n') || s.startsWith(' ') || s.endsWith(' ')) {
     return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
   return s;
+}
+
+/**
+ * The scalar spellings `readBareScalar` reads as a non-string value: `true`/`false`/`null`, or
+ * anything `Number` accepts (`123`, `1.50`, `0x10`, `1e3`, `Infinity`, `007`, `.5`, `5.`, …).
+ * Shared by the reader (which coerces them) and the writer (which quotes them, so a string that
+ * only looks like one of them reads back as the string it was) — one predicate, no drift
+ * (t_5768425d).
+ */
+function isCoercedScalar(raw: string): boolean {
+  return raw === 'true' || raw === 'false' || raw === 'null'
+    || (raw !== '' && !isNaN(Number(raw)));
+}
+
+/** Read one scalar with the type the coercion above implies. */
+function readBareScalar(raw: string): unknown {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === 'null') return null;
+  if (isCoercedScalar(raw)) return Number(raw);
+  return unquote(raw);
 }
 
 /** Minimal YAML parser — handles our specific frontmatter schema */
@@ -210,16 +357,8 @@ function parseYAML(yaml: string): Record<string, unknown> {
       // to the element (t_cf744a8e: `["alpha, beta"]` used to split into two malformed values).
       const inner = rest.slice(1, -1).trim();
       result[key] = inner === '' ? [] : splitInlineArray(inner);
-    } else if (rest === 'true') {
-      result[key] = true;
-    } else if (rest === 'false') {
-      result[key] = false;
-    } else if (rest === 'null') {
-      result[key] = null;
-    } else if (!isNaN(Number(rest)) && rest !== '') {
-      result[key] = Number(rest);
     } else {
-      result[key] = unquote(rest);
+      result[key] = readBareScalar(rest);
     }
     i++;
   }
