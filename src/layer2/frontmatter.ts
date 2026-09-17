@@ -17,10 +17,14 @@
 // t_cf744a8e nested-sequence carve-out is superseded on the write side — it was the same
 // uncarriable class), and a multi-line string as an array element is supported by emitting the
 // block form (`- |`) the reader already decodes — for an element whose minimum indentation over
-// its non-blank lines is 0 (some line's content starts at column 0). An all-indented element is a
-// disclosed, pinned remaining loss, not a refusal: the writer's fixed 4-space prefix and the
-// reader's minimum-indent strip take the element's own indentation with them (`' a\n b'` reads
-// back `'a\nb'`), silently (independent VERIFY t_6012c8ca Finding 1).
+// its non-blank lines is 0 (some line's content starts at column 0) and which carries no
+// whitespace-only line. Two sub-classes are disclosed, pinned remaining losses, not refusals. An
+// all-indented element: the writer's fixed 4-space prefix and the reader's minimum-indent strip
+// take the element's own indentation with them (`' a\n b'` reads back `'a\nb'`), silently
+// (independent VERIFY t_6012c8ca Finding 1). An element carrying a whitespace-only line: the
+// reader replaces such a line with the empty string before that strip, so those characters are
+// lost whatever the indentation (`'a\n \nb'` reads back `'a\n\nb'`) — pre-existing on both arms,
+// the C4 half of t_6fc254cd (independent VERIFY t_cee7412a).
 
 import { toPageCategory } from './paths.js';
 
@@ -51,9 +55,11 @@ export function parseFrontmatter(raw: string): { frontmatter: Record<string, unk
  * a mixed scalar/object array, a non-string scalar or an array as an array element, an empty
  * object item (t_cf744a8e, t_5768425d, t_0e19036e) — instead of writing YAML that flattens,
  * drops or retypes it on the next read. A multi-line string inside a string array is carried in
- * the block form, not refused, when some line's content starts at column 0; an all-indented
- * element is written the same way but reads back de-indented (the reader's minimum-indent strip —
- * a disclosed remaining loss, not an over-refusal; see the module header).
+ * the block form, not refused, when some line's content starts at column 0 and no line is
+ * whitespace-only; an all-indented element reads back de-indented (the reader's minimum-indent
+ * strip) and an element carrying a whitespace-only line reads back with that line's characters
+ * gone (the reader collapses it first) — two disclosed remaining losses, not over-refusals; see
+ * the module header.
  */
 export function serialiseFrontmatter(frontmatter: Record<string, unknown>, body: string): string {
   assertPageVocabulary(frontmatter);
@@ -259,9 +265,11 @@ function toYAML(obj: Record<string, unknown>, indent = 0): string {
         // reader already decodes both (t_cf744a8e's block-scalar item branch); this is also the
         // form the writer uses for a multi-line mapping value. The guard has already refused
         // every non-string element, so the cast is sound. Reading is exact when some line's
-        // content starts at column 0; an all-indented element loses its own minimum indent to the
-        // reader's minimum-indent strip (`' a\n b'` reads back `'a\nb'`) — disclosed and pinned,
-        // not refused (t_6012c8ca Finding 1).
+        // content starts at column 0 and no line is whitespace-only; an all-indented element
+        // loses its own minimum indent to the reader's minimum-indent strip (`' a\n b'` reads back
+        // `'a\nb'`), and a whitespace-only line is collapsed to '' before that strip (`'a\n \nb'`
+        // reads back `'a\n\nb'`) — both disclosed and pinned, not refused (t_6012c8ca Finding 1;
+        // t_cee7412a).
         lines.push(`${pad}${key}:`);
         for (const item of val as string[]) {
           if (!item.includes('\n')) {

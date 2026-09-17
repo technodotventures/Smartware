@@ -62,18 +62,25 @@ back and supporting the one it can:
 - a **multi-line string as an array element** (`aliases: ['a\nb']`) is contract-legal
   (`aliases.items` is a plain string) and was silently destroyed — the writer quoted the element
   across lines and the whole array read back as one string. **SUPPORTED when the element's
-  minimum indentation over its non-blank lines is 0** (some line's content starts at column 0 —
-  every spelling in the pin, and the whole 5569-row probe corpus): the writer now emits the block
+  minimum indentation over its non-blank lines is 0 and the element carries no whitespace-only
+  line** (some line's content starts at column 0, and every other line is either empty or carries
+  content): the writer now emits the block
   form (the `- <str>` item form, and the `- |` block form for multi-line elements) that the
   reader has decoded since `t_cf744a8e`'s shape 6, and a hand-authored block-array page is no
   longer corrupted on re-serialise. **Not supported, disclosed and pinned** (VERIFY `t_6012c8ca`
-  Finding 1): an **all-indented** element silently loses its own minimum indentation to the
+  Finding 1; VERIFY `t_cee7412a` for the second sub-class): an **all-indented** element silently
+  loses its own minimum indentation to the
   writer's fixed 4-space prefix plus `readBlockScalar`'s minimum-indent strip — `' a\n b'` reads
-  back `'a\nb'`, `'  a\n b'` reads back `' a\nb'` — and the same reset appears at every array
+  back `'a\nb'`, `'  a\n b'` reads back `' a\nb'`. An element carrying a **whitespace-only line**
+  (blank but not empty) is the second sub-class: `readBlockScalar` replaces such a line with the
+  empty string *before* the strip, so those characters are lost whatever the element's
+  indentation — the corpus's own `'a\n \nb'`, min indentation 0 over its non-blank lines, reads
+  back `'a\n\nb'` (the same-status byte change quoted below). Both resets appear at every array
   position the writer emits (the pre-existing `key: |` mapping-value path behaves identically).
   The string is contract-legal and deliberately **not** refused (refusing it would be an
-  over-refusal); it is a host-constructed-value loss only — a hand-authored all-indented block
-  already loses the indent at *read*, so the compile/endorse re-serialise path cannot re-lose it.
+  over-refusal); both are host-constructed-value losses only — a hand-authored all-indented block
+  already loses the indent at *read* and a hand-authored whitespace-only line already loses its
+  characters at *read*, so the compile/endorse re-serialise path cannot re-lose either.
 
 Correction note (`t_15b309f3`, after the independent VERIFY `t_6012c8ca`): the R2 bullet and the
 reachability clause above are the corrected text — the fix commit `4a30730` and the first docs
@@ -86,8 +93,23 @@ entry. No refusal semantics, no emitted bytes for carriable shapes and no publis
 changed: the corrected pin reproduces **5 failed | 2 passed (7)** at `c740511` and **7 passed (7)**
 on the fix, and the 5569-row and byte-level re-runs reproduce the numbers quoted here.
 
-Non-tautological: the corrected pin file (sha256
-`be19837ad18311f109c4b19388d4d836de8f389b1523563c5e5b11280b239585`) is **5 failed | 2 passed (7)**
+Amendment (`t_9bdc35ce`, text only, after the independent VERIFY `t_cee7412a`): the R2 SUPPORTED
+class above gained its **second qualifier** — the element must also carry no whitespace-only line.
+The corpus's own `'a\n \nb'` has min indentation 0 over its non-blank lines and still does not
+round-trip: `readBlockScalar` collapses a whitespace-only line to the empty string *before* the
+minimum-indent strip, so the characters are lost whatever the indentation (measured at four
+positions on both fix arms; mechanism and the 20-spelling × 4-position sweep in the VERIFY's §3).
+Amended in the same three surfaces (the pin's R2 header and measured resets, the `frontmatter.ts`
+comments, this entry) and **pinned** by the `'a\n \nb'` → `'a\n\nb'` rows added to the pin's R2
+measured-reset block. Provenance is unchanged and pre-existing: the loss is reader behaviour on
+both arms — the C4 half of `t_6fc254cd`, not in this ancestry — and it is the one same-status byte
+change the byte-level re-run quotes. No code, refusal semantics, emitted bytes for carriable
+shapes or published schema byte changed: the amended pin still reproduces **5 failed | 2 passed
+(7)** at `c740511` and **7 passed (7)** on the fix.
+
+Non-tautological: the pin file (sha256
+`8e0f960508c7f60c1ed4ee9c5bbced381fae3b2dbb8cabeb77fe117abdb1d102`, the `t_9bdc35ce` amendment
+included) is **5 failed | 2 passed (7)**
 in a worktree at `c740511` with the fix absent (the 5 feature pins fail; the 2 controls pass on
 both arms) and **7 passed (7)** on the fix; the independent probe's 5569 rows move exactly 208 —
 51 `LOSS → PASS` (every one a `S2.aliases_elem` newline string) and 157 `STATUS_MOVED_OTHER` (81
@@ -106,7 +128,8 @@ byte-level re-run of the same corpus shows emitted frontmatter
 byte-identical on 5256 rows; every byte change is on a row whose status moved, plus one row
 (`'a\n \nb'`) whose status was and stays LOSS. Remaining at this tip: that string loses the space
 on its whitespace-only line at four positions — pre-existing reader behaviour (`readBlockScalar`,
-identical on both arms; the C4 half of `t_6fc254cd`, not in this ancestry) — `tags: ['123']`
+identical on both arms; the C4 half of `t_6fc254cd`, not in this ancestry), pinned in the pin's R2
+measured-reset block (`t_9bdc35ce`) — `tags: ['123']`
 still fails the published `Tag` pattern (a contract refusal, not a serialiser defect), and the
 all-indented multi-line array element above (`' a\n b'` → `'a\nb'`) stays a silent
 host-constructed-value loss (measured reset, pinned in the pin's R2 test; not refused; not

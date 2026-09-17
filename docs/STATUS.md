@@ -25,14 +25,15 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-17-t_4d84ff6b.md`](journal/2026-09-17-t_4d84ff6b.md) — A populated `notices` array now round-trips the page YAML serialiser (2026-09-17)
-- **Journal entries:** 41 · tasks completed on board `smartware`: 107
+- **Journal entries:** 41 · tasks completed on board `smartware`: 111
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
-| `integration/v0.8.0` | 204 | 2026-09-17 | Merge branch 'wip/neo/adr-numbering-rule' into integration/v0.8.0 |
+| `integration/v0.8.0` | 206 | 2026-09-17 | chore: bump version 0.7.0 -> 0.8.0 |
+| `wip/neo/compile-page-refusal` | 91 | 2026-09-17 | docs: regenerate the STATUS projection (live board counter; t_5742162f) |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
 | `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
@@ -41,10 +42,11 @@
 | `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
 | `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
 | `wip/neo/consent-change-scope` | 76 | 2026-09-16 | docs: regenerate the STATUS projection (branch row, journal count, in-flight tips) |
+| `wip/neo/mcp-lane-sweep` | 75 | 2026-09-17 | docs: regenerate the STATUS projection at this round's tip (t_a6bf30a8) |
+| `wip/tech-head/catchup-lane-sync` | 75 | 2026-09-17 | docs: regenerate the STATUS projection at this round's tip (t_a6bf30a8) |
 | `wip/tech-head/l2-page-frontmatter-schema` | 74 | 2026-09-16 | docs(journal): correct the push-blocker paragraph — the branch is published as PR #22 |
 | `wip/smarty/l0-record-schema` | 73 | 2026-09-16 | docs(journal): name the published PR and the CI result (t_f1157ed4) |
 | `wip/tech-head/l1-claim-record-boundary` | 73 | 2026-09-17 | docs: regenerate the STATUS projection at the round-1-correction tip (t_11fed5bb) |
-| `wip/tech-head/catchup-lane-sync` | 72 | 2026-09-17 | docs: regenerate the STATUS projection at the final tip (t_a6bf30a8) |
 | `wip/smarty/canonical-schema-boundary` | 69 | 2026-09-16 | docs(journal): fix the pushed-tip clause in the t_74faf12d entry (review round 1, neo) |
 | `wip/neo/kept-rows-settle` | 66 | 2026-09-17 | docs(journal): exact completion timestamp; STATUS regenerated at the final tip (t_8779781f) |
 | `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
@@ -111,8 +113,6 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
 - `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
-- `t_5742162f` [ready] FIX (low, DECIDE-first): the COMPILE re-serialise throws on a page whose `notices` array mixes mapping and non-mapping items — the mixed-array write refusal is reachable from the reader (measured end-to-end, pre-existing on both arms) (created 2026-09-17, assignee neo)
-- `t_dae50f51` [todo] FIX (lead, read-only evidence): the MCP dispatcher surface (`src/index.ts`) never got the verb-level claim-FTS lane repairs — `smartware_correct` answers [] over MCP until a restart (created 2026-09-17, assignee neo)
 
 ## Blockers and stale work
 
@@ -143,8 +143,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (128 tasks, 9351 events)
-- ⚠️ 66 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (130 tasks, 9470 events)
+- ⚠️ 70 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index

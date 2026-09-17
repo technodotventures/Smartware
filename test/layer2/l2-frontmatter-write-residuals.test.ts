@@ -29,13 +29,14 @@
 //   R2 — a multi-line string as an inline-array element (`aliases: ['a\nb']`) is CONTRACT-LEGAL
 //   (`aliases.items` is a plain string) and was silently destroyed: the writer's quote branch
 //   emits a literal newline inside the inline array, so the whole array read back as one string.
-//   SUPPORTED now when the element's minimum indentation over its non-blank lines is 0 — some
-//   line's content starts at column 0 (every spelling pinned below, and the whole 5569-row probe
-//   corpus): an all-string array with such a multi-line element is written in the block form the
-//   reader already decodes (`- <str>` items, `- |` + indented lines for the multi-line ones — the
-//   t_cf744a8e shape-6 reader support, which the writer never emitted). This also repairs a
-//   re-serialise hazard: a hand-authored `aliases:\n  - |\n    a\n    b` page read as `['a\nb']`
-//   used to be re-emitted corrupted.
+//   SUPPORTED now when the element's minimum indentation over its non-blank lines is 0 **and the
+//   element carries no whitespace-only line** — some line's content starts at column 0, and every
+//   other line is either empty or carries content (the seven spellings in the round-trip loop
+//   below all round-trip): an all-string array with such a multi-line element is written in the
+//   block form the reader already decodes (`- <str>` items, `- |` + indented lines for the
+//   multi-line ones — the t_cf744a8e shape-6 reader support, which the writer never emitted). This
+//   also repairs a re-serialise hazard: a hand-authored `aliases:\n  - |\n    a\n    b` page read
+//   as `['a\nb']` used to be re-emitted corrupted.
 //
 //   The all-indented sub-class is a REMAINING LOSS, disclosed and pinned below rather than left
 //   implied (independent VERIFY t_6012c8ca Finding 1): when every non-blank line of the element is
@@ -46,6 +47,16 @@
 //   deliberately NOT refused — refusing a plain string would be an over-refusal — and not reachable
 //   on the compile/endorse re-serialise path (a hand-authored all-indented block already loses the
 //   indent at *read*; it is the host-constructed-value path that does).
+//
+//   The whitespace-only-line sub-class is the SECOND REMAINING LOSS, pinned the same way
+//   (independent VERIFY t_cee7412a): `readBlockScalar` replaces a whitespace-only line (blank but
+//   not empty) with the empty string BEFORE the minimum-indent strip, so those characters are lost
+//   whatever the element's indentation — `'a\n \nb'`, whose non-blank lines both start at column
+//   0, reads back `'a\n\nb'` (the corpus spelling S2.aliases_elem#60, measured at R2's own
+//   `aliases[1]` and at the other three positions). Pre-existing on both arms (LOSS at `c740511`
+//   and on the fix — the one same-status byte change in the byte-level re-run), the C4 half of
+//   `t_6fc254cd` (not in this ancestry), contract-legal and deliberately NOT refused, and likewise
+//   a host-constructed-value loss only (a hand-authored block already loses the space at *read*).
 //
 // See the task's DECISION.md (board attachment) for the full rationale and measurements.
 import assert from 'node:assert/strict';
@@ -223,7 +234,7 @@ describe('L2 page frontmatter — the write boundary at array positions (t_0e190
     );
   });
 
-  test('a multi-line string as an array element round-trips in the block form when a line starts at column 0 (all-indented elements: a pinned, disclosed loss)', () => {
+  test('a multi-line string as an array element round-trips in the block form when a line starts at column 0 (all-indented and whitespace-only-line elements: pinned, disclosed losses)', () => {
     const validate = validator(createAjv(), 'page-frontmatter.schema.json');
     const spellings = [
       'line one\nline two',
@@ -292,6 +303,36 @@ describe('L2 page frontmatter — the write boundary at array positions (t_0e190
         errorKeys(validate, parsed.frontmatter),
         [],
         'and the de-indented read-back is still contract-legal (a plain string) — the loss is silent',
+      );
+    }
+
+    // The whitespace-only-line sub-class is the second remaining loss: `readBlockScalar` replaces
+    // a whitespace-only line (blank but not empty) with the empty string BEFORE the minimum-indent
+    // strip, so those characters are gone whatever the element's indentation — `'a\n \nb'` has
+    // min indent 0 over its non-blank lines and still reads back `'a\n\nb'` (the corpus spelling
+    // S2.aliases_elem#60; VERIFY t_cee7412a). Pre-existing on both arms, the C4 half of
+    // t_6fc254cd; contract-legal and deliberately not refused. The measured reset is asserted here
+    // so the boundary is pinned instead of implied.
+    const whitespaceOnlyLine: Array<[string, string]> = [
+      ['a\n \nb', 'a\n\nb'],
+      ['a\n  \nb', 'a\n\nb'],
+      ['a\n\t\nb', 'a\n\nb'],
+    ];
+    for (const [spelling, measured] of whitespaceOnlyLine) {
+      const fm = pageFrontmatter({ aliases: ['Graphiti', spelling] });
+      const serialised = serialiseFrontmatter(fm, BODY);
+      assert.ok(serialised.includes('  - |'), 'the whitespace-only-line element still takes the block form');
+      const parsed = parseFrontmatter(serialised);
+      assert.ok(parsed, 'the serialised page is readable — the loss is silent, not a throw');
+      assert.deepEqual(
+        parsed.frontmatter['aliases'],
+        ['Graphiti', measured],
+        `an element carrying a whitespace-only line reads back with that line's characters gone (this is the measured reset, not the value written): ${JSON.stringify(spelling)}`,
+      );
+      assert.deepEqual(
+        errorKeys(validate, parsed.frontmatter),
+        [],
+        'and the collapsed read-back is still contract-legal (a plain string) — the loss is silent',
       );
     }
 
