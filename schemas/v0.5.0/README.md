@@ -80,14 +80,22 @@ Its presence does not make the integrity manifest a beta requirement.
 
 ## Which schema covers which surface
 
-Three surfaces are easy to confuse. An integrator validating Smartware records should
-use the schema named here and no other (ADR-0013, kanban `t_0920aa1d`):
+Four surfaces are easy to confuse. An integrator validating Smartware records should
+use the schema named here and no other (ADR-0013, kanban `t_0920aa1d`; the L1 row was
+added on kanban `t_11fed5bb`):
 
 | surface | what it is | what validates it |
 |---|---|---|
+| `<data_dir>/claims/<yyyy-mm>.jsonl` (one line per claim version) | **the L1 claim version record** — the canonical claim store as the writer appends it. `EXPORT.SCOPE` ships these lines **verbatim**, filtered to the exported scope, as `claims.jsonl`: the package copy is the same artifact, not a projection of it | `claim.schema.json` — see *What `claim.schema.json` describes* above. **No separate record schema and no extra manifest field**: unlike the L0 line, this record *is* the artifact `claim.schema.json` names, and the set a package's manifest declares holds that file |
 | `observation.schema.json` | **the observation object on the wire** — the OBSERVE payload (`content`, `source` identifier string, `scope`, `metadata{timestamp, actor, informed_by, tags}`, `idempotency_key`) plus the server-stamped `observation_id`, `operation_id`, `actor_id` | itself |
 | `<data_dir>/evidence/<date>.jsonl` (one line per observation) | **the L0 record** — the append-only storage envelope. It carries the wire payload's information under different names (`id`, `source.app`, `source.observed_at`, `source.actor`) **plus** canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` tamper-evidence chain | **no schema in this set** — see the gap below |
 | `page-frontmatter.schema.json` | **L2 page frontmatter** (spec §9) for `wiki/<category>/<slug>.md` | itself |
+
+A package's `claims.jsonl` therefore needs no schema name beyond the `schemas` set version in its
+manifest — that set holds `claim.schema.json` itself (v0.5.1, if the L0 record schema is present, is
+documented as this set plus one additive file). The claim record's boundary is pinned by
+`test/layer1/l1-claim-record-portability-boundary.test.ts` and decided in ADR-0013 → *Delta
+(2026-09-16) — the L1 claims record*.
 
 **Known gaps, disclosed rather than silently relaxed** (both carded with measured
 evidence; the measurement is `test/layer0/l0-record-wire-boundary.test.ts` and the

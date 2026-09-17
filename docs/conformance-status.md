@@ -35,19 +35,97 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-15 on Node v26.5.1 for the **retention sweep's OperationId**
-(`wip/smarty/retention-op-id`, kanban `t_0177d9c3`): **534 tests across 74 files**, 31 schema files, no
-schema file changed (the `OperationId` pattern is unchanged). The delta over the entry below is 4 tests
-in one new file (`test/protocol/retention-operation-id.test.ts`), which drives `handleExpireRetention`
-with no caller `operation_id`, reads the `state: "forgotten"` L1 line back off disk, and validates it
-against `schemas/v0.5.0/claim.schema.json`. The sweep's fallback was
-`op_${computePayloadHash({ sweep: 'expire', claim, seq })}` — 67 characters of sha256 hex, which the
-published Crockford-base32 pattern rejects; measured, it was the **only** schema error on that line. It
-is now `op_${ulid()}` per retracted record, the convention the sibling writers already use
-(`forget.ts`, `forget_scope.ts`, `session.ts`, `dream/phases.ts`), and the spec's canonical form is
-`OperationId = op_<ulid>`. A forgotten record carries no `semantic` block, so a swept line now validates
-with zero errors — the active-record `semantic` divergence noted in the entry below is untouched. No
-other suite changed.
+Verified 2026-09-16 on Node v26.5.1 for **which schema covers the L1 claim record** — the canonical
+`<data_dir>/claims/<yyyy-mm>.jsonl` line and the byte-identical copy `EXPORT.SCOPE` ships as
+`claims.jsonl` (`wip/tech-head/l1-claim-record-boundary`, kanban `t_11fed5bb`, ADR-0013 → *Delta
+(2026-09-16) — the L1 claims record* — a boundary statement plus its pin; **no published schema byte
+moves**, `schemas/v0.5.0/SHA256SUMS` unchanged): **548 tests across 77 files** (544 passed; the four
+failures are `mcp_smoke`'s stdio-transport tests in a tree with no `dist/` — after `npm run build` that
+file alone is 4/4), 31 schema files. The delta over the entry below is **7 tests in one new file**,
+`test/layer1/l1-claim-record-portability-boundary.test.ts`, which pins: the ordinary write path's
+records (a caller-supplied `OperationId`, the legacy marker when none is supplied, a demoted copy, and
+the claim `reflect.auto` creates) validate against `claim.schema.json` with an **empty** Ajv error list;
+the record envelope is exactly the schema's enumerated property set; the schema stays closed at the root
+and inside `semantic` (a pre-v0.6 record with no block still validates, and an invented key at either
+level is rejected with its exact single error); **no other schema file in either published set
+references `claim.schema.json`**, so the artifact has one validator; every emitted record's
+`OperationId` matches `^op_[0-9A-HJKMNP-TV-Z]{26}$` while the pre-fix literal
+`op_LEGACY00000000000000000000` is asserted to fail it; the package's `claims.jsonl` lines are
+**byte-identical** to the canonical lines and validate against the file the manifest's set holds
+(`manifest.schemas` names a set that contains it — no extra manifest field is needed for claims, unlike
+the L0 record, whose schema is named explicitly); and the one open half — `insertClaim` omitting
+`supersedes` on a `version >= 2` and on a born-forgotten record (`t_3ba3ee39`, ADR-0014, another lane)
+— is asserted as its **exact** two-error list `/:required:supersedes` + `/:if`, so it can neither hide
+a fourth divergence nor survive the fix. RED control: the same file against the packaged revision
+`e937fab` is **6 failed | 1 passed**, the ordinary-path assertion failing with
+`/:additionalProperties:semantic` and the id assertion on the pre-fix literal — the gate's two
+divergences (`t_66f1dd7d` §3 B2), reproduced by the pin. Mutation checks: deleting `semantic` from the
+schema → 5 failed | 2 passed; reverting the writer to the pre-fix literal → 3 failed | 4 passed;
+applying the `supersedes` writer half alone → 1 failed | 6 passed (the residual flips when closed). The
+README's *Which schema covers which surface* table now lists the L1 record and its export copy — one
+artifact, one validator. No other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
+evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
+`t_0920aa1d`, ADR-0013 — schema/contract accuracy plus a disclosed boundary; **no published schema byte
+moves**, `SHA256SUMS` unchanged): **541 tests across 76 files** (540 passed; the single failure is
+`mcp_smoke`'s 10 s stdio-transport hook under a load average of 23–27 with five sibling lanes running
+vitest — re-run alone on the same tree: 4/4 pass, exit 0), 31 schema files. The delta over the entry below is 4
+tests in two new files — `test/layer0/l0-record-wire-boundary.test.ts` (2) and
+`test/layer2/l2-page-frontmatter-boundary.test.ts` (2) — which pin, for the first time, which schema
+belongs to which artifact: no `src/` file referenced either schema, and no normative text assigned one
+to a surface (the contract prints the OBSERVE payload in prose without naming `observation.schema.json`,
+and mentions `page-frontmatter` only in its Scope-vocabulary list). Measured on the
+protocol-native flow (`observe → reflect → compile → exportScope`, raw bytes + Ajv 2020):
+`observation.schema.json` accepts the contract's OBSERVE payload plus the stamped identity and rejects
+the on-disk **record envelope** by construction (4 `required`, 9 `additionalProperties`,
+`/source:type` — the record's nested `source`, `status`, `visibility`, `version`, `policy` and
+`integrity` chain have no place in a closed wire schema), **including the byte-identical copies
+`EXPORT.SCOPE` ships in `observations.jsonl`/`evidence.jsonl` while its manifest declares
+`"schemas": "v0.5.0"`**; `page-frontmatter.schema.json` accepts the spec §9 projection of the frontmatter
+the compiler itself writes and rejects the raw form with 19 errors (2 `required`, 12
+`additionalProperties`, `category` enum, `sources/0` pattern, `updated` format, `confidence`
+type+enum), so there the writer is the side that is wrong. Both divergences are **disclosed** in
+`schemas/v0.5.0/README.md` → *Which schema covers which surface*, not silently relaxed; the two fixes
+(the L2 page writer, and a published record schema plus an honest export-manifest label) are carded with
+their measured evidence (`t_8d6f4a5c`, `t_f1157ed4`). No other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the **substrate ActorId and the host-lane scope disclosure**
+(`wip/neo/host-lane-identity`, kanban `t_9a700aed`, ADR-0015 — a writer-identity fix plus a stated
+conformance boundary; no schema byte moves, `SHA256SUMS` unchanged): **537 tests across 74 files**, 31
+schema files. The delta over the entry below is 5 tests — a new `test/layer1/pod-profile-conformance.test.ts`
+(4: the pod-profile record's complete Ajv error list is exactly `["/scope:pattern"]` with a conformant
+actor id equal across claims and operations-log entries, the protocol-native control record's list is
+empty, reflect.auto and dream carry the same `substrateActorId`, and the slug rule for named/ULID
+instances) and one fixture in `test/schemas-v0.5.0.test.ts` (host-lane spellings are not `Scope`
+values) — while `test/semantic-materialization.test.ts` substitutes only the scope now, because the
+actor id it used to substitute is written conformant. One instance now mints exactly one substrate
+identity (`substrate:<slug>`; `smartware_coffee` → `substrate:coffee`), where reflect.auto / the
+compile queue previously wrote `substrate:<ULID>` (uppercase, rejected by the published pattern) and
+`dream` a second spelling. `pod/<pod>/<lane>` scopes are disclosed as **host-registered lanes** outside
+the v0.5.0 `Scope` vocabulary and the schema-conformance claim (see *Remaining limits*). Mutation
+checks: reverting the writer mint fails 4 tests; widening the Scope pattern to admit host lanes fails
+the new closed-vocabulary fixture. No other suite changed.
+
+Verified 2026-09-15 on Node v26.5.1 for the **claim record's extraction materialization block**
+(`wip/tech-head/claim-record-semantic`, kanban `t_229601e4`, ADR-0011 — schema/contract accuracy, not a
+protocol change): **532 tests across 73 files**, 31 schema files, `claim.schema.json` the only schema
+file changed (`SHA256SUMS` regenerated; the required set and every other property are unchanged). The
+delta over the entry below is 2 tests — a fixture group in `test/schemas-v0.5.0.test.ts` (the block is
+optional, closed, and required-field-complete when present) and one test in
+`test/semantic-materialization.test.ts` (the records `reflect.auto` appends validate against the
+published schema) — plus the pinned `test/layer1/legacy-operation-id.test.ts`, which now asserts the
+**whole** Ajv error list of the record `insertClaim` appends is empty instead of pinning the known
+divergence (same test count). `claim.schema.json` now enumerates the optional `semantic` block, so an
+active record the reference implementation writes is accepted by the contract it publishes; the block
+is optional, not a wire field, and no conformance claim depends on it. Two same-class divergences were
+measured while deciding this and stay open, carded with their evidence (ADR-0011 → *Known
+divergences*): `insertClaim`'s forgotten path omits `supersedes` that the schema's forgotten branch
+requires (`t_3ba3ee39`), and pod-profile records carry `pod/<pod>/<lane>` scopes and
+`substrate:<ULID>` actor ids the v0.5.0 `Scope`/`ActorId` patterns reject (`t_9a700aed` — both halves
+settled in the entry above: the ActorId defect fixed in the writers, the host-lane scope disclosed as
+outside the v0.5.0 `Scope` vocabulary, ADR-0015). No other
+suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **L1 record writer's legacy OperationId**
 (`wip/smarty/l1-legacy-op-id`, kanban `t_85817375`): **530 tests across 73 files**, 31 schema files, no
@@ -58,7 +136,9 @@ pins the marker to the one `src/layer1/tombstone-backfill.ts` stamps on a pre-A3
 writer fixed in the entry below). The placeholder was `op_LEGACY00000000000000000000`, whose `L` the
 published Crockford-base32 pattern rejects; it is now `op_000000000000000000000000A3`. One Ajv error
 remains on such a record — the internal `semantic` block the published claim schema does not enumerate
-— measured, unchanged by this fix, and carded separately. No other suite changed.
+— measured, unchanged by this fix, and carded separately; **that second half was decided in the entry
+above** (the schema enumerates the block, and the pinned test now asserts an empty error list). No
+other suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for the **tombstone backfill writer**
 (`wip/neo/tombstone-backfill-writer`, kanban `t_9e124fe6`): **524 tests across 72 files**, 31 schema
@@ -230,6 +310,44 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
+- **The L1 claim record has one open divergence on this lane.** `insertClaim` (`src/layer1/store.ts`)
+  omits `supersedes` on a `version >= 2` record and on a born-forgotten (`version 1`,
+  `state: forgotten`) record, which `claim.schema.json`'s `if version >= 2` branch requires in every
+  state. Decided and fixed on `wip/smarty/l1-forgotten-supersedes` (ADR-0014, kanban `t_3ba3ee39`) —
+  the writer names the version it replaces, and the schema's `forgotten` branch stops requiring it,
+  because a claim can be born forgotten with no prior version to name — but not composed on this lane.
+  Pinned as its **exact** residual by `test/layer1/l1-claim-record-portability-boundary.test.ts`,
+  which flips to an empty list when that branch composes. Everything else the ordinary write path emits
+  (a real `OperationId`, the legacy marker, a demoted copy, `reflect.auto`'s own claim) validates whole.
+- **The L0 evidence record's field shape is not published in v0.5.0.** `observation.schema.json` covers the
+  observation object *on the wire* (the OBSERVE payload plus the stamped identity), not the record the
+  substrate appends to `<data_dir>/evidence/<date>.jsonl` — which carries the same information under
+  different names plus `status`, `visibility`, `version`, `policy` and the `integrity` chain, none of
+  which a closed wire schema can hold. **This includes the copies `EXPORT.SCOPE` ships** in
+  `observations.jsonl` / `evidence.jsonl`, in a package whose manifest declares `"schemas": "v0.5.0"`.
+  An integrator validating raw evidence — or a third-party implementation claiming v0.5.0 — has no
+  published contract for the record until the carded record schema lands (`t_f1157ed4`). Disclosed in
+  `schemas/v0.5.0/README.md` → *Which schema covers which surface*; decided in
+  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md); pinned by
+  `test/layer0/l0-record-wire-boundary.test.ts` (the record envelope, the wire projection validating,
+  the record's exact 14-error rejection, and the export package carrying the same bytes).
+- **The reference implementation's compiled page frontmatter does not yet validate against
+  `page-frontmatter.schema.json`** — 19 Ajv errors (`created`/`epistemic_tag` missing, plural `category`,
+  ISO `updated`, numeric `confidence`, observation ids under `sources`, plus the compile envelope). The
+  schema is the contract for that artifact (spec §9 prints the same field set); the writer fix is carded
+  (`t_8d6f4a5c`), disclosed in the same README section, and pinned by
+  `test/layer2/l2-page-frontmatter-boundary.test.ts`.
+- **Host-registered lanes are outside the v0.5.0 `Scope` vocabulary.** The reference implementation's
+  pod-profile helper registers `pod/<pod>/<lane>` ids — a host's own lanes, and the live Pod product's
+  scope ids — and the published vocabulary admits no host-lane form. A canonical record written in a
+  host lane therefore does not meet this contract's conformance boundary ("schema validity on every
+  canonical write"); hosts that need v0.5.0 schema-conformant records write protocol-native lanes
+  (`self` / `workspace` / `project:<slug>` / `agent:<slug>` / `client:<id>[#n]`). Decided, with the
+  measured evidence and the recommendation to define a host-lane form in a later protocol revision:
+  [ADR-0015](adr/0015-host-registered-lanes-and-the-substrate-actor-id.md). Pinned by
+  `test/schemas-v0.5.0.test.ts` (the vocabulary rejects host lanes) and
+  `test/layer1/pod-profile-conformance.test.ts` (a pod-profile record's only Ajv error is
+  `/scope:pattern`; a protocol-native record's complete error list is empty).
 - Legacy direct calls without an operation ID are outside the recovery
   guarantee.
 - Automatic quarantine is not implemented; ambiguous append-only artifacts
@@ -274,6 +392,9 @@ The exact ordering and recovery state table are documented in
   **content form** — the snapshot block enumerates neither the structured assertion
   nor `semantic`, so a structured value would not be re-derivable from the artifact
   whose purpose is reconstruction (`t_9e124fe6`, ADR-0003 → *Known divergence*).
+  (Deliberately unchanged by `t_229601e4` / ADR-0011: the L1 *record* now enumerates
+  the materialization block, the snapshot block still does not — its promise is the
+  claim schema's **required** fields, and the block is optional.)
 - The suite does not prove concurrent multi-writer serialization or universal
   sudden-power-loss durability.
 - REFLECT page output and search databases are rerunnable projections rather
