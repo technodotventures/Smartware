@@ -3,6 +3,12 @@
 // The parser is deliberately untyped: a page on disk may still carry the pre-ADR-0013 → D2
 // envelope inline, and the reader has to accept both shapes. Use `readPageFile`
 // (`src/layer2/envelope.ts`) for the shape-aware entry point.
+//
+// The serialiser is hand-rolled and minimal by design; its contract is that everything it writes
+// reads back unchanged for the page vocabulary (`schemas/v0.5.0/page-frontmatter.schema.json`):
+// scalars, string arrays, and arrays of notice objects of scalar values. Shapes outside that
+// vocabulary are refused at the write boundary (`assertPageVocabulary`) rather than emitted in a
+// form the reader would silently flatten or drop (t_cf744a8e).
 
 import { toPageCategory } from './paths.js';
 
@@ -28,13 +34,53 @@ export function parseFrontmatter(raw: string): { frontmatter: Record<string, unk
 
 /**
  * Serialise frontmatter + body back to a full markdown string.
+ *
+ * Refuses (throws on) a value the minimal reader cannot carry — a nested object anywhere in the
+ * page vocabulary's value positions (t_cf744a8e) — instead of writing YAML that flattens or drops
+ * it on the next read.
  */
 export function serialiseFrontmatter(frontmatter: Record<string, unknown>, body: string): string {
+  assertPageVocabulary(frontmatter);
   return `---\n${toYAML(frontmatter)}---\n${body}`;
 }
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+/** A value YAML carries as a mapping — the shape the page vocabulary does not admit. */
+function isObjectValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The page vocabulary is scalars, string arrays, and arrays of notice objects whose values are
+ * scalars: `schemas/v0.5.0/page-frontmatter.schema.json` declares no object-valued field and the
+ * top level is `additionalProperties: false`. `toYAML` writes an object value as `key:` plus
+ * indented lines, and `parseYAML` reads one `key: value` per line with no indentation model, so
+ * those lines come back flattened into the *parent* — `{meta: {a: b}}` inside a notice item reads
+ * as `{meta: …, a: b}`, and at the top level `a` leaks out as a stray page key. The value is lost,
+ * not merely re-shaped (measured on t_cf744a8e). Refuse the write and name the offending field.
+ */
+function assertPageVocabulary(frontmatter: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(frontmatter)) {
+    if (isObjectValue(value)) rejectNestedObject(key);
+    if (!Array.isArray(value)) continue;
+    value.forEach((item, index) => {
+      if (!isObjectValue(item)) return;
+      for (const [itemKey, itemValue] of Object.entries(item)) {
+        if (isObjectValue(itemValue)) rejectNestedObject(`${key}[${index}].${itemKey}`);
+      }
+    });
+  }
+}
+
+function rejectNestedObject(field: string): never {
+  throw new Error(
+    `serialiseFrontmatter: page field "${field}" holds a nested object, which the page YAML `
+    + `vocabulary cannot carry (strings, string arrays, and notice objects of scalar values only); `
+    + `flatten the value or extend the page contract (schemas/v0.5.0/page-frontmatter.schema.json) first`,
+  );
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -108,6 +154,9 @@ function toYAML(obj: Record<string, unknown>, indent = 0): string {
 }
 
 function yamlString(s: string): string {
+  // The empty scalar is written `""`: `key: ` (or an empty array element) would read back as a
+  // dropped key / YAML null instead of the empty string it was (t_cf744a8e).
+  if (s === '') return '""';
   if (/[:\[\]{},&*#?|<>=!%@`'"]/.test(s) || s.includes('\n') || s.startsWith(' ') || s.endsWith(' ')) {
     return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
@@ -128,22 +177,39 @@ function parseYAML(yaml: string): Record<string, unknown> {
     const key = line.slice(0, colonIdx).trim();
     const rest = line.slice(colonIdx + 1).trim();
 
-    if (rest === '' || rest === '|') {
-      // Could be array or nested object — peek ahead
+    if (rest === '|') {
+      // Literal block scalar — how `toYAML` writes any string containing a newline (`key: |`, the
+      // content indented under the key). Before t_cf744a8e this branch only looked for an array
+      // item next and then dropped the key, so a multi-line `summary` (or a notice's `message`)
+      // vanished from the parse.
+      const { text, next } = readBlockScalar(lines, i + 1, leadingSpaces(line));
+      result[key] = text;
+      i = next;
+      continue;
+    }
+
+    if (rest === '') {
+      // `key:` with nothing after it. A `-`-prefixed next line opens an array; a *deeper* next
+      // line opens a construct this minimal reader has no model for (a nested object/sequence) and
+      // is left where it is; otherwise YAML's value is null — the writer spells a real null
+      // `key: null` and an empty string `key: ""` (t_cf744a8e), so this is a hand-authored bare
+      // key, and reading it as null beats dropping it silently.
       if (i + 1 < lines.length && lines[i + 1]!.match(/^\s*-/)) {
         const { items, next } = parseBlockArray(lines, i + 1);
         result[key] = items;
         i = next;
         continue;
       }
-    } else if (rest.startsWith('[') && rest.endsWith(']')) {
-      // Inline array
+      if (!hasDeeperNonBlankLine(lines, i + 1, leadingSpaces(line))) result[key] = null;
+      i++;
+      continue;
+    }
+
+    if (rest.startsWith('[') && rest.endsWith(']')) {
+      // Inline array — elements are comma-separated, but a comma inside a quoted element belongs
+      // to the element (t_cf744a8e: `["alpha, beta"]` used to split into two malformed values).
       const inner = rest.slice(1, -1).trim();
-      if (inner === '') {
-        result[key] = [];
-      } else {
-        result[key] = inner.split(',').map(s => unquote(s.trim()));
-      }
+      result[key] = inner === '' ? [] : splitInlineArray(inner);
     } else if (rest === 'true') {
       result[key] = true;
     } else if (rest === 'false') {
@@ -167,6 +233,83 @@ function unquote(s: string): string {
   return s;
 }
 
+const QUOTE_CHARS = new Set(['"', "'"]);
+
+/**
+ * Split the inside of an inline array (`[a, "b, c"]`) into its raw elements: a comma inside a
+ * quoted scalar belongs to that scalar, not to the separator set (t_cf744a8e — `["alpha, beta"]`
+ * used to decode as two malformed values).
+ */
+function splitInlineArray(inner: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  for (let i = 0; i < inner.length; i++) {
+    const char = inner[i]!;
+    if (quote !== null) {
+      current += char;
+      if (char === '\\' && quote === '"' && i + 1 < inner.length) {
+        // Stay inside the element: an escaped character cannot close the scalar.
+        current += inner[++i]!;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (QUOTE_CHARS.has(char)) {
+      quote = char;
+      current += char;
+    } else if (char === ',') {
+      parts.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts.map(part => unquote(part.trim()));
+}
+
+/**
+ * Read a literal block scalar introduced on the line before `start` (`key: |` or `- |`): the run
+ * of lines indented deeper than the introducing line, blank lines in between kept, and the block's
+ * common indentation stripped. This is the reader half of `toYAML`'s multi-line-string shape
+ * (t_cf744a8e). Only `|` is understood — the serialiser never writes `|-`, `|+` or `>`.
+ */
+function readBlockScalar(
+  lines: string[],
+  start: number,
+  introduceIndent: number,
+): { text: string; next: number } {
+  const collected: string[] = [];
+  let i = start;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (line.trim() === '') {
+      collected.push('');
+      i++;
+      continue;
+    }
+    if (leadingSpaces(line) <= introduceIndent) break;
+    collected.push(line);
+    i++;
+  }
+  const indents = collected.filter(line => line.trim() !== '').map(line => leadingSpaces(line));
+  const strip = indents.length > 0 ? indents.reduce((min, n) => Math.min(min, n)) : 0;
+  const text = collected.map(line => (line.trim() === '' ? '' : line.slice(strip))).join('\n');
+  return { text, next: i };
+}
+
+/** Whether the next non-blank line is indented deeper than the key that precedes it. */
+function hasDeeperNonBlankLine(lines: string[], from: number, keyIndent: number): boolean {
+  for (let j = from; j < lines.length; j++) {
+    const line = lines[j]!;
+    if (line.trim() === '') continue;
+    return leadingSpaces(line) > keyIndent;
+  }
+  return false;
+}
+
 const BLOCK_ITEM = /^(\s*)-(\s*)(.*)$/;
 
 /** The number of leading whitespace characters on a line. */
@@ -176,9 +319,20 @@ function leadingSpaces(line: string): number {
 
 /** Whether a block item's content opens a mapping (`key: value`) rather than a plain scalar. */
 function isMappingItem(content: string): boolean {
+  // A quoted scalar is one scalar however many colons it contains: `- "a: b"` is the string
+  // `a: b` (the parent fix of t_4d84ff6b read it as `{'"a': 'b"'}`, as the reviewer measured).
+  if (isQuotedScalar(content)) return false;
   // `- http://example.com` is a scalar, not `{ http: '//example.com' }`: the colon has to be
   // followed by whitespace (or end the line) to separate a key from its value.
   return /^[^\s:][^:]*:(\s|$)/.test(content);
+}
+
+/** Whether the whole content is one quoted scalar (`"…"` or `'…'` with the matching close at the end). */
+function isQuotedScalar(content: string): boolean {
+  const quote = content[0];
+  return (quote === '"' || quote === "'")
+    && content.length >= 2
+    && content[content.length - 1] === quote;
 }
 
 /**
@@ -194,7 +348,10 @@ function isMappingItem(content: string): boolean {
  *
  * Both the standard shape this serialiser now emits and the mis-indented shape the pre-fix
  * serialiser wrote decode to the same object, so a page written by the broken writer is recovered
- * on read instead of silently degraded. A plain item (`- alpha`) stays a string.
+ * on read instead of silently degraded. A plain item (`- alpha`) stays a string, a quoted scalar
+ * item (`- "a: b"`) stays the one string it is, and a block-scalar item (`- |` + deeper lines) is
+ * the multi-line string it introduces (t_cf744a8e). A nested sequence — a construct no page field
+ * admits — is still left where it is rather than silently swallowed.
  */
 function parseBlockArray(lines: string[], start: number): { items: unknown[]; next: number } {
   const items: unknown[] = [];
@@ -206,16 +363,27 @@ function parseBlockArray(lines: string[], start: number): { items: unknown[]; ne
     const content = match[3]!.trim();
     i++;
 
+    if (content === '|') {
+      // A block scalar as the item's own value: the block-array form of a multi-line string.
+      const { text, next } = readBlockScalar(lines, i, dashIndent);
+      items.push(text);
+      i = next;
+      continue;
+    }
+
     if (!isMappingItem(content)) {
-      // A plain item is a string, as before. A construct this minimal parser has never read (a
-      // block scalar, a nested sequence) is left where it is rather than silently swallowed.
+      // A plain item is a string, as before.
       items.push(unquote(content));
       continue;
     }
 
-    // `parseYAML` is indentation-agnostic (one `key: value` per line), so the item's whole block
-    // can be handed to it: the dash line's content first, then the continuation lines.
-    const block = [content];
+    // `parseYAML` is mostly indentation-agnostic (one `key: value` per line), but the block-scalar
+    // branch and the bare-key branch need the item's *content column*, which is where standard
+    // block YAML puts it: the dash plus one space (`  - key: value`, keys of the same item aligned
+    // under the first one at column dashIndent + 2). The dash line's content is trimmed, so it is
+    // re-indented to that column; the continuation lines keep the indent they were written with.
+    const itemIndent = dashIndent + 2;
+    const block = [' '.repeat(itemIndent) + content];
     while (i < lines.length && leadingSpaces(lines[i]!) > dashIndent) {
       block.push(lines[i]!);
       i++;
