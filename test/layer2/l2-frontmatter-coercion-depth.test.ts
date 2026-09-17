@@ -29,8 +29,9 @@
 //   honest failure is a loud refusal, not silent flattening. Mixed scalar/object arrays
 //   (`['a', {b: 'c'}]`, written through `String(item)` as `[object Object]` / `0: a` lines) are
 //   refused for the same reason — contract-illegal input, silent loss before. A nested sequence
-//   item (`[["x"]]`) stays the out-of-vocabulary shape t_cf744a8e documented: still written,
-//   still garbled on read; no page field admits one.
+//   item (`[["x"]]`) was the out-of-vocabulary shape t_cf744a8e documented ("still written,
+//   still garbled on read"); t_0e19036e superseded that on the write side — it is refused now,
+//   like every other uncarriable array element.
 //
 // Pre-fix measurement (b10c77c, `probes/probe-coercion-depth.mjs`): 16/16 C1 spellings
 // SILENT_LOSS at `summary`, 4/4 inside a notice `message`, C2a/C2b (the nested object inside the
@@ -261,12 +262,12 @@ describe('L2 page frontmatter — coerced scalars and guard depth (t_5768425d)',
     // `0: a` lines — both came back as something else (probe C2d/C2e: SILENT_LOSS).
     assert.throws(
       () => serialiseFrontmatter(pageFrontmatter({ aliases: ['a', { b: 'c' }] }), BODY),
-      /page field "aliases" mixes scalar and object items/,
+      /page field "aliases" mixes object and non-object items/,
       'scalar-then-object must be refused, naming the field',
     );
     assert.throws(
       () => serialiseFrontmatter(pageFrontmatter({ aliases: [{ b: 'c' }, 'a'] }), BODY),
-      /page field "aliases" mixes scalar and object items/,
+      /page field "aliases" mixes object and non-object items/,
       'object-then-scalar must be refused too',
     );
   });
