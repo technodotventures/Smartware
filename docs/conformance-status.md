@@ -36,51 +36,30 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-17 on Node v26.5.1 for **what a REFLECT does when its `operation_id` is replayed**
-(`wip/tech-head/reflect-replay-contract`, kanban `t_efa8d5a8`, stacked on the unscoped-REFLECT lane
-`48cdc0b`): **79 files / 559 tests**, **32 schema files** (v0.4.2, v0.5.0, v0.5.1). Protocol v0.5.0
-(*Idempotency and commit identity*) says "same OperationId plus identical canonical payload returns
-the prior result", and `observe` / `forget` / `forget.scope` / `endorse` / the retention sweep / the
-connector ingest all implement it — REFLECT instead matched the recorded `reflect.explicit` entry and
-then fell through into the whole compile. Measured on this lane's own A/B: a pre-fix brain's id
-replayed by the fix's base returned `claims_created` 0 (**recorded**) beside `pages_compiled` 4
-(**fresh**), and wrote claims +4, pages +5, `ops_lines` +8 and 8 `reflect.auto` receipts; on a brain
-whose observations were all processed the counts happened to match (4/4) while every page's bytes were
-rewritten — the defect was invisible in the numbers being watched. Replay is now a pure no-op: both
-counts come from the committed entry, `telemetry.replayed: true`, every other telemetry count 0 and
-`freshness` **omitted** (a live reading inside a recorded result is the same defect class), `audit: []`
-and no `git_sha` (the entry is the durable audit trail). An entry with no recorded counts is refused
-(`conflict`) rather than reported as a 0/0 run; gates and the payload conflict check still run first;
-the entry is still appended after the compile returns, so an interrupted run's retry compiles. The
-durable compile queue is unaffected — its crash recovery re-processes queue rows by `observation_id`
-(and dedups through the fingerprint index + per-observation receipts), never a `reflect.explicit` id.
-A/B pair: the same test file (sha256 `8d8d973d…`) at `48cdc0b` (4 failed | 1 passed) and here (5/5),
-pinned by `test/protocol/reflect-replay-contract.test.ts`; the probe pairs (upgrade case /
-same-revision / deferred L2 completion) are in `attachments/t_efa8d5a8/replay-ab.log`. **A pre-existing
-`operation_id` from a pre-fix brain replays to its recorded result and writes nothing — replay-safe, and
-it does not repair the brain; fresh behaviour needs a fresh id.** The one host-visible change (the
-deferred L2 stage is a separate operation, so it takes its own id) is why the decision record —
-`docs/adr/0018-reflect-replay-returns-the-recorded-result.md`, *Proposed* — leaves the merge to the
-owner. No schema byte, no `SHA256SUMS` line, no `OpType` change.
-
-Verified 2026-09-17 on Node v26.5.1 for **what a REFLECT with no scope compiles, and what the
-operations log records for it** (`wip/tech-head/reflect-noscope-all-scopes`, kanban `t_27c73d58`,
-stacked on the consent-change lane `658c3cb`): **78 files / 554 tests**, **32 schema files**
-(v0.4.2, v0.5.0, v0.5.1). `handleCompile`'s `params.scope ?? 'personal'` is gone — the target is the
-absence itself, the spelling every other reader of it already used (`CompileOptions.scope`, the L2
-gather guard, the claim-production filter, `syncSearchFromClaims`) — so an unscoped compile gathers
-every registered lane: measured on a fresh brain with one extractable observation per lane, **0 claims
-/ 0 pages → 3 claims / 3 pages** (exactly the union of the three per-lane runs), and
-`layer3_indexed_count` **0 → 3** on the deferred-synthesis path. The `reflect.explicit` entry records
-`details.scope: null` — the same spelling its own `payload_hash` is computed over, and never a lane the
-caller did not name — instead of the unregistered lane `personal`; the named-lane, non-owner
-`invalid_scope` and grant-enforcement behaviours are unchanged and are pinned as controls on both arms.
-A/B pair: the same test file (sha256 `51dc5162…`) at `658c3cb` (3 failed | 3 passed, the three
-unscoped assertions) and at the fix (6/6), pinned by
-`test/protocol/reflect-no-scope-all-scopes.test.ts`. No `$defs/Scope` widening, no published schema
-byte, no `SHA256SUMS` line, no literal re-introduced. **Claim production on this owner-gated path
-changes**, so the merge call belongs to the owner (requirement 2 of the card); the idempotency note for
-an `operation_id` already used by an unscoped run is in `docs/journal/2026-09-17-t_27c73d58.md`.
+Verified 2026-09-17 on Node v26.5.1 for **the remaining `personal` literals outside the four writer
+sites** (`wip/tech-head/remaining-personal-literals`, kanban `t_574be8cd`, stacked on the
+consent-change lane `658c3cb`; carded out of `t_e6fce49a`): **81 files / 559 tests**, **32 schema
+files** (v0.4.2, v0.5.0, v0.5.1). The delta over the entry below is 4 files / 11 tests, all pins:
+`test/layer1/scope-half-life.test.ts` (4), `test/protocol/session-summariser-lane.test.ts` (3),
+`test/conformance/scope-example-vocabulary.test.ts` (2), `test/storage/data-dir-layout.test.ts` (2).
+Four items, one commit each: (1) `src/layer1/confidence.ts`'s half-life table was keyed on the
+pre-rename spellings, so **neither** declared staleness override reached the lane the `$defs/Scope`
+vocabulary names — measured by reading the applied half-life back out of the shipped
+`computeConfidence`, `self` decayed at 90 d while `personal` carried the declared 365 d, and
+`project:foo` at 90 d while `project/foo` carried 30 d; the table is now vocabulary-keyed, which moves
+canonical-ish values for `self`/`project:<id>` claims (on a 180-day claim: 0.3475 → 0.41657 and
+0.3475 → 0.31234) — **that item is this lane's owner-gated class**; (2) the session summariser default
+(`session.ts`) handed a host callback the literal `personal` for a session with `requested_scopes: []`
+— driven, and it now names the registered pod lane `self`; (3) the OBSERVE tool-description example
+read `(e.g. personal, project/foo)` — both off-vocabulary — and now reads
+`self, project:foo, client:acme#1`, pinned by a scan that validates every scope example in every tool
+description under `src/` against `$defs/Scope`; (4) init created `wiki/personal|workspace|project`,
+which appear in no normative layout and which nothing in `src/` reads or writes — init now creates the
+wiki root only, and the pin shows a compiled page still lands under `wiki/<category>/` with its
+`_index.md`. `forget_scope.ts`'s legacy-registry fallback is left exactly as written (card
+instruction); `reflect.ts`'s no-scope sentinel is carded separately (`t_27c73d58`). No published
+schema byte and no `SHA256SUMS` line moved (v0.5.0 `8d47a427…`, v0.5.1 `a7c3095d…`). A/B: the four pin
+files byte-identical at `658c3cb` → 8 failed | 3 passed; the same files at the fix → 11/11.
 
 Verified 2026-09-16 on Node v26.5.1 for **the lane the reference implementation's own consent-change
 records are written in** (`wip/neo/consent-change-scope`, kanban `t_e6fce49a`, stacked on the
@@ -99,9 +78,10 @@ scopes, grants never read a record's `scope`, and both fallbacks are unreachable
 refused before any lane resolves). No published schema byte and no `SHA256SUMS` line moved (v0.5.0
 `8d47a427…`, v0.5.1 `a7c3095d…`). Pre-fix records keep the `personal` spelling — L0 is append-only.
 Adjacent `personal` literals (`reflect.ts`'s no-scope sentinel, `session.ts`'s summarizer default,
-`confidence.ts`'s half-life key, the OBSERVE tool-description example) are measured and carded, not
-fixed here — the `reflect.ts` sentinel was fixed on `t_27c73d58` (see the baseline above); the other
-three remain.
+`confidence.ts`'s half-life key, the OBSERVE tool-description example) are measured and carded here;
+the summariser default, the half-life key, the description example and the vestigial `wiki/<lane>`
+directories are decided and pinned in the entry above (kanban `t_574be8cd`), while `reflect.ts`'s
+no-scope sentinel is carded separately (`t_27c73d58`).
 
 Verified 2026-09-16 on Node v26.5.1 for **the published L0 evidence record schema and the export
 manifest's schema label** (`wip/smarty/l0-record-schema`, kanban `t_f1157ed4`, ADR-0013 → *Delta

@@ -73,7 +73,10 @@ always appends.
   consent-change writers hardcoded the literal `personal` here until kanban `t_e6fce49a`: GRANT,
   REVOKE and the two `?? 'personal'` fallbacks now write the protocol-native `self`. Records already on
   disk keep the spelling they were written with — L0 is append-only — so a pre-fix `personal` record is
-  a pre-fix artifact and still outside this set.)
+  a pre-fix artifact and still outside this set. The remaining `personal` literals outside the writers
+  were decided on kanban `t_574be8cd`: `layer1/confidence.ts`'s half-life table is keyed on this
+  vocabulary, the session summariser default names `self`, and the OBSERVE tool-description example
+  reads `self, project:foo, client:acme#1`.)
 - **Legacy value shapes are not admitted by pattern tricks.** `id`, `actor_id`, `operation_id` and
   the integrity hash reuse the published `$defs`, so a record either matches the published identifier
   forms or is out of the set.
