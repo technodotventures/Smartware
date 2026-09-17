@@ -42,3 +42,4 @@ data/
 
 # Packaged release artifacts (npm pack output)
 *.tgz
+.agenttrail/
