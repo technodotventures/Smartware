@@ -641,7 +641,7 @@ async function repickSurvivor(args: {
     // no recall-eligible copy. The hook fires once, after the unit is durable.
     appendClaimVersions(dataDir, [released, ...demotedRecords]);
     commitHooks?.afterClaimVersion?.(released);
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: preparedAt,
