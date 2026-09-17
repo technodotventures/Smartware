@@ -1,4 +1,4 @@
-# ADR-0010 — Coffee reference adapter: public-surface ports, settle-before-write, and a deterministic local proof
+# ADR-0021 — Coffee reference adapter: public-surface ports, settle-before-write, and a deterministic local proof
 
 - **Date:** 2026-09-15
 - **Status:** Accepted (implemented and evidence-backed in this change; the

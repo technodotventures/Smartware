@@ -1,4 +1,4 @@
-# ADR-0008 — A host-facing health contract with a three-state SLO verdict
+# ADR-0020 — A host-facing health contract with a three-state SLO verdict
 
 - **Date:** 2026-09-15
 - **Status:** Accepted (implemented and evidence-backed in this change; the SLO

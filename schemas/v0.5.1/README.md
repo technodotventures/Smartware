@@ -31,7 +31,7 @@ canonical state the closed wire schema has no place for. `observation.schema.jso
 construction (4 `required`, 9 `additionalProperties`, `/source:type` — measured, and pinned by
 `test/layer0/l0-record-wire-boundary.test.ts`). Reshaping the writer to fit the wire schema was
 rejected: it would delete the integrity chain and the canonical state. The reasoning, the rejected
-options and the migration story are [ADR-0013](../../docs/adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md)
+options and the migration story are [ADR-0023](../../docs/adr/0023-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md)
 → *Delta (2026-09-16): D1 carried out*.
 
 ## The record contract, precisely

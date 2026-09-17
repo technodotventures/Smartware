@@ -1,4 +1,4 @@
-# ADR-0005 — Sources, connector ingestion and federated reads
+# ADR-0019 — Sources, connector ingestion and federated reads
 
 - **Date:** 2026-09-14
 - **Status:** Proposed (implemented and evidence-backed in this change; operator sign-off pending)

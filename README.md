@@ -119,8 +119,6 @@ remain supported through the documented
 - **[Smartware Connectors](https://github.com/technodotventures/smartware-connectors)** —
   connector runtime, OAuth management, MCP client pooling, grants, and audit
   logging for Smartware-powered applications.
-- **[Smartware MCP Servers](https://github.com/technodotventures/smartware-mcp-servers)** —
-  Docker-packaged MCP service adapters used by the connector runtime.
 - **Pod** — a personal memory layer and second brain built on Smartware.
 - **Coffee** — an agent-powered client workspace extending Smartware toward
   governed team memory.

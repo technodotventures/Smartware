@@ -1,4 +1,4 @@
-# ADR-0011 — Coffee company-brain acceptance gate: the packaged artifact, a six-business fixture, and the surface it forced
+# ADR-0022 — Coffee company-brain acceptance gate: the packaged artifact, a six-business fixture, and the surface it forced
 
 - **Date:** 2026-09-15
 - **Status:** Accepted (implemented; evidence in the `coffee-gate` run attached to card `t_9740ae98`)

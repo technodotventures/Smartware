@@ -94,23 +94,25 @@ claims live on their whole stack. Snapshot: 2026-09-15 ~13:30Z.
 | 0002 | consolidation | `main` | merged |
 | 0003 | claim-fact-identity | `docs/protocol-identity-adr` (`t_15bb0cd0`) +19 branches | |
 | 0004 | contradiction-and-bi-temporal-lifecycle | `feat/deepseek-provider` +15 branches | |
-| 0005 | protocol-claim-identity | `docs/protocol-identity-adr` (`t_15bb0cd0`) +3 branches | contested — second claim to reach `main` renumbers before merge |
-| 0005 | sources-ingestion-and-federation | `feat/deepseek-provider` +14 branches | contested (see above) |
+| 0005 | protocol-claim-identity | `docs/protocol-identity-adr` (`t_15bb0cd0`) +3 branches | kept `0005`; `sources-ingestion-and-federation` refiled to `0019` |
 | 0006 | export-restore-return-path | `feat/deepseek-provider` +14 branches | |
 | 0007 | fencing-token-at-the-mutation-boundary | `feat/deepseek-provider` +7 branches | |
-| 0008 | legal-hold-composition | `wip/neo/legal-hold-findings` (`t_7a64ded2`, PR #12) +4 branches | contested — second claim to reach `main` renumbers before merge |
-| 0008 | host-facing-health-contract | `wt/t_65569b9e` (`t_65569b9e`) +3 branches | contested (see above) |
+| 0008 | legal-hold-composition | `wip/neo/legal-hold-findings` (`t_7a64ded2`, PR #12) +4 branches | kept `0008`; `host-facing-health-contract` refiled to `0020` |
 | 0009 | explicit-legal-hold-marker | `wip/neo/legal-hold-findings` (`t_7a64ded2`, PR #12) +3 branches | |
-| 0010 | storage-level-fencing | `wip/neo/storage-fencing` (`t_695656d8`, PR #13) | contested — second claim to reach `main` renumbers before merge |
-| 0010 | coffee-reference-adapter | `wt/t_9740ae98` (PR #14) +2 branches | contested (see above) |
-| 0011 | claim-record-materialization-block | `fix/l1-replay-correction-state` (`t_ef77c695`) +6 branches | contested — second claim to reach `main` renumbers before merge |
-| 0011 | coffee-company-brain-acceptance-gate | `wt/t_9740ae98` (PR #14) +1 branch | contested (see above) |
+| 0010 | storage-level-fencing | `wip/neo/storage-fencing` (`t_695656d8`, PR #13) | kept `0010`; `coffee-reference-adapter` refiled to `0021` |
+| 0011 | claim-record-materialization-block | `fix/l1-replay-correction-state` (`t_ef77c695`) +6 branches | kept `0011`; `coffee-company-brain-acceptance-gate` refiled to `0022` |
 | 0012 | grant-granularity-at-the-forget-scope-boundary | `wt/t_f2b584dc` (`t_f2b584dc`, PR #16) | kept `0012` in the `t_201cdca8` arbitration — see below |
-| 0013 | retention-sweep-commit-identity | `wip/tech-head/retention-sweep-audit` (`t_543cb61a`) | contested — second claim to reach `main` renumbers before merge |
-| 0013 | which-schema-covers-the-l0-record-and-the-l2-page-frontmatter | `wip/smarty/canonical-schema-boundary` (`t_0920aa1d`) | contested (see above) |
+| 0013 | retention-sweep-commit-identity | `wip/tech-head/retention-sweep-audit` (`t_543cb61a`) | kept `0013`; `which-schema-covers-the-l0-record-and-the-l2-page-frontmatter` refiled to `0023` |
 | 0014 | forgotten-version-supersedes | `wip/smarty/l1-forgotten-supersedes` (`t_3ba3ee39`) | refiled from `0012` before merge (`t_201cdca8`) |
 | 0015 | host-registered-lanes-and-the-substrate-actor-id | `wip/neo/host-lane-identity` (`t_9a700aed`, PR #17) | refiled from `0012` before merge (`t_201cdca8`) |
 | 0016 | canonical-state-is-a-projection-of-status | `fix/l1-replay-correction-state` (`t_ef77c695`) | minted after the `0012` arbitration (next free above `0015`) |
+| 0017 | prefix-l1-log-repair | `integration/v0.8.0` (card `t_a54a4606`) | |
+| 0018 | reflect-replay-returns-the-recorded-result | `integration/v0.8.0` (card `t_efa8d5a8`) | |
+| 0019 | sources-ingestion-and-federation | `feat/deepseek-provider` +14 branches | refiled from `0005` before merge |
+| 0020 | host-facing-health-contract | `wt/t_65569b9e` (`t_65569b9e`) +3 branches | refiled from `0008` before merge |
+| 0021 | coffee-reference-adapter | `wt/t_9740ae98` (PR #14) +2 branches | refiled from `0010` before merge |
+| 0022 | coffee-company-brain-acceptance-gate | `wt/t_9740ae98` (PR #14) +1 branch | refiled from `0011` before merge |
+| 0023 | which-schema-covers-the-l0-record-and-the-l2-page-frontmatter | `wip/smarty/canonical-schema-boundary` (`t_0920aa1d`) | refiled from `0013` before merge |
 
 > **The `0012` arbitration (`t_201cdca8`).** Three unmerged lanes minted
 > `docs/adr/0012-*.md` independently on 2026-09-15 (11:21–11:33Z). Before any of
