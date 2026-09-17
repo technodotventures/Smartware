@@ -25,7 +25,7 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-17-t_a6bf30a8.md`](journal/2026-09-17-t_a6bf30a8.md) — The catch-up re-syncs the claim-FTS lane: `replayCatchUp` reports the scopes it materialised, and every call site that owns a lane repairs them (2026-09-17)
-- **Journal entries:** 64 · tasks completed on board `smartware`: 107
+- **Journal entries:** 64 · tasks completed on board `smartware`: 108
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
@@ -33,8 +33,10 @@
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
 | `integration/v0.8.0` | 204 | 2026-09-17 | Merge branch 'wip/neo/adr-numbering-rule' into integration/v0.8.0 |
+| `tmp/t_5742162f-mix` | 93 | 2026-09-17 | tmp: combined tree for t_5742162f merge-order measurement |
+| `wip/neo/compile-page-refusal` | 88 | 2026-09-17 | docs(conformance): verified baseline for the named page refusal on the compile/endorse re-serialise (t_5742162f) |
+| `wip/neo/frontmatter-write-residuals` | 86 | 2026-09-17 | docs(t_15b309f3): make the write-boundary lane's R2 and reachability claims true |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
-| `wip/neo/frontmatter-write-residuals` | 85 | 2026-09-17 | docs(conformance): verified baseline for the array write boundary; pin comment correction; STATUS regen (t_0e19036e) |
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
 | `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
 | `wip/neo/frontmatter-coercion-depth` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
@@ -111,8 +113,8 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
 - `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
-- `t_5742162f` [ready] FIX (low, DECIDE-first): the COMPILE re-serialise throws on a page whose `notices` array mixes mapping and non-mapping items — the mixed-array write refusal is reachable from the reader (measured end-to-end, pre-existing on both arms) (created 2026-09-17, assignee neo)
 - `t_dae50f51` [todo] FIX (lead, read-only evidence): the MCP dispatcher surface (`src/index.ts`) never got the verb-level claim-FTS lane repairs — `smartware_correct` answers [] over MCP until a restart (created 2026-09-17, assignee neo)
+- `t_cee7412a` [ready] VERIFY (independent): the t_15b309f3 text fix — corrected pin/claims at a415578 (PR #37) (created 2026-09-17, assignee tech-head)
 
 ## Blockers and stale work
 
@@ -145,8 +147,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (128 tasks, 9350 events)
-- ⚠️ 45 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (129 tasks, 9408 events)
+- ⚠️ 46 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index
