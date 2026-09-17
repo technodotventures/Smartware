@@ -48,7 +48,25 @@ import { ensurePrivateDirectory, writePrivateFile } from '../storage/private-fs.
 export const EXPORT_ID_PATTERN = /^exp_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 export const EXPORT_PROTOCOL_VERSION = 'v0.5.0';
-export const EXPORT_SCHEMA_VERSION = 'v0.5.0';
+
+/**
+ * The schema set that covers the bytes this package ships — the v0.5.0 wire
+ * contract's records PLUS the L0 evidence record schema, which the v0.5.0 set
+ * does not describe (`observation.schema.json` is the observation object on the
+ * wire; it rejects the record envelope by construction — ADR-0013). The v0.5.1
+ * set is the v0.5.0 set plus `observation-record.schema.json`, additively: no
+ * v0.5.0 schema byte moves, and this manifest names the set that actually
+ * covers `observations.jsonl` / `evidence.jsonl` (kanban t_f1157ed4).
+ */
+export const EXPORT_SCHEMA_VERSION = 'v0.5.1';
+
+/**
+ * The `$id` of the L0 evidence record schema — the validator for the record
+ * bytes in `observations.jsonl` and `evidence.jsonl`. Named explicitly in the
+ * manifest so a consumer does not have to infer it from the set version.
+ */
+export const EXPORT_RECORD_SCHEMA =
+  'https://smartware.dev/schemas/v0.5.1/observation-record.schema.json';
 
 const CONTENT_FILES = [
   'observations',
@@ -86,6 +104,12 @@ export interface DeletionCertificate {
 export interface ExportManifest {
   protocol: string;
   schemas: string;
+  /**
+   * `$id` of the schema that validates `observations.jsonl` / `evidence.jsonl`.
+   * Named explicitly because those files carry the L0 record, which the wire
+   * schema set does not describe (ADR-0013).
+   */
+  record_schema: string;
   export_id: string;
   scope: string;
   exported_at: string;
@@ -304,6 +328,7 @@ export async function handleExportScope(
   const manifest: ExportManifest = {
     protocol: EXPORT_PROTOCOL_VERSION,
     schemas: EXPORT_SCHEMA_VERSION,
+    record_schema: EXPORT_RECORD_SCHEMA,
     export_id: exportId,
     scope: params.scope,
     exported_at: new Date().toISOString(),

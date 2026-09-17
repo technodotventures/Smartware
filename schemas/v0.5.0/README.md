@@ -12,6 +12,11 @@ retained under `schemas/v0.4.2` and remains valid for five-verb conformance
 claims (see the protocol contract's change history — a migration note, not a
 break).
 
+A companion set, [`schemas/v0.5.1`](../v0.5.1/README.md), is this set **plus one
+additive schema** — `observation-record.schema.json`, the L0 evidence record that
+this set does not describe (see *Which schema covers which surface* below). No
+file in this set moves for it, and v0.5.0 conformance claims are unaffected.
+
 ## What `claim.schema.json` describes
 
 `claim.schema.json` describes the **L1 claim version record** — one line on the
@@ -60,67 +65,41 @@ Changes vs v0.4.2 (schema-surface only):
   scope, reason (`erasure | offboarding`), operation_id, owner actor; optional
   owner-approved non-PII `owner_pointer` valid for offboarding only.
 
-Enum completions after the v0.5.0 cut (additive only, `SHA256SUMS` regenerated;
-no property, shape or pattern changes):
-
-- 2026-09-15 — `hold.release` (ADR-0009 explicit legal-hold marker).
-- 2026-09-15 — `consolidate`, `reflect.explicit`, `retention.expire`: ops the
-  substrate has been writing since before the v0.5.0 cut but which the enum never
-  listed, so their receipts failed schema validation. Every op the reference
-  implementation writes now validates against this set (card t_7a64ded2).
-
-The enum is a **superset** of what the reference implementation writes — it may
-list ops before a surface emits them. The writer surface is pinned the other
-way: `test/schemas-v0.5.0.test.ts` asserts every op the writer can emit validates
-against this enum, so a writer op missing here fails the suite instead of
-shipping a receipt this set rejects (card t_0e3989eb).
-
 `integrity-manifest-entry.schema.json` describes an optional post-beta surface.
 Its presence does not make the integrity manifest a beta requirement.
 
 ## Which schema covers which surface
 
-Four surfaces are easy to confuse. An integrator validating Smartware records should
-use the schema named here and no other (ADR-0013, kanban `t_0920aa1d`; the L1 row was
-added on kanban `t_11fed5bb`):
+Three surfaces are easy to confuse. An integrator validating Smartware records should
+use the schema named here and no other (ADR-0013, kanban `t_0920aa1d`):
 
 | surface | what it is | what validates it |
 |---|---|---|
-| `<data_dir>/claims/<yyyy-mm>.jsonl` (one line per claim version) | **the L1 claim version record** — the canonical claim store as the writer appends it. `EXPORT.SCOPE` ships these lines **verbatim**, filtered to the exported scope, as `claims.jsonl`: the package copy is the same artifact, not a projection of it | `claim.schema.json` — see *What `claim.schema.json` describes* above. **No separate record schema and no extra manifest field**: unlike the L0 line, this record *is* the artifact `claim.schema.json` names, and the set a package's manifest declares holds that file |
 | `observation.schema.json` | **the observation object on the wire** — the OBSERVE payload (`content`, `source` identifier string, `scope`, `metadata{timestamp, actor, informed_by, tags}`, `idempotency_key`) plus the server-stamped `observation_id`, `operation_id`, `actor_id` | itself |
-| `<data_dir>/evidence/<date>.jsonl` (one line per observation) | **the L0 record** — the append-only storage envelope. It carries the wire payload's information under different names (`id`, `source.app`, `source.observed_at`, `source.actor`) **plus** canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` tamper-evidence chain | **no schema in this set** — see the gap below |
+| `<data_dir>/evidence/<date>.jsonl` (one line per observation) | **the L0 record** — the append-only storage envelope. It carries the wire payload's information under different names (`id`, `source.app`, `source.observed_at`, `source.actor`) **plus** canonical state the wire object has no place for: `status`, `visibility`, `version`, `policy`, `provenance`, and the `integrity{hash, writer_id, sequence, previous_hash}` tamper-evidence chain | `observation-record.schema.json` in the **v0.5.1 set** — **not in this set** (v0.5.0 is frozen; the record schema is additive, see the gap below) |
 | `page-frontmatter.schema.json` | **L2 page frontmatter** (spec §9) for `wiki/<category>/<slug>.md` | itself |
-
-A package's `claims.jsonl` therefore needs no schema name beyond the `schemas` set version in its
-manifest — that set holds `claim.schema.json` itself (v0.5.1, if the L0 record schema is present, is
-documented as this set plus one additive file). The claim record's boundary is pinned by
-`test/layer1/l1-claim-record-portability-boundary.test.ts` and decided in ADR-0013 → *Delta
-(2026-09-16) — the L1 claims record*.
 
 **Known gaps, disclosed rather than silently relaxed** (both carded with measured
 evidence; the measurement is `test/layer0/l0-record-wire-boundary.test.ts` and the
 rationale is ADR-0013):
 
-1. **The L0 record shape is unpublished in v0.5.0.** Applying `observation.schema.json`
-   to an evidence line yields errors by construction (4 `required`, 9
-   `additionalProperties`, `/source:type`). This includes the copies in
-   `EXPORT.SCOPE` packages (`observations.jsonl`, `evidence.jsonl`) — a package whose
-   `manifest.json` declares `"schemas": "v0.5.0"` while shipping a record shape no
-   v0.5.0 schema describes. A record schema is required for that manifest claim to be
-   honest; until it exists, treat the exported record shape as defined by the
-   implementation, not by this set.
-2. **The compiled page frontmatter conforms to `page-frontmatter.schema.json`** — fixed
-   2026-09-16 (kanban `t_8d6f4a5c`, ADR-0013 → D2). The compiler now writes spec §9's field set
-   verbatim: singular `category`, `created`/`updated` as `format: date`, `confidence` bucketed
-   through `confidenceToBucket`, `epistemic_tag` through `epistemicToTag`, and `sources` holding
-   the page's cited `ClaimId`s (its published meaning). The compile envelope is **not** page
-   vocabulary — entity identity, compile provenance, the observation groundtruth and
-   endorsement-recovery metadata render into the page's derived **Evidence Timeline** region as a
-   `smartware-envelope` block, a cached render §9 already makes agent-managed and rebuildable.
-   `page-frontmatter.schema.json` is the contract for that artifact, and
-   `test/layer2/l2-page-frontmatter-boundary.test.ts` pins **both** writers of it (COMPILE and
-   ENDORSE) to an empty error list. A page written before this change is still read through the
-   compatibility accessor (`src/layer2/envelope.js`) and is upgraded in place on its next write.
+1. **The L0 record shape is not in this set — it is published in v0.5.1.**
+   `observation.schema.json` (this set) describes the observation object on the wire and rejects the
+   evidence line by construction (4 `required`, 9 `additionalProperties`, `/source:type`); the record
+   has its own schema, `schemas/v0.5.1/observation-record.schema.json`, which is the validator for
+   `<data_dir>/evidence/<date>.jsonl` **and for the byte-identical copies `EXPORT.SCOPE` ships in
+   `observations.jsonl` / `evidence.jsonl`**. It ships additively (no v0.5.0 byte moves) and an export
+   package's manifest names it explicitly (`"schemas": "v0.5.1"` + `"record_schema"`), so the
+   portability claim matches the bytes.
+2. **The reference implementation's compiled page frontmatter does not yet validate
+   against `page-frontmatter.schema.json`.** The compiler emits the L2 page with a
+   legacy internal envelope and a different vocabulary (`category` plural,
+   `confidence` numeric, `epistemic` for `epistemic_tag`, observation ids under
+   `sources`); the schema's field set is the normative one, and spec §9 prints the same field set
+   (`tags`, `aliases` and `notices` optional). The writer fix is carded. `page-frontmatter.schema.json`
+   is the contract
+   for that artifact — do not read the implementation's current output as an
+   alternative contract.
 
 `tombstone-frontmatter.schema.json` covers `wiki/tombstones/*.md` and
 `profile-frontmatter.schema.json` covers `wiki/profiles/*.md`; the page schema's

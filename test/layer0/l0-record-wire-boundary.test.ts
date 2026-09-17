@@ -1,22 +1,24 @@
-// L0 record ↔ wire observation boundary pin (ADR-0013, kanban t_0920aa1d).
+// L0 record ↔ wire observation boundary pin (ADR-0013, kanban t_0920aa1d;
+// record schema published by kanban t_f1157ed4).
 //
-// Two things are easy to conflate and neither was pinned by a test before this one:
+// Two artifacts are easy to conflate, and neither was pinned by a test before this one:
 //
-//   1. `observation.schema.json` describes the observation OBJECT ON THE WIRE — the
-//      v0.5.0 contract's OBSERVE payload plus the server-stamped identity.
+//   1. `observation.schema.json` (v0.5.0) describes the observation OBJECT ON THE WIRE —
+//      the v0.5.0 contract's OBSERVE payload plus the server-stamped identity.
 //   2. the L0 line in `<dataDir>/evidence/<date>.jsonl` is the append-only RECORD
 //      envelope: it carries that same information under different names, plus the
 //      canonical state and the integrity chain the wire object has no place for.
 //
-// So `observation.schema.json` is NOT the validator for the record. That is a
-// disclosed divergence (ADR-0013 → D1; the record shape is unpublished in v0.5.0),
-// pinned here so it cannot drift in EITHER direction:
+// The record now has its own published schema — `observation-record.schema.json` in the
+// v0.5.1 set (the v0.5.0 set plus that one additive file; ADR-0013 → D1 carried out).
+// Both halves are pinned here so the boundary cannot drift in EITHER direction:
 //
-//   - if the record shape changes, the envelope-set assertion fails;
-//   - if someone closes the gap (publishes a record schema, or reshapes the writer),
-//     the rejection assertions fail — which is the signal to update the README section
-//     "Which schema covers which surface" and invert these assertions, not to relax
-//     them.
+//   - if the record shape changes, the envelope-set assertion and the record schema's
+//     empty error list fail;
+//   - if someone widens the record schema until it accepts the WIRE object, the
+//     wire-object rejection assertion fails;
+//   - if someone relaxes `observation.schema.json` to admit the record, the record's
+//     exact 14-error rejection fails.
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
@@ -28,19 +30,23 @@ import { afterEach, describe, test } from 'vitest';
 
 import { SmartwareCore } from '../../src/core.js';
 
-const schemaDir = path.join(process.cwd(), 'schemas', 'v0.5.0');
+/** Both sets: the v0.5.1 record schema `$ref`s the shared v0.5.0 `common.schema.json`. */
+const SCHEMA_SETS = ['v0.5.0', 'v0.5.1'];
 
 function createAjv(): Ajv2020 {
   const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false });
   addFormats(ajv);
-  for (const file of readdirSync(schemaDir).filter(f => f.endsWith('.schema.json')).sort()) {
-    ajv.addSchema(JSON.parse(readFileSync(path.join(schemaDir, file), 'utf8')) as AnySchema);
+  for (const set of SCHEMA_SETS) {
+    const dir = path.join(process.cwd(), 'schemas', set);
+    for (const file of readdirSync(dir).filter(f => f.endsWith('.schema.json')).sort()) {
+      ajv.addSchema(JSON.parse(readFileSync(path.join(dir, file), 'utf8')) as AnySchema);
+    }
   }
   return ajv;
 }
 
-function validator(ajv: Ajv2020, filename: string): ValidateFunction {
-  const id = `https://smartware.dev/schemas/v0.5.0/${filename}`;
+function validator(ajv: Ajv2020, set: string, filename: string): ValidateFunction {
+  const id = `https://smartware.dev/schemas/${set}/${filename}`;
   const validate = ajv.getSchema(id);
   assert.ok(validate, `schema not registered: ${id}`);
   return validate;
@@ -74,6 +80,10 @@ const L0_KEYS = [
   'content', 'id', 'idempotency', 'integrity', 'policy', 'provenance',
   'scope', 'source', 'status', 'type', 'version', 'visibility',
 ].sort();
+
+/** The record's published validator: `schemas/v0.5.1/observation-record.schema.json`. */
+const RECORD_SCHEMA_SET = 'v0.5.1';
+const RECORD_SCHEMA_FILE = 'observation-record.schema.json';
 
 const tempDirs: string[] = [];
 
@@ -169,7 +179,7 @@ describe('L0 record vs observation.schema.json — which artifact the schema cov
       );
 
       // ── The schema's subject is the wire object ──────────────────────────
-      const observation = validator(createAjv(), 'observation.schema.json');
+      const observation = validator(createAjv(), 'v0.5.0', 'observation.schema.json');
       const wire = wireProjection(record);
       assert.equal(
         observation(wire),
@@ -204,7 +214,77 @@ describe('L0 record vs observation.schema.json — which artifact the schema cov
     }
   }, 120_000);
 
-  test('EXPORT.SCOPE ships the record shape under a v0.5.0 schema label (disclosed gap #1)', async () => {
+  test('the record schema accepts the record the reference writer appends, and stays closed', async () => {
+    const { dataDir, core } = await protocolNativeFlow();
+    try {
+      const record = evidenceLines(dataDir)[0]!;
+      const recordValidator = validator(createAjv(), RECORD_SCHEMA_SET, RECORD_SCHEMA_FILE);
+
+      // ── Positive direction: the writer's own record, empty error list ────
+      assert.deepEqual(
+        errorKeys(recordValidator, record),
+        [],
+        'L0 record the reference writer appended must validate against the published record schema '
+        + `(${RECORD_SCHEMA_SET}/${RECORD_SCHEMA_FILE}) with an empty error list`,
+      );
+
+      // ── Negative direction: the schema is CLOSED, at the top level and nested ──
+      assert.deepEqual(
+        errorKeys(recordValidator, { ...record, unexpected_key: 'nope' }),
+        ['/:additionalProperties:unexpected_key'],
+        'the record schema must reject an unknown top-level key',
+      );
+      assert.deepEqual(
+        errorKeys(recordValidator, { ...record, integrity: { ...record['integrity'] as object, extra: 1 } }),
+        ['/integrity:additionalProperties:extra'],
+        'the record schema must reject an unknown key inside the integrity chain',
+      );
+      const { policy: _policy, ...withoutPolicy } = record;
+      assert.deepEqual(
+        errorKeys(recordValidator, withoutPolicy),
+        ['/:required:policy'],
+        'the record schema must require the written canonical state (policy)',
+      );
+    } finally {
+      core.close();
+    }
+  }, 120_000);
+
+  test('the record schema does not accept the wire observation object', async () => {
+    const { dataDir, core } = await protocolNativeFlow();
+    try {
+      const record = evidenceLines(dataDir)[0]!;
+      const recordValidator = validator(createAjv(), RECORD_SCHEMA_SET, RECORD_SCHEMA_FILE);
+
+      // ── The record schema does NOT accept the wire object ────────────────
+      // This is the pin that fails if the record schema is ever widened until the
+      // wire observation object validates: the two artifacts must stay separable, and
+      // keeping the record's canonical-state fields REQUIRED is what keeps them so.
+      assert.deepEqual(
+        errorKeys(recordValidator, wireProjection(record)),
+        [
+          '/:additionalProperties:metadata',
+          '/:additionalProperties:observation_id',
+          '/:required:id',
+          '/:required:integrity',
+          '/:required:policy',
+          '/:required:provenance',
+          '/:required:status',
+          '/:required:type',
+          '/:required:version',
+          '/:required:visibility',
+          '/content:type',
+          '/source:type',
+        ].sort(),
+        'the record schema accepted part of the WIRE observation object — the record schema is the '
+        + 'record contract, not the wire contract (ADR-0013 → D1); do not widen it to swallow the wire shape',
+      );
+    } finally {
+      core.close();
+    }
+  }, 120_000);
+
+  test('EXPORT.SCOPE ships the record shape and names the schema that covers it (ADR-0013 D1)', async () => {
     const { dataDir, core } = await protocolNativeFlow();
     try {
       const owner = { type: 'person' as const, id: core.getConfig().owner_id, display_name: 'Owner' };
@@ -214,9 +294,17 @@ describe('L0 record vs observation.schema.json — which artifact the schema cov
         readFileSync(path.join(exported.path, 'manifest.json'), 'utf8'),
       ) as Record<string, unknown>;
       assert.equal(manifest['protocol'], 'v0.5.0');
-      assert.equal(manifest['schemas'], 'v0.5.0');
+      // The manifest's schema version names the set that actually covers the bytes
+      // in this package: the v0.5.1 record schema is what the exported record lines
+      // validate against (v0.5.0 alone does not describe them).
+      assert.equal(manifest['schemas'], 'v0.5.1');
+      assert.equal(
+        manifest['record_schema'],
+        `https://smartware.dev/schemas/${RECORD_SCHEMA_SET}/${RECORD_SCHEMA_FILE}`,
+      );
 
-      const observation = validator(createAjv(), 'observation.schema.json');
+      const observation = validator(createAjv(), 'v0.5.0', 'observation.schema.json');
+      const recordValidator = validator(createAjv(), RECORD_SCHEMA_SET, RECORD_SCHEMA_FILE);
       const record = evidenceLines(dataDir)[0]!;
 
       for (const name of ['observations', 'evidence']) {
@@ -234,8 +322,15 @@ describe('L0 record vs observation.schema.json — which artifact the schema cov
         assert.equal(
           observation(exportedRecord),
           false,
-          `no v0.5.0 schema covers the exported record shape (gap carded from ADR-0013 → D1): `
-          + `${name}.jsonl validated, so a record schema has landed — update the README and this test`,
+          `the wire schema still does not cover the exported record (${name}.jsonl); `
+          + 'the record schema is the validator for these bytes',
+        );
+        // The package's own claim is now true: the record bytes validate against the
+        // schema the manifest names, with an empty error list.
+        assert.deepEqual(
+          errorKeys(recordValidator, exportedRecord),
+          [],
+          `the package's ${name}.jsonl must validate against ${RECORD_SCHEMA_SET}/${RECORD_SCHEMA_FILE}`,
         );
       }
     } finally {

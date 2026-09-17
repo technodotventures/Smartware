@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { ulid } from 'ulid';
 
-import { loadConfig, saveConfig, getDataDir, type SmartwareConfig } from './config.js';
+import { loadConfig, POD_SELF_SCOPE, saveConfig, getDataDir, type SmartwareConfig } from './config.js';
 import { SMARTWARE_VERSION } from './version.js';
 import { Layer0Index } from './layer0/index.js';
 import { ClaimStore } from './layer1/store.js';
@@ -58,7 +58,7 @@ async function initialize(dataDir: string): Promise<SmartwareConfig> {
     version: SMARTWARE_VERSION,
     data_dir: dataDir,
     scopes: [
-      { id: 'self', parent: null, visibility_default: 'private' },
+      { id: POD_SELF_SCOPE, parent: null, visibility_default: 'private' },
       { id: 'workspace', parent: null, visibility_default: 'workspace' },
       { id: 'project:default', parent: 'workspace', visibility_default: 'scope' },
     ],

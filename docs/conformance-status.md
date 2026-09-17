@@ -1,7 +1,8 @@
 # Implementation conformance
 
 **Target:** Specification v1.6.16 (five-verb surface), Protocol v0.5.0,
-Schemas v0.5.0. The v0.5.0 conformance surface is **the five core memory verbs
+Schemas v0.5.0 plus the additive v0.5.1 set (`observation-record.schema.json`, the
+L0 evidence record). The v0.5.0 conformance surface is **the five core memory verbs
 (OBSERVE, RECALL, REFLECT, REVISE, FORGET) plus FORGET.SCOPE.**
 
 Smartware is beta software. The repository provides executable evidence for
@@ -35,35 +36,98 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
-Verified 2026-09-16 on Node v26.5.1 for **which schema covers the L1 claim record** — the canonical
-`<data_dir>/claims/<yyyy-mm>.jsonl` line and the byte-identical copy `EXPORT.SCOPE` ships as
-`claims.jsonl` (`wip/tech-head/l1-claim-record-boundary`, kanban `t_11fed5bb`, ADR-0013 → *Delta
-(2026-09-16) — the L1 claims record* — a boundary statement plus its pin; **no published schema byte
-moves**, `schemas/v0.5.0/SHA256SUMS` unchanged): **548 tests across 77 files** (544 passed; the four
-failures are `mcp_smoke`'s stdio-transport tests in a tree with no `dist/` — after `npm run build` that
-file alone is 4/4), 31 schema files. The delta over the entry below is **7 tests in one new file**,
-`test/layer1/l1-claim-record-portability-boundary.test.ts`, which pins: the ordinary write path's
-records (a caller-supplied `OperationId`, the legacy marker when none is supplied, a demoted copy, and
-the claim `reflect.auto` creates) validate against `claim.schema.json` with an **empty** Ajv error list;
-the record envelope is exactly the schema's enumerated property set; the schema stays closed at the root
-and inside `semantic` (a pre-v0.6 record with no block still validates, and an invented key at either
-level is rejected with its exact single error); **no other schema file in either published set
-references `claim.schema.json`**, so the artifact has one validator; every emitted record's
-`OperationId` matches `^op_[0-9A-HJKMNP-TV-Z]{26}$` while the pre-fix literal
-`op_LEGACY00000000000000000000` is asserted to fail it; the package's `claims.jsonl` lines are
-**byte-identical** to the canonical lines and validate against the file the manifest's set holds
-(`manifest.schemas` names a set that contains it — no extra manifest field is needed for claims, unlike
-the L0 record, whose schema is named explicitly); and the one open half — `insertClaim` omitting
-`supersedes` on a `version >= 2` and on a born-forgotten record (`t_3ba3ee39`, ADR-0014, another lane)
-— is asserted as its **exact** two-error list `/:required:supersedes` + `/:if`, so it can neither hide
-a fourth divergence nor survive the fix. RED control: the same file against the packaged revision
-`e937fab` is **6 failed | 1 passed**, the ordinary-path assertion failing with
-`/:additionalProperties:semantic` and the id assertion on the pre-fix literal — the gate's two
-divergences (`t_66f1dd7d` §3 B2), reproduced by the pin. Mutation checks: deleting `semantic` from the
-schema → 5 failed | 2 passed; reverting the writer to the pre-fix literal → 3 failed | 4 passed;
-applying the `supersedes` writer half alone → 1 failed | 6 passed (the residual flips when closed). The
-README's *Which schema covers which surface* table now lists the L1 record and its export copy — one
-artifact, one validator. No other suite changed.
+Verified 2026-09-17 on Node v26.5.1 for **what a REFLECT does when its `operation_id` is replayed**
+(`wip/tech-head/reflect-replay-contract`, kanban `t_efa8d5a8`, stacked on the unscoped-REFLECT lane
+`48cdc0b`): **79 files / 559 tests**, **32 schema files** (v0.4.2, v0.5.0, v0.5.1). Protocol v0.5.0
+(*Idempotency and commit identity*) says "same OperationId plus identical canonical payload returns
+the prior result", and `observe` / `forget` / `forget.scope` / `endorse` / the retention sweep / the
+connector ingest all implement it — REFLECT instead matched the recorded `reflect.explicit` entry and
+then fell through into the whole compile. Measured on this lane's own A/B: a pre-fix brain's id
+replayed by the fix's base returned `claims_created` 0 (**recorded**) beside `pages_compiled` 4
+(**fresh**), and wrote claims +4, pages +5, `ops_lines` +8 and 8 `reflect.auto` receipts; on a brain
+whose observations were all processed the counts happened to match (4/4) while every page's bytes were
+rewritten — the defect was invisible in the numbers being watched. Replay is now a pure no-op: both
+counts come from the committed entry, `telemetry.replayed: true`, every other telemetry count 0 and
+`freshness` **omitted** (a live reading inside a recorded result is the same defect class), `audit: []`
+and no `git_sha` (the entry is the durable audit trail). An entry with no recorded counts is refused
+(`conflict`) rather than reported as a 0/0 run; gates and the payload conflict check still run first;
+the entry is still appended after the compile returns, so an interrupted run's retry compiles. The
+durable compile queue is unaffected — its crash recovery re-processes queue rows by `observation_id`
+(and dedups through the fingerprint index + per-observation receipts), never a `reflect.explicit` id.
+A/B pair: the same test file (sha256 `8d8d973d…`) at `48cdc0b` (4 failed | 1 passed) and here (5/5),
+pinned by `test/protocol/reflect-replay-contract.test.ts`; the probe pairs (upgrade case /
+same-revision / deferred L2 completion) are in `attachments/t_efa8d5a8/replay-ab.log`. **A pre-existing
+`operation_id` from a pre-fix brain replays to its recorded result and writes nothing — replay-safe, and
+it does not repair the brain; fresh behaviour needs a fresh id.** The one host-visible change (the
+deferred L2 stage is a separate operation, so it takes its own id) is why the decision record —
+`docs/adr/0018-reflect-replay-returns-the-recorded-result.md`, *Proposed* — leaves the merge to the
+owner. No schema byte, no `SHA256SUMS` line, no `OpType` change.
+
+Verified 2026-09-17 on Node v26.5.1 for **what a REFLECT with no scope compiles, and what the
+operations log records for it** (`wip/tech-head/reflect-noscope-all-scopes`, kanban `t_27c73d58`,
+stacked on the consent-change lane `658c3cb`): **78 files / 554 tests**, **32 schema files**
+(v0.4.2, v0.5.0, v0.5.1). `handleCompile`'s `params.scope ?? 'personal'` is gone — the target is the
+absence itself, the spelling every other reader of it already used (`CompileOptions.scope`, the L2
+gather guard, the claim-production filter, `syncSearchFromClaims`) — so an unscoped compile gathers
+every registered lane: measured on a fresh brain with one extractable observation per lane, **0 claims
+/ 0 pages → 3 claims / 3 pages** (exactly the union of the three per-lane runs), and
+`layer3_indexed_count` **0 → 3** on the deferred-synthesis path. The `reflect.explicit` entry records
+`details.scope: null` — the same spelling its own `payload_hash` is computed over, and never a lane the
+caller did not name — instead of the unregistered lane `personal`; the named-lane, non-owner
+`invalid_scope` and grant-enforcement behaviours are unchanged and are pinned as controls on both arms.
+A/B pair: the same test file (sha256 `51dc5162…`) at `658c3cb` (3 failed | 3 passed, the three
+unscoped assertions) and at the fix (6/6), pinned by
+`test/protocol/reflect-no-scope-all-scopes.test.ts`. No `$defs/Scope` widening, no published schema
+byte, no `SHA256SUMS` line, no literal re-introduced. **Claim production on this owner-gated path
+changes**, so the merge call belongs to the owner (requirement 2 of the card); the idempotency note for
+an `operation_id` already used by an unscoped run is in `docs/journal/2026-09-17-t_27c73d58.md`.
+
+Verified 2026-09-16 on Node v26.5.1 for **the lane the reference implementation's own consent-change
+records are written in** (`wip/neo/consent-change-scope`, kanban `t_e6fce49a`, stacked on the
+L0-record-schema lane `e0241d4`; carded out of `t_f1157ed4`'s writer sweep): **77 files / 548 tests**,
+**32 schema files** (v0.4.2, v0.5.0, v0.5.1). GRANT, REVOKE and the two `?? 'personal'` fallbacks
+(`quarantine_review.ts`, `forget.ts`) now write the protocol-native `self` through one constant
+(`POD_SELF_SCOPE`, `src/config.ts`) — the lane a Core-opened brain registers and FORGET.SCOPE's audit
+marker resolves to — so those records validate against
+`schemas/v0.5.1/observation-record.schema.json` with an **empty** error list (were
+`['/scope:pattern']`). The A/B pair is the same test file (sha256 `ee8144ca…`) at `e0241d4`
+(1 failed | 4 passed, quoting `/scope:pattern`) and at the fix (5/5), pinned by
+`test/protocol/consent-change-lane.test.ts`. Measured behaviour of the literal: it decided the
+*scope-keyed read surfaces* (raw-window search, `EXPORT.SCOPE` closure) and nothing else — replay
+produces no claims from `consent_change`, retention is `forever`, FORGET.SCOPE refuses pod-internal
+scopes, grants never read a record's `scope`, and both fallbacks are unreachable (a missing target is
+refused before any lane resolves). No published schema byte and no `SHA256SUMS` line moved (v0.5.0
+`8d47a427…`, v0.5.1 `a7c3095d…`). Pre-fix records keep the `personal` spelling — L0 is append-only.
+Adjacent `personal` literals (`reflect.ts`'s no-scope sentinel, `session.ts`'s summarizer default,
+`confidence.ts`'s half-life key, the OBSERVE tool-description example) are measured and carded, not
+fixed here — the `reflect.ts` sentinel was fixed on `t_27c73d58` (see the baseline above); the other
+three remain.
+
+Verified 2026-09-16 on Node v26.5.1 for **the published L0 evidence record schema and the export
+manifest's schema label** (`wip/smarty/l0-record-schema`, kanban `t_f1157ed4`, ADR-0013 → *Delta
+(2026-09-16): D1 carried out* — an additive schema set; `schemas/v0.5.0/SHA256SUMS` sha256
+`8d47a427…` unchanged, so no frozen v0.5.0 byte moves): **543 tests across 76 files**, **32 schema
+files** (`v0.4.2`, `v0.5.0`, `v0.5.1`). The delta over the entry below is 2 tests —
+`test/layer0/l0-record-wire-boundary.test.ts` (2 → 4: the record the reference writer appends
+validates against `schemas/v0.5.1/observation-record.schema.json` with an **empty error list**; the
+schema is closed (unknown top-level key, unknown key inside `integrity`, and a record missing
+`policy` are each rejected with their exact single error); and the record schema does **not** accept
+the wire observation object — 12 exact errors, so it cannot be widened into the wire shape) — plus
+updated assertions in `test/protocol/export-scope.test.ts` and
+`test/conformance/coffee-company-brain.test.ts` (the manifest now declares `"schemas": "v0.5.1"` and
+an explicit `"record_schema"` `$id`). `observation.schema.json` still rejects the record with its
+exact 14 errors, and an export package's record lines stay byte-identical to the canonical line while
+validating against the schema its manifest names. A sweep of **every** L0 writer in one brain (12
+records across 8 writer paths: OBSERVE plain / with `operation_id` / with an idempotency key and an
+attachment-shaped body / in a client lane; the retention-expiry tombstone; a quarantined OBSERVE; the
+quarantine review; the FORGET tombstone; GRANT + REVOKE consent records; the claim correction; the
+FORGET.SCOPE audit marker) reports **10 valid with an empty error list and 0 unexpected failures**;
+the two divergences are the consent-change writers' hardcoded `scope: 'personal'` — outside the
+published `Scope` vocabulary (ADR-0015 boundary), reported as a writer defect rather than admitted
+into the record schema. Mutation checks: dropping the `sha256:` prefix from the writer's chain hash
+fails 2 tests with `/integrity/hash:pattern`; widening the record schema until the wire object
+validates (`required` emptied, wire property names admitted, `source`/`content` relaxed) fails the
+canonical-state pin and the wire-object pin (2 failed | 2 passed). No other suite changed.
 
 Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
 evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
@@ -310,27 +374,28 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
-- **The L1 claim record has one open divergence on this lane.** `insertClaim` (`src/layer1/store.ts`)
-  omits `supersedes` on a `version >= 2` record and on a born-forgotten (`version 1`,
-  `state: forgotten`) record, which `claim.schema.json`'s `if version >= 2` branch requires in every
-  state. Decided and fixed on `wip/smarty/l1-forgotten-supersedes` (ADR-0014, kanban `t_3ba3ee39`) —
-  the writer names the version it replaces, and the schema's `forgotten` branch stops requiring it,
-  because a claim can be born forgotten with no prior version to name — but not composed on this lane.
-  Pinned as its **exact** residual by `test/layer1/l1-claim-record-portability-boundary.test.ts`,
-  which flips to an empty list when that branch composes. Everything else the ordinary write path emits
-  (a real `OperationId`, the legacy marker, a demoted copy, `reflect.auto`'s own claim) validates whole.
-- **The L0 evidence record's field shape is not published in v0.5.0.** `observation.schema.json` covers the
-  observation object *on the wire* (the OBSERVE payload plus the stamped identity), not the record the
-  substrate appends to `<data_dir>/evidence/<date>.jsonl` — which carries the same information under
-  different names plus `status`, `visibility`, `version`, `policy` and the `integrity` chain, none of
-  which a closed wire schema can hold. **This includes the copies `EXPORT.SCOPE` ships** in
-  `observations.jsonl` / `evidence.jsonl`, in a package whose manifest declares `"schemas": "v0.5.0"`.
-  An integrator validating raw evidence — or a third-party implementation claiming v0.5.0 — has no
-  published contract for the record until the carded record schema lands (`t_f1157ed4`). Disclosed in
-  `schemas/v0.5.0/README.md` → *Which schema covers which surface*; decided in
-  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md); pinned by
-  `test/layer0/l0-record-wire-boundary.test.ts` (the record envelope, the wire projection validating,
-  the record's exact 14-error rejection, and the export package carrying the same bytes).
+- **The L0 evidence record is published in v0.5.1, not in v0.5.0.** `observation.schema.json` (the
+  v0.5.0 set) covers the observation object *on the wire* (the OBSERVE payload plus the stamped
+  identity), not the record the substrate appends to `<data_dir>/evidence/<date>.jsonl` — which
+  carries the same information under different names plus `status`, `visibility`, `version`, `policy`
+  and the `integrity` chain, none of which a closed wire schema can hold. That record now has its own
+  schema, `schemas/v0.5.1/observation-record.schema.json`, which ships **additively** (no v0.5.0 byte
+  moves) and is the validator for the copies `EXPORT.SCOPE` ships in `observations.jsonl` /
+  `evidence.jsonl`; the package's manifest names it (`"schemas": "v0.5.1"` + `"record_schema"`), so the
+  portability claim matches the bytes. **Residual:** a record whose `scope` is a lane the published
+  vocabulary does not admit is outside this set even with a valid shape — host-registered lanes
+  (`pod/<pod>/<lane>`, ADR-0015). Disclosed in `schemas/v0.5.1/README.md` → *Boundaries this schema
+  does not widen*; decided in
+  [ADR-0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md) (its
+  2026-09-16 delta carries D1 out); pinned by
+  `test/layer0/l0-record-wire-boundary.test.ts`. The second divergence the same writer sweep measured —
+  the reference implementation's own consent-change writers stamping `scope: 'personal'` — is **fixed**
+  (kanban `t_e6fce49a`, `wip/neo/consent-change-scope`): GRANT, REVOKE and the two `?? 'personal'`
+  fallbacks (`quarantine_review.ts`, `forget.ts`) now write the protocol-native `self` through one
+  constant (`POD_SELF_SCOPE`, `src/config.ts`), pinned by
+  `test/protocol/consent-change-lane.test.ts` (the driven records' complete Ajv error list against the
+  v0.5.1 record schema is empty; the pre-fix revision fails the identical assertion with
+  `['/scope:pattern']`). Pre-fix records on disk keep the `personal` spelling — L0 is append-only.
 - **The reference implementation's compiled page frontmatter does not yet validate against
   `page-frontmatter.schema.json`** — 19 Ajv errors (`created`/`epistemic_tag` missing, plural `category`,
   ISO `updated`, numeric `confidence`, observation ids under `sources`, plus the compile envelope). The

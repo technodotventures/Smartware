@@ -123,17 +123,6 @@ Because (2) and (3) touch page endorsement — a core verb that reads this front
 - The compiled page frontmatter keeps failing the published schema until the carded writer fix lands.
   The pinning test asserts the exact delta, so the fix cannot land half-done, and the test fails loudly
   when it is fixed (which is the signal to invert it and update the README/ADR).
-  **Landed 2026-09-16 (kanban `t_8d6f4a5c`, branch `wip/tech-head/l2-page-frontmatter-schema`).** The pin
-  was inverted rather than deleted: the compiled page's own frontmatter now validates against
-  `page-frontmatter.schema.json` with an empty error list, and the same file pins the *endorsed* page to
-  it too — ENDORSE is a second writer of this artifact, so its recovery metadata
-  (`endorsement_operation_id`/`endorsed_by`/`endorsed_at`) moved into the derived cached region with the
-  compile envelope instead of back into the frozen contract. Migration: the compatibility reader
-  `src/layer2/envelope.js` reconstructs the envelope from a pre-fix page's inline frontmatter and recovers
-  the cited claims from the pre-fix name, so a tree that is mid-migration keeps reading; the next compile
-  (or endorsement) of that page rewrites it in the published shape, preserving `created`, the locked
-  `sources`, user prose and user `tags`/`aliases`/`notices` verbatim. Nothing here changes `Status` — the
-  owner merge gate on this record is untouched.
 - Costs: the page fix touches `src/layer2/compiler.ts`, `src/layer2/types.ts`, `src/protocol/endorse.ts`
   and `src/protocol/read.ts`, plus hand-built frontmatter fixtures in three conformance tests
   (`f_l2_voice_protection`, `g_endorsement`, `demotion-durability`). Page-endorsement semantics are
@@ -165,71 +154,64 @@ Because (2) and (3) touch page endorsement — a core verb that reads this front
    artifact, and the page gap will keep widening while three code paths and three test fixtures depend on
    the un-published vocabulary.
 
-## Delta (2026-09-16) — the L1 claims record: one artifact, one schema
+## Delta (2026-09-16) — D1 carried out: the record schema is published in the v0.5.1 set
 
-*Appended on kanban `t_11fed5bb` (branch `wip/tech-head/l1-claim-record-boundary`, forked from this
-record's own lane `wip/smarty/canonical-schema-boundary` @ `25f5349`). Nothing above is edited. The
-filename names two artifacts; the question this record answers is *which published schema covers which
-canonical artifact*, and the third artifact of the same class — the L1 claim record — was measured by
-the independent Coffee gate (`t_66f1dd7d` §3 B2) and had no entry here. This section adds it.*
+*Appended on kanban `t_f1157ed4` (branch `wip/smarty/l0-record-schema`, forked from this lane's
+`wip/smarty/canonical-schema-boundary`). Nothing above is edited. This section records the outcome of
+the reversal trigger in *Consequences* and which option was chosen. ADR-0013 stays **Proposed** — the
+owner gate is now the gate on the new schema file, not on the boundary statement.*
 
-### D3 — `<dataDir>/claims/<yyyy-mm>.jsonl` is covered by `claim.schema.json` (v0.5.0); it needs no new file
+**Chosen: option (a) — a new, additive set.** `schemas/v0.5.1/observation-record.schema.json` (with
+its `SHA256SUMS` entry and set README) is the published contract for the L0 record. The set is the
+v0.5.0 set plus that one file: **no v0.5.0 byte moves** (`schemas/v0.5.0/SHA256SUMS` sha256
+`8d47a427…` unchanged), and the record schema `$ref`s `../v0.5.0/common.schema.json` for `Scope`,
+`ActorId`, `ObservationId`, `OperationId` and `Iso8601` — the shared vocabulary (and with it the
+ADR-0015 host-lane boundary on `scope`) is reused, not restated.
 
-**The schema that covers the L1 claim record is `schemas/v0.5.0/claim.schema.json`, and it covers the
-`EXPORT.SCOPE` copy of it too.** A package's `claims.jsonl` is not a projection: `handleExportScope`
-filters `iterAllClaimVersions(dataDir)` by scope and writes those very lines
-(`src/protocol/export_scope.ts`), which `test/layer1/l1-claim-record-portability-boundary.test.ts`
-measures as byte-identical to the canonical line. One artifact, one validator — for the canonical
-surface and for the portability artifact the manifest labels.
+**Option (b) — add the file to the v0.5.0 directory and bump the set's version of record — was
+evaluated and not taken**: it moves the set's file list and checksum manifest, which this card's
+constraint forbids without the owner explicitly accepting that move. The schema content is identical
+either way; if the owner prefers one 17-file set, supersede this delta and move the file and its
+`$id` (no other change).
 
-The L1 case therefore lands differently from D1, and the difference is the decision:
+**The manifest is now honest.** `EXPORT.SCOPE`'s `manifest.json` declares `"schemas": "v0.5.1"` plus
+an explicit `"record_schema": "https://smartware.dev/schemas/v0.5.1/observation-record.schema.json"`
+(`EXPORT_SCHEMA_VERSION` / `EXPORT_RECORD_SCHEMA`, `src/protocol/export_scope.ts`). The version names
+the set that actually covers the package's `observations.jsonl` / `evidence.jsonl` bytes, and the
+second field names the file rather than leaving a consumer to infer it.
 
-| | L0 evidence line | L1 claim line |
-|---|---|---|
-| relation to the published schema | the schema (`observation.schema.json`) describes a **different object** — the wire OBSERVE payload, whose `source` is a string and whose `content` may be a bare string — so the record is outside it by construction | the schema *is* the record's contract: `claim.schema.json` describes "the **L1 claim version record** — one line on the canonical L1 JSONL surface", and its property set is the record envelope, `semantic` included (ADR-0011) |
-| disposition | the record has **no** published schema in v0.5.0 → publish one, additively (`schemas/v0.5.1/observation-record.schema.json`, `t_f1157ed4`) | the record's schema **exists** → the divergences are inside it and are settled field by field, below. **No v0.5.1 claim-record schema is minted**: a second schema for one artifact is exactly the failure this record exists to prevent, and the pin asserts no other file in either set references `claim.schema.json` |
-| the manifest | `record_schema` had to be **named explicitly**, because the file that covers the bytes is outside the set the manifest's `schemas` field names | nothing is added: `manifest.schemas` names a *set*, and `claim.schema.json` is in it (v0.5.0; v0.5.1 is documented as that set plus the L0 record schema, so a consumer resolving the claim lines still loads this file). A record schema outside the named set must be named; one inside it must not be |
+**Pinned in both directions.** `test/layer0/l0-record-wire-boundary.test.ts` asserts that the record
+the reference writer appends validates against the record schema with an **empty error list**; that
+the schema stays closed (unknown top-level key, unknown key inside `integrity`, missing `policy`);
+that the record schema does **not** accept the wire observation object (12 exact errors), so it
+cannot be widened into the wire shape without failing the pin; that `observation.schema.json` still
+rejects the record with its exact 14 errors; and that an export package's record lines stay
+byte-identical to the canonical line while validating against the schema its manifest names.
 
-### Each divergence, and which side was wrong
+**Migration story.** Existing data dirs: nothing to migrate — the writer is unchanged and L0 is
+append-only, so protocol-native-lane records already on disk validate as-is. Existing export
+packages: nothing to rewrite — a package is immutable (an `operation_id` retry returns the same
+manifest), so a package produced before this change keeps its historical `"schemas": "v0.5.0"` label
+while its bytes are the shape the record schema covers; re-exporting under a **new** `operation_id`
+writes the corrected label. Detail: `schemas/v0.5.1/README.md` → *Migration*.
 
-| divergence (measured on the packaged build `wt/t_9740ae98` @ `e937fab`) | which side was wrong | disposition |
-|---|---|---|
-| `semantic` present on the ordinary write path (123/143 records), declared in no set | **the schema** — incomplete, not the writer | the block is enumerated, **optional and closed**, in `claim.schema.json` (ADR-0011, kanban `t_229601e4`, branch `wip/tech-head/claim-record-semantic` @ `981e5a7` — on this lane). "Relax the schema" meant *enumerate what the writer writes*; the envelope stayed `additionalProperties: false` at the root and inside the block |
-| `operation_id: "op_LEGACY00000000000000000000"` (125/143 records) | **the writer** — the value failed the published pattern it must satisfy | the writer stamps the shared Crockford-valid marker `op_000000000000000000000000A3` when the caller mints none (kanban `t_85817375`, branch `wip/smarty/l1-legacy-op-id` @ `0a68482` — on this lane). The schema is **not** relaxed: widening `$defs/OperationId` to admit a 26-char literal that cannot be a ULID would delete the one property the pattern exists for. The gate's 125/143 is *also* a host defect and not a schema question — the Coffee adapter's `#admit()` never forwarded the caller's `operation_id` into the L1 commit, the normal path — which is composition work on the gate lane (kanban `t_5ef44cc1`), not a contract change |
-| a `version >= 2` record and a born-forgotten (`version 1, state forgotten`) record omit `supersedes`, while the schema requires it (`if version >= 2` in every state; the `forgotten` branch) | **both sides**, each for its own case | found while measuring this boundary, not named on the card: the writer names the version it replaces (`supersedes: version - 1`), and the schema's `forgotten` branch stops requiring it — a claim can be **born forgotten** (legacy/migration rows, the replay retraction path) and has no prior version to name, while `supersedes: 0` violates `minimum: 1`. ADR-0014, kanban `t_3ba3ee39`, branch `wip/smarty/l1-forgotten-supersedes` @ `eb93bd0` / `1c75fd9` — **not on this lane**, so this lane's pin states it as the exact residual and flips when that branch composes |
+**Adjacent finding, reported and not fixed here** (measured by sweeping every L0 writer in one brain;
+evidence attached to `t_f1157ed4`): the consent-change writers (`src/protocol/grant.ts`,
+`src/protocol/revoke.ts`) hardcode `scope: 'personal'` — an id the published `Scope` vocabulary does
+not admit, and one that is not in a Core-opened brain's scope registry either (`self` is the spec's
+personal lane; `quarantine_review.ts` and `forget.ts` use the same literal as a fallback). Those
+records are outside this set's conformance claim for that reason alone — the ADR-0015 boundary, not a
+record-schema defect — and the record schema is deliberately **not** widened to admit the literal.
+Carded separately as a writer defect.
 
-Because of the third row, the boundary as written is true of **every record class this lane can write
-except that one**, and the pin says so rather than pinning a fiction: the residual is asserted as its
-exact two-error list, so it can neither hide a fourth divergence nor survive the fix that closes it.
-
-### What this boundary deliberately does not cover
-
-- **Host-registered lanes** — a canonical record whose `scope` is `pod/<pod>/<lane>` or whose
-  `actor_id` is `substrate:<ULID>` is rejected by `/scope:pattern` + `/actor_id:pattern`. That is the
-  ADR-0015 boundary (owner decision recorded on kanban `t_804449f1`), carded `t_9a700aed`, and stated in
-  `schemas/v0.5.0/README.md` → *Scope vocabulary*; the record schema is not widened to admit either.
-- **Ids the replay path mints** — `claim_`/`tomb_` + lowercase sha256 hex from `deterministicClaimId`
-  are outside the `ClaimId`/`TombstoneId` patterns: same class, carded `t_0b079fbf`, pinned on that lane.
-- **The retention sweep's fallback id** (`op_` + 64 lowercase hex, `src/protocol/retention.ts`): same
-  `OperationId` class, writer-side, carded `t_0177d9c3`.
-
-### Consequences
-
-- An integrator now has a named validator for the exported `claims.jsonl` as well as for the canonical
-  line, and the README's boundary table lists it with the other three surfaces.
-- The pin is `test/layer1/l1-claim-record-portability-boundary.test.ts` (7 tests): the ordinary write
-  path's records validate with a **whole empty error list**; the envelope is exactly the schema's
-  enumerated property set; the schema stays closed at the root and inside `semantic` (a pre-v0.6 record
-  with no block still validates); no other file in either set claims the artifact; every emitted record's
-  `OperationId` matches the published pattern; the package's `claims.jsonl` lines are byte-identical to
-  the canonical lines and validate against the file the manifest's set holds. Measured RED against the
-  packaged revision `e937fab`: **6 failed | 1 passed**, the first assertion failing with
-  `/:additionalProperties:semantic` and the id assertion with the pre-fix literal — the gate's two
-  divergences, reproduced by the pin.
-- **Reversal trigger:** if a future set publishes a claim-record schema separate from
-  `claim.schema.json`, or an export manifest gains a claim-record field, this delta is superseded rather
-  than quietly amended. If the owner prefers D1's shape for L1 too (a `v0.5.1` record file), the same
-  move applies to the file and its `$id`, and the "no other schema claims it" assertion inverts with it.
-- ADR-0013 stays **Proposed**: this delta moves **no** published schema byte (it adds a README table row,
-  a test, and this text); the owner gate this record carries is unchanged, and the owner gates on
-  ADR-0011 / ADR-0014 still govern the two schema-side halves it refers to.
+**Fixed 2026-09-16** (kanban `t_e6fce49a`, `wip/neo/consent-change-scope`, stacked on this lane):
+those four writers now stamp the protocol-native `self`, spelled once as `POD_SELF_SCOPE`
+(`src/config.ts`, the same value `initialiseDataDir` registers and FORGET.SCOPE's audit marker
+resolves to), and `test/protocol/consent-change-lane.test.ts` drives GRANT + REVOKE + the
+review/tombstone writers and asserts the appended records' complete Ajv error list against this set's
+record schema is empty — the pre-fix revision fails the identical assertion with `['/scope:pattern']`
+(A/B pair). No published schema byte, no `SHA256SUMS` line, and no record already on disk changes: L0
+keeps the spelling it was written with. The two `?? 'personal'` fallbacks are measured-unreachable
+(the effective-status lookup throws `not_found` first and `observations.scope` is NOT NULL), so that
+half is a spelling change, not a behaviour change; what the literal *did* decide (raw-window search by
+scope, EXPORT.SCOPE's closure, and nothing else) is recorded in the task's journal entry.
