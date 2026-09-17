@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/tech-head/mutation-fts-sync` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/kept-rows-settle` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,16 +24,19 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-17-t_12c79071.md`](journal/2026-09-17-t_12c79071.md) — The claim-FTS lane survey: REVIVE is the third verb of the class; FORGET, RETENTION, ENDORSE and QUARANTINE_REVIEW measured clean (2026-09-17)
-- **Journal entries:** 62 · tasks completed on board `smartware`: 98
+- **Journal:** [`2026-09-17-t_8779781f.md`](journal/2026-09-17-t_8779781f.md) — The kept rows stay (decided, documented); the drain's mirror is not the divergence — and the demotion it needs is not durable on this base (2026-09-17)
+- **Journal entries:** 63 · tasks completed on board `smartware`: 104
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `integration/v0.8.0` | 88 | 2026-09-17 | fix: re-add releaseHold (ADR-0009) + hold_release import dropped by snapshot |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
+| `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
 | `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
+| `wip/neo/frontmatter-coercion-depth` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
 | `wip/neo/frontmatter-lossy-shapes` | 80 | 2026-09-17 | docs: regenerate the STATUS projection (t_cf744a8e, tight check window) |
 | `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
 | `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
@@ -46,6 +49,7 @@
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
 | `wt/t_f2b584dc` | 64 | 2026-09-16 | docs: regenerate STATUS projection + journal sync for the round-4 text fix |
 | `wip/neo/revise-fts-sync` | 62 | 2026-09-17 | docs: journal entry, conformance-status paragraph, STATUS regen (t_336ba0b9) |
+| `wip/tech-head/mutation-fts-sync` | 62 | 2026-09-17 | docs: regenerate the STATUS projection (t_12c79071) |
 | `wip/tech-head/pre-fix-l1-repair-adr` | 62 | 2026-09-17 | docs(adr): ADR-0017 — tighten three citations to the exact lines they name (t_a54a4606) |
 | `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
 | `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
@@ -105,8 +109,7 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
 - `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
-- `t_6fc254cd` [ready] DECIDE+FIX (low): the page YAML reader's still-unread constructs — `|-`/`|+`/`>` block styles and quoted-key items read as silent garbage (measured on t_cf744a8e's tip) (created 2026-09-17, assignee tech-head)
-- `t_5768425d` [ready] FIX (low, DECIDE-first): the page YAML serialiser still degrades two contract-legal shapes — numeric/boolean/null-looking strings (C1) and a nested object deeper than one level inside a notice item (C2) (created 2026-09-17, assignee neo)
+- `t_a6bf30a8` [todo] FIX (lead, measured): a mid-session `replayCatchUp` materialises claim rows without re-syncing the claim-FTS lane — live recall misses them until a re-syncing write (created 2026-09-17, assignee tech-head)
 
 ## Blockers and stale work
 
@@ -139,8 +142,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (119 tasks, 9093 events)
-- ⚠️ 38 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (124 tasks, 9252 events)
+- ⚠️ 43 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index
