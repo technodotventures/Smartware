@@ -2,16 +2,33 @@
 
 import type { Claim, EpistemicLabel } from './types.js';
 
+/**
+ * Half-life (days) per lane, keyed on the **published** `Scope` vocabulary
+ * (`schemas/v0.5.0/common.schema.json#/$defs/Scope`:
+ * `self | workspace | project:<id> | agent:<id> | client:<id>[#n]`), mirroring
+ * the staleness values this implementation declares
+ * (`staleness: { default_half_life_days: 90, scope_overrides: { self: 365, 'project:*': 30 } }`).
+ *
+ * Pre-fix the table was keyed on the pre-rename spellings instead (`personal`,
+ * a `project/` prefix), so neither declared override reached the lane the
+ * vocabulary names. Measured on identical claims, the implied half-life the
+ * shipped function applied was: `personal` 365, `self` 90, `project/foo` 30,
+ * `project:foo` 90 (kanban t_574be8cd; the rename is ADR-0015 / t_e6fce49a).
+ */
 const SCOPE_HALF_LIFE_DAYS: Record<string, number> = {
-  'personal': 365,
-  'default': 90,
+  self: 365,
+  default: 90,
 };
+
+/** The config's `project:*` override, applied to the spec's `project:<id>` lanes. */
+const PROJECT_SCOPE_HALF_LIFE_DAYS = 30;
 
 function getScopeHalfLife(scope: string): number {
   for (const [key, days] of Object.entries(SCOPE_HALF_LIFE_DAYS)) {
+    if (key === 'default') continue;
     if (scope === key || scope.startsWith(key + '/')) return days;
   }
-  if (scope.startsWith('project/')) return 30;
+  if (scope.startsWith('project:')) return PROJECT_SCOPE_HALF_LIFE_DAYS;
   return SCOPE_HALF_LIFE_DAYS['default'];
 }
 

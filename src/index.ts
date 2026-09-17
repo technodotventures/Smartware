@@ -46,9 +46,13 @@ import { openCompileQueue, runCompileBatch, startCompileWorker } from './compile
 async function initialize(dataDir: string): Promise<SmartwareConfig> {
   ensurePrivateDirectory(dataDir);
   ensurePrivateDirectory(path.join(dataDir, 'evidence'));
-  ensurePrivateDirectory(path.join(dataDir, 'wiki', 'personal'));
-  ensurePrivateDirectory(path.join(dataDir, 'wiki', 'workspace'));
-  ensurePrivateDirectory(path.join(dataDir, 'wiki', 'project'));
+  // Pages are written under `wiki/<category>/` (spec §9 L2 conventions: concepts,
+  // entities, decisions, synthesis, tombstones, profiles) and the compiler creates
+  // its category directory on demand (`layer2/compiler.ts`), so init creates the
+  // wiki root only. The `wiki/personal`, `wiki/workspace` and `wiki/project`
+  // directories init used to create were vestigial — nothing in the library reads
+  // or writes them (kanban t_574be8cd).
+  ensurePrivateDirectory(path.join(dataDir, 'wiki'));
 
   const config: SmartwareConfig = {
     instance_id: `smartware_${ulid()}`,
@@ -248,7 +252,7 @@ async function start(): Promise<void> {
       type: z.enum(['message', 'file', 'meeting', 'preference', 'decision', 'tool_output', 'feedback', 'system']).default('message'),
       content_format: z.enum(['text/markdown', 'text/plain', 'application/json']).default('text/plain'),
       content_body: z.string().describe('Observation content'),
-      scope: z.string().describe('Scope identifier (e.g. personal, project/foo)'),
+      scope: z.string().describe('Scope identifier (e.g. self, project:foo, client:acme#1)'),
       visibility: z.enum(['private', 'scope', 'workspace', 'public']).default('scope'),
       source_id: z.string().optional(),
       observed_at: z.string().optional(),
