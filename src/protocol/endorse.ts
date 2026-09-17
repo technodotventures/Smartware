@@ -28,7 +28,7 @@ import {
   type CommitContext,
   type EndorseOperationIntent,
 } from '../ops_log/index.js';
-import { parseFrontmatter, serialiseFrontmatter } from '../layer2/frontmatter.js';
+import { parseFrontmatter, serialisePageFrontmatter } from '../layer2/frontmatter.js';
 import {
   endorsedEnvelope,
   endorsedPageFrontmatter,
@@ -316,7 +316,8 @@ export async function handleEndorse(
     operationId: params.operation_id,
     commitTs,
   };
-  const pageContent = serialiseFrontmatter(
+  const pageContent = serialisePageFrontmatter(
+    params.page_path,
     endorsedPageFrontmatter(page, sources, stamp),
     // The evidence timeline is a derived render; the endorsement stamps its durable recovery
     // metadata into the same cached region instead of into the published frontmatter.

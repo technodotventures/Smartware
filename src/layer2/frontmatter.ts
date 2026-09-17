@@ -21,6 +21,13 @@
 // disclosed, pinned remaining loss, not a refusal: the writer's fixed 4-space prefix and the
 // reader's minimum-indent strip take the element's own indentation with them (`' a\n b'` reads
 // back `'a\nb'`), silently (independent VERIFY t_6012c8ca Finding 1).
+//
+// The refusal is reachable from bytes a page can carry: `parseBlockArray` yields a mixed
+// object/non-object array for a hand-authored block array one of whose items is not a mapping
+// (a bare `- `, a `|-`, a nested sequence; VERIFY t_6012c8ca Finding 2), and the compile/endorse
+// re-serialise paths feed the parsed array back in. Those paths therefore serialise pages through
+// `serialisePageFrontmatter`, which refuses by *page* (`PageRefusalError`, naming the page and
+// the field) instead of throwing an unnamed error from inside the writer (t_5742162f).
 
 import { toPageCategory } from './paths.js';
 
@@ -58,6 +65,47 @@ export function parseFrontmatter(raw: string): { frontmatter: Record<string, unk
 export function serialiseFrontmatter(frontmatter: Record<string, unknown>, body: string): string {
   assertPageVocabulary(frontmatter);
   return `---\n${toYAML(frontmatter)}---\n${body}`;
+}
+
+/**
+ * A page on disk whose parsed frontmatter the writer refuses: re-serialising it would write YAML
+ * the reader flattens, drops or retypes, so the write stops instead (the same write-boundary rule
+ * `serialiseFrontmatter` enforces — nothing is dropped, stringified or otherwise normalised).
+ *
+ * The compile and endorse re-serialise paths can meet one on a *hand-authored* page: a `notices`
+ * array mixing object and non-object items is produced by `parseBlockArray` from ordinary bytes —
+ * a bare `- ` item, a `|-` item, or a nested sequence (VERIFY t_6012c8ca Finding 2) — and both
+ * paths carry the parsed array into the re-serialise (`compiler.ts`, `endorsedPageFrontmatter`).
+ * The failure has to say *which page* to fix, not only which field, so it is named here and
+ * carries the page path; the writer's own reason (field path, and what the vocabulary admits) is
+ * kept verbatim in `reason`.
+ */
+export class PageRefusalError extends Error {
+  constructor(
+    public readonly pagePath: string,
+    public readonly reason: string,
+  ) {
+    super(`page_refused: "${pagePath}" cannot be re-serialised — ${reason}`);
+    this.name = 'PageRefusalError';
+  }
+}
+
+/**
+ * Serialise a page's frontmatter with the page named on refusal: `serialiseFrontmatter` plus the
+ * page context a compile/endorse failure needs (`PageRefusalError`). A page the writer refuses is
+ * never silently rewritten — the page's own bytes stay exactly as authored, and the remedy is to
+ * make the value carriable (VERIFY `t_6012c8ca` Finding 2; kanban `t_5742162f`).
+ */
+export function serialisePageFrontmatter(
+  pagePath: string,
+  frontmatter: Record<string, unknown>,
+  body: string,
+): string {
+  try {
+    return serialiseFrontmatter(frontmatter, body);
+  } catch (error) {
+    throw new PageRefusalError(pagePath, error instanceof Error ? error.message : String(error));
+  }
 }
 
 function isStringArray(value: unknown): value is string[] {
