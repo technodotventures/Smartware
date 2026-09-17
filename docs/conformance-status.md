@@ -36,6 +36,33 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-17 on Node v26.5.1 for **what a REFLECT does when its `operation_id` is replayed**
+(`wip/tech-head/reflect-replay-contract`, kanban `t_efa8d5a8`, stacked on the unscoped-REFLECT lane
+`48cdc0b`): **79 files / 559 tests**, **32 schema files** (v0.4.2, v0.5.0, v0.5.1). Protocol v0.5.0
+(*Idempotency and commit identity*) says "same OperationId plus identical canonical payload returns
+the prior result", and `observe` / `forget` / `forget.scope` / `endorse` / the retention sweep / the
+connector ingest all implement it — REFLECT instead matched the recorded `reflect.explicit` entry and
+then fell through into the whole compile. Measured on this lane's own A/B: a pre-fix brain's id
+replayed by the fix's base returned `claims_created` 0 (**recorded**) beside `pages_compiled` 4
+(**fresh**), and wrote claims +4, pages +5, `ops_lines` +8 and 8 `reflect.auto` receipts; on a brain
+whose observations were all processed the counts happened to match (4/4) while every page's bytes were
+rewritten — the defect was invisible in the numbers being watched. Replay is now a pure no-op: both
+counts come from the committed entry, `telemetry.replayed: true`, every other telemetry count 0 and
+`freshness` **omitted** (a live reading inside a recorded result is the same defect class), `audit: []`
+and no `git_sha` (the entry is the durable audit trail). An entry with no recorded counts is refused
+(`conflict`) rather than reported as a 0/0 run; gates and the payload conflict check still run first;
+the entry is still appended after the compile returns, so an interrupted run's retry compiles. The
+durable compile queue is unaffected — its crash recovery re-processes queue rows by `observation_id`
+(and dedups through the fingerprint index + per-observation receipts), never a `reflect.explicit` id.
+A/B pair: the same test file (sha256 `8d8d973d…`) at `48cdc0b` (4 failed | 1 passed) and here (5/5),
+pinned by `test/protocol/reflect-replay-contract.test.ts`; the probe pairs (upgrade case /
+same-revision / deferred L2 completion) are in `attachments/t_efa8d5a8/replay-ab.log`. **A pre-existing
+`operation_id` from a pre-fix brain replays to its recorded result and writes nothing — replay-safe, and
+it does not repair the brain; fresh behaviour needs a fresh id.** The one host-visible change (the
+deferred L2 stage is a separate operation, so it takes its own id) is why the decision record —
+`docs/adr/0018-reflect-replay-returns-the-recorded-result.md`, *Proposed* — leaves the merge to the
+owner. No schema byte, no `SHA256SUMS` line, no `OpType` change.
+
 Verified 2026-09-17 on Node v26.5.1 for **what a REFLECT with no scope compiles, and what the
 operations log records for it** (`wip/tech-head/reflect-noscope-all-scopes`, kanban `t_27c73d58`,
 stacked on the consent-change lane `658c3cb`): **78 files / 554 tests**, **32 schema files**
