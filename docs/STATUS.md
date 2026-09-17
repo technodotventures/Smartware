@@ -42,8 +42,8 @@
 | `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
 | `wt/t_f2b584dc` | 64 | 2026-09-16 | docs: regenerate STATUS projection + journal sync for the round-4 text fix |
+| `wip/neo/revise-fts-sync` | 62 | 2026-09-17 | docs: journal entry, conformance-status paragraph, STATUS regen (t_336ba0b9) |
 | `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
-| `wip/neo/revise-fts-sync` | 61 | 2026-09-17 | test(revise): the live claim lane must equal the durable surface; RED/GREEN restart probe (t_336ba0b9) |
 | `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
 | `wip/tech-head/l1-forgotten-carry-superseded` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
 | `fix/b1-correction-durability` | 59 | 2026-09-17 | docs(journal): the pre-rewrite ids are unreferenced objects, said plainly (t_3ee1ae37) |
@@ -133,7 +133,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (114 tasks, 8907 events)
+- ✅ kanban board readable (114 tasks, 8912 events)
 - ⚠️ 53 completed task(s) have no journal entry — run: npm run journal:sync
 
 ## Canonical index
