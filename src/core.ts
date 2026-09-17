@@ -98,6 +98,7 @@ import {
   type RestoreScopeResult,
 } from './protocol/restore_scope.js';
 import { handleEndorse, type EndorseParams, type EndorseResult } from './protocol/endorse.js';
+import { handleHoldRelease, type HoldReleaseParams, type HoldReleaseResult } from './protocol/hold_release.js';
 import {
   handleQuarantineReview,
   type QuarantineReviewParams,
@@ -1508,6 +1509,19 @@ export class SmartwareCore {
       semanticStore: options.semanticStore ?? null,
       compileQueue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
+    });
+  }
+
+  /**
+   * Legal hold release (ADR-0009): lifts a scope's hold so erasure and the
+   * retention sweep resume. Owner-only; idempotent per operation_id.
+   */
+  async releaseHold(params: HoldReleaseParams): Promise<HoldReleaseResult> {
+    const config = this.getConfig();
+    return handleHoldRelease(params, {
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      config,
     });
   }
 
