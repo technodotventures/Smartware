@@ -6,6 +6,8 @@ import Ajv2020, { type AnySchema, type ValidateFunction } from 'ajv/dist/2020.js
 import addFormats from 'ajv-formats';
 import { describe, test } from 'vitest';
 
+import { OP_TYPES } from '../src/ops_log/types.js';
+
 const schemaDir = path.join(process.cwd(), 'schemas', 'v0.5.0');
 const schemaFiles = readdirSync(schemaDir)
   .filter(file => file.endsWith('.schema.json'))
@@ -210,6 +212,78 @@ describe('Smartware v0.5.0 schemas', () => {
     };
     assert.equal(opsEntry(forgetScopeEntry), true, JSON.stringify(opsEntry.errors));
     assert.equal(opsEntry({ ...forgetScopeEntry, op: 'forget.scope.evil' }), false);
+  });
+
+  test('operation-log-entry op enum gains hold.release (ADR-0009)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    const holdReleaseEntry = {
+      operation_id: OPERATION_A,
+      actor_id: 'user:ava',
+      timestamp: NOW,
+      op: 'hold.release',
+      details: {
+        payload_hash: 'abc123',
+        scope: 'client:gate#1',
+        released_at: NOW,
+        released_by: 'user:ava',
+        statement: 'no pending dispute / hold released',
+      },
+    };
+    assert.equal(opsEntry(holdReleaseEntry), true, JSON.stringify(opsEntry.errors));
+    assert.equal(opsEntry({ ...holdReleaseEntry, op: 'hold.release.evil' }), false);
+  });
+
+  test('operation-log-entry op enum lists every op the substrate writes (t_7a64ded2)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    // These three have been written since before the v0.5.0 cut but were never
+    // listed, so their receipts failed validation against the published set —
+    // including the hold gate's own sweep-skip receipt (`retention.expire`).
+    for (const op of ['consolidate', 'reflect.explicit', 'retention.expire']) {
+      const entry = {
+        operation_id: OPERATION_A,
+        actor_id: 'user:ava',
+        timestamp: NOW,
+        op,
+        details: { scope: 'client:gate#1', payload_hash: 'abc123' },
+      };
+      assert.equal(opsEntry(entry), true, `${op}: ${JSON.stringify(opsEntry.errors)}`);
+    }
+    assert.equal(opsEntry({
+      operation_id: OPERATION_A,
+      actor_id: 'user:ava',
+      timestamp: NOW,
+      op: 'consolidate.evil',
+      details: {},
+    }), false);
+  });
+
+  test('every writer-surface OpType validates against the published op enum (t_0e3989eb)', () => {
+    const ajv = createAjv();
+    const opsEntry = validator(ajv, 'operation-log-entry.schema.json');
+
+    // The writer surface may not admit an op the published v0.5.0 contract
+    // rejects: that would be a typed-in path to unvalidatable receipts
+    // (t_fa18b2bf F-2). The enum may be a superset — ops reserved for
+    // surfaces this implementation does not write yet — so this pins
+    // `OP_TYPES ⊆ enum`, not equality.
+    for (const op of OP_TYPES) {
+      const entry = {
+        operation_id: OPERATION_A,
+        actor_id: 'user:ava',
+        timestamp: NOW,
+        op,
+        details: {},
+      };
+      assert.equal(
+        opsEntry(entry),
+        true,
+        `writer op '${op}' must validate against the published op enum: ${JSON.stringify(opsEntry.errors)}`,
+      );
+    }
   });
 
   test('forget-scope-request: reason semantics and owner pointer rules', () => {

@@ -98,7 +98,7 @@ describe('expireRetention sweep', () => {
     expect(c.readObservationEvidence({ actor: OWNER, observation_id: fresh.id })?.status).toBe('accepted');
 
     // Raw search window excludes the tombstoned record.
-    const hits = c.searchObservations('Acme', ACME, {});
+    const hits = c.searchObservations({ actor: OWNER, query: 'Acme', scope: ACME });
     expect(hits.map(h => h.id)).not.toContain(past.id);
   });
 

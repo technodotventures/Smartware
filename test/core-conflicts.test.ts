@@ -90,6 +90,9 @@ describe('SmartwareCore conflict read boundary', () => {
 
       expect(core.readConflicts({ actor: owner, scopes: [scope] }).claims).toEqual([]);
 
+      // P0-7: an actor with no grant row at all is denied as `actor_unregistered`
+      // (unknown identity), which a host can route differently from "known actor,
+      // wrong scope" (`insufficient_permission`).
       expect(() => core.readConflicts({
         actor: {
           type: 'agent',
@@ -97,7 +100,7 @@ describe('SmartwareCore conflict read boundary', () => {
           display_name: 'Unregistered',
         },
         scopes: [scope],
-      })).toThrow(/does not have 'read' permission/);
+      })).toThrow(/is not registered with this Pod/);
     } finally {
       store.close();
       core.close();

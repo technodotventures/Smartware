@@ -22,6 +22,21 @@ Changes vs v0.4.2 (schema-surface only):
   scope, reason (`erasure | offboarding`), operation_id, owner actor; optional
   owner-approved non-PII `owner_pointer` valid for offboarding only.
 
+Enum completions after the v0.5.0 cut (additive only, `SHA256SUMS` regenerated;
+no property, shape or pattern changes):
+
+- 2026-09-15 — `hold.release` (ADR-0009 explicit legal-hold marker).
+- 2026-09-15 — `consolidate`, `reflect.explicit`, `retention.expire`: ops the
+  substrate has been writing since before the v0.5.0 cut but which the enum never
+  listed, so their receipts failed schema validation. Every op the reference
+  implementation writes now validates against this set (card t_7a64ded2).
+
+The enum is a **superset** of what the reference implementation writes — it may
+list ops before a surface emits them. The writer surface is pinned the other
+way: `test/schemas-v0.5.0.test.ts` asserts every op the writer can emit validates
+against this enum, so a writer op missing here fails the suite instead of
+shipping a receipt this set rejects (card t_0e3989eb).
+
 `integrity-manifest-entry.schema.json` describes an optional post-beta surface.
 Its presence does not make the integrity manifest a beta requirement.
 

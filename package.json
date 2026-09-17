@@ -102,6 +102,10 @@
       "types": "./dist/layer1/corroboration.d.ts",
       "import": "./dist/layer1/corroboration.js"
     },
+    "./layer1/conflicts": {
+      "types": "./dist/layer1/conflicts.d.ts",
+      "import": "./dist/layer1/conflicts.js"
+    },
     "./layer1/confidence": {
       "types": "./dist/layer1/confidence.d.ts",
       "import": "./dist/layer1/confidence.js"
@@ -109,6 +113,10 @@
     "./layer3": {
       "types": "./dist/layer3/search.d.ts",
       "import": "./dist/layer3/search.js"
+    },
+    "./ingestion": {
+      "types": "./dist/ingestion/index.d.ts",
+      "import": "./dist/ingestion/index.js"
     },
     "./render": {
       "types": "./dist/render/provenance.d.ts",

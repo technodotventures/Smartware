@@ -582,7 +582,7 @@ describe('G2 conformance · FORGET.SCOPE zero results against REBUILT indexes', 
     //  - recall filters claim hits against the authorized store snapshot.
     expect(searchClaimsFor(fx, 'acme', ACME).length).toBe(1);   // index layer: ghost present
     expect(searchObsFor(fx, 'beta', ACME).length).toBe(1);      // index layer: ghost present
-    expect(fx.core.searchObservations('beta', ACME)).toHaveLength(0);
+    expect(fx.core.searchObservations({ actor: OWNER, query: 'beta', scope: ACME })).toHaveLength(0);
     expect((await recall(fx, ACME, 'acme beta')).results).toHaveLength(0);
 
     // Regeneration is the assertion that matters: wipe + rebuild and the
@@ -946,7 +946,7 @@ async function viewSnapshot(fx: Fixture, scopes: string[], obsIds: string[]): Pr
       .map(c => `${c.id}|${c.status}`).sort();
     snapshot.obsFTS[scope] = searchObsFor(fx, 'beta', scope)
       .map(r => `${r.obs_id ?? ''}|${r.freshness ?? ''}`).sort();
-    snapshot.obsSearch[scope] = fx.core.searchObservations('beta', scope)
+    snapshot.obsSearch[scope] = fx.core.searchObservations({ actor: OWNER, query: 'beta', scope })
       .map(h => `${h.id}|${h.freshness}|${h.snippet}`).sort();
     const result = await recall(fx, scope, 'beta');
     snapshot.query[scope] = result.results.map(r => r.claim?.id ?? '').sort();

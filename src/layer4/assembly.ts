@@ -61,8 +61,17 @@ export function assembleContext(
   registry: ScopeRegistry,
   filters: QueryFilters = {},
 ): AssembledContext {
-  const temporalHistory = filters.temporal?.axis === 'transaction_time'
+  // History requests. Two different reconstructions, two different relaxations:
+  //   • transaction-time reads rebuild what the brain had recorded at an
+  //     instant — superseded AND forgotten claims are candidates;
+  //   • valid-time reads rebuild what was true in the window — a claim that was
+  //     true then is eligible even if a later fact has since superseded it
+  //     (forgotten/retracted material was never true and stays excluded).
+  const transactionHistory = filters.temporal?.axis === 'transaction_time'
     && filters.temporal.mode !== 'current';
+  const validTimeHistory = filters.temporal?.axis === 'valid_time'
+    && filters.temporal.mode !== 'current';
+  const temporalHistory = transactionHistory || validTimeHistory;
   const snapshot = buildAuthorizedClaimSnapshot({
     actorId,
     scope: queryScope,
@@ -73,7 +82,7 @@ export function assembleContext(
     includeSensitive: filters.includeSensitive,
     includeStale: filters.includeStale,
     includeSuperseded: temporalHistory || filters.includeSuperseded,
-    includeForgotten: temporalHistory || filters.includeForgotten,
+    includeForgotten: transactionHistory || filters.includeForgotten,
   }, store, config);
   if (!snapshot.authorized) {
     return { results: [], total_found: 0, filtered_out: 0, query_scope: queryScope };

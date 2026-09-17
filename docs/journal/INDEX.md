@@ -5,7 +5,7 @@
 One entry per recorded state transition. Newest last. Entries are append-only:
 supersede an earlier entry with a new one, never by editing the old one.
 
-Total: **20** entries.
+Total: **45** entries.
 
 | Date | Entry | Title |
 |---|---|---|
@@ -29,3 +29,28 @@ Total: **20** entries.
 | 2026-09-09 | [`2026-09-09-t_ec51cb06.md`](2026-09-09-t_ec51cb06.md) | Build and deploy a version of Smartware than can be implemented into Coffee platform as per the latest Techno OS architecture |
 | 2026-09-10 | [`2026-09-10-t_0f787dcb.md`](2026-09-10-t_0f787dcb.md) | Consolidation/compaction operation — collapse superseded claim versions into a reviewed summary while preserving evidence + correction path |
 | 2026-09-10 | [`2026-09-10-t_a0d2171c.md`](2026-09-10-t_a0d2171c.md) | Retention / expiry / archival policy — enforce retention_duration + consume staleness.scope_overrides; scheduled expiry/archive/GC |
+| 2026-09-13 | [`2026-09-13-t_03fcaeb2.md`](2026-09-13-t_03fcaeb2.md) | P0 audit: freeze the real Smartware baseline and Coffee boundary |
+| 2026-09-13 | [`2026-09-13-t_1548b5f6.md`](2026-09-13-t_1548b5f6.md) | P0 audit: Graphiti temporal-memory parity for Coffee |
+| 2026-09-13 | [`2026-09-13-t_1aa4e55d.md`](2026-09-13-t_1aa4e55d.md) | Verify completed Kanban changes against committed code |
+| 2026-09-13 | [`2026-09-13-t_4f1013e8.md`](2026-09-13-t_4f1013e8.md) | Validate the Coffee-shaped pilot and authorization mapping |
+| 2026-09-13 | [`2026-09-13-t_8f754b0a.md`](2026-09-13-t_8f754b0a.md) | Compile the authoritative Coffee capability ledger |
+| 2026-09-13 | [`2026-09-13-t_9a58647c.md`](2026-09-13-t_9a58647c.md) | P0 audit: GBrain company-brain parity for Coffee |
+| 2026-09-13 | [`2026-09-13-t_aa6a3280.md`](2026-09-13-t_aa6a3280.md) | Audit conformance claims and release artifacts |
+| 2026-09-13 | [`2026-09-13-t_cb77ba0c.md`](2026-09-13-t_cb77ba0c.md) | Verify the active repository baseline and version identity |
+| 2026-09-14 | [`2026-09-14-t_00a9df88.md`](2026-09-14-t_00a9df88.md) | P0 verify/fix: single-writer resilience, recovery and portability gauntlet |
+| 2026-09-14 | [`2026-09-14-t_01ef0ede.md`](2026-09-14-t_01ef0ede.md) | Smartware defect: a demoted duplicate is not demoted in canonical state — status 'superseded' is projection-only (compile-sync and rebuild restore it to active) |
+| 2026-09-14 | [`2026-09-14-t_29739781.md`](2026-09-14-t_29739781.md) | smartware docs+SDK: saas-integration recipe teaches the silent duplicate-claim pick |
+| 2026-09-14 | [`2026-09-14-t_30732060.md`](2026-09-14-t_30732060.md) | VERIFY (independent): a mechanical demotion is preserved by every hand-built version record — audit t_742e31f9's decision + implementation |
+| 2026-09-14 | [`2026-09-14-t_35d6aa74.md`](2026-09-14-t_35d6aa74.md) | P0 implement: Graphiti-grade contradiction and temporal lifecycle |
+| 2026-09-14 | [`2026-09-14-t_3f19e206.md`](2026-09-14-t_3f19e206.md) | P0 synthesize: Coffee company-brain parity contract v1 |
+| 2026-09-14 | [`2026-09-14-t_742e31f9.md`](2026-09-14-t_742e31f9.md) | Smartware: carry a mechanical demotion through hand-built version records (REVISE/forget/revive/endorse/consolidation) — decide preserve vs release per flow |
+| 2026-09-14 | [`2026-09-14-t_868d9680.md`](2026-09-14-t_868d9680.md) | P0 implement: shared workspace sources, federation and ingestion contract |
+| 2026-09-14 | [`2026-09-14-t_a1118c49.md`](2026-09-14-t_a1118c49.md) | P0 implement: tenant, scope, human and agent isolation conformance |
+| 2026-09-14 | [`2026-09-14-t_ad51d0e2.md`](2026-09-14-t_ad51d0e2.md) | P1 verify/fix: retention, forget, offboarding, export/import and legal-hold composition |
+| 2026-09-14 | [`2026-09-14-t_ec159c21.md`](2026-09-14-t_ec159c21.md) | P0 fix: deterministic corroboration proof in Coffee-shaped pilot |
+| 2026-09-15 | [`2026-09-15-t_15bb0cd0.md`](2026-09-15-t_15bb0cd0.md) | Decide protocol identity: does claim fact identity include claim_type, or is the spec fingerprint the autonomous-path truth? (ADR-0003 vs spec §193) |
+| 2026-09-15 | [`2026-09-15-t_1db21462.md`](2026-09-15-t_1db21462.md) | DECIDE: a user-only way to re-pick which duplicate survives (release a mechanical demotion) — protocol surface + owner sign-off |
+| 2026-09-15 | [`2026-09-15-t_2996a3ab.md`](2026-09-15-t_2996a3ab.md) | Smartware identity F1: reflect.auto must consult fact identity before creating a bounded claim (kills the both-surfaces duplicate) |
+| 2026-09-15 | [`2026-09-15-t_2bba749f.md`](2026-09-15-t_2bba749f.md) | Schema accuracy: tombstone-frontmatter snapshot block does not enumerate the demotion/release record fields |
+| 2026-09-15 | [`2026-09-15-t_463c1ff9.md`](2026-09-15-t_463c1ff9.md) | P1 pre-production gate: explicit legal-hold marker — erasure refused under hold, sweep skip, audited release (ADR-0009) |
+| 2026-09-15 | [`2026-09-15-t_c5c999ba.md`](2026-09-15-t_c5c999ba.md) | DECIDE (+ maybe implement): explicit legal-hold marker — erasure refused under hold, sweep skip (ADR-0001 AC5–AC6 vs §10c.7 v1 composition) |

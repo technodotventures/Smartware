@@ -11,6 +11,7 @@ import { resolveRetention, toRetentionDurationString } from '../config.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { quarantineForGrants } from '../auth/trust.js';
 import { isOwner, getAuthorizingGrants } from '../auth/grants.js';
+import { requireActiveSource } from '../ingestion/sources.js';
 import type { SessionStore } from '../session/store.js';
 import { requireSessionCapability, resolveActorFromSession } from './session.js';
 import {
@@ -33,6 +34,12 @@ export interface ObserveParams {
   scope: string;
   visibility?: Observation['visibility'];
   source_id?: string | null;
+  /**
+   * Registered source id (provenance origin). Validated fail-closed against
+   * the owner-managed source registry: unknown, inactive or actor-forbidden
+   * references are denied, never silently unattributed.
+   */
+  source_ref?: string | null;
   app?: string;
   app_version?: string;
   observed_at?: string;
@@ -94,6 +101,9 @@ function observePayload(
     content: params.content,
     claims: params.claims ?? [],
   };
+  // Only emit source_ref when non-null so the default payload (and thus its
+  // observation id) is byte-identical to pre-registry builds.
+  if (params.source_ref != null) payload['source_ref'] = params.source_ref;
   // Only emit retention_duration when non-null so the default `forever` payload
   // (and thus its observation id) is byte-identical to pre-retention builds.
   if (retentionDuration != null) payload['retention_duration'] = retentionDuration;
@@ -159,6 +169,13 @@ export async function handleObserve(
   }
 
   requireGrant(params.actor.id, 'observe', params.scope, config);
+
+  // Source context is fail-closed: a referenced source must be registered,
+  // active, and (when the entry carries an allow-list) writable by THIS actor.
+  // A denial happens before any payload hashing or disk write.
+  if (params.source_ref != null && params.source_ref !== '') {
+    requireActiveSource(config, params.source_ref, params.actor.id);
+  }
 
   // Resolve retention once, before the payload hash, so the derived policy +
   // duration are part of the canonical observation (id + idempotency) exactly as
@@ -242,7 +259,7 @@ export async function handleObserve(
 
   const app = params.app ?? 'mcp-client';
   if (!params.idempotency_key && params.source_id) {
-    const dedup = checkLegacySourceDedup(layer0, app, params.source_id);
+    const dedup = checkLegacySourceDedup(layer0, app, params.source_id, params.scope);
     if (dedup.isDuplicate && dedup.existingId) {
       return { id: dedup.existingId, status: 'duplicate', existing_id: dedup.existingId, sequence: 0 };
     }
@@ -278,6 +295,9 @@ export async function handleObserve(
       app,
       app_version: params.app_version ?? SMARTWARE_VERSION,
       source_id: params.source_id ?? null,
+      ...(params.source_ref != null && params.source_ref !== ''
+        ? { source_ref: params.source_ref }
+        : {}),
       actor: params.actor,
       captured_at: now,
       observed_at: params.observed_at ?? now,

@@ -295,10 +295,20 @@ describe('handleExportScope — one-scope boundary (spec §10c.4)', () => {
     expect(claims[0]!['scope']).toBe(SCOPE);
     expect(claims[1]!['scope']).toBe(SCOPE);
 
-    // Raw observations still exported (tombstoned records are canonical).
+    // Raw observations still exported (tombstoned records are canonical), and
+    // the scope-level offboarding marker travels with the package — it lives in
+    // the POD scope by design (§10c.4) and is the replay evidence that restores
+    // this scope as retained rather than resurrected.
     const observations = packageLines(result.path, 'observations');
-    expect(observations).toHaveLength(1);
-    expect(observations[0]!['id']).toBe(o1.id);
+    expect(observations).toHaveLength(2);
+    const rawRecord = observations.find(record => record['id'] === o1.id)!;
+    expect(rawRecord['scope']).toBe(SCOPE);
+    const markerRecord = observations.find(record => record['id'] !== o1.id)!;
+    expect(markerRecord['type']).toBe('erasure');
+    expect(markerRecord['scope']).toBe('self');
+    expect((markerRecord['content'] as { body: Record<string, unknown> }).body['target_kind']).toBe('scope');
+    expect((markerRecord['content'] as { body: Record<string, unknown> }).body['scope']).toBe(SCOPE);
+    expect((markerRecord['content'] as { body: Record<string, unknown> }).body['reason']).toBe('offboarding');
 
     // Deleted/erased marker is NOT an erase marker (offboarding) → full history.
     expect(result.manifest.deletion_certificate).toBeNull();

@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS observations (
   payload_hash TEXT
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup ON observations(app, source_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup ON observations(app, source_id, scope)
   WHERE source_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_scope ON observations(scope);
@@ -72,6 +72,22 @@ export class Layer0Index {
     this.db.pragma('busy_timeout = 5000');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(SCHEMA);
+    // Dedup identity is (app, source_id, scope): a source item that matters to
+    // two scopes (two clients of one business) is two observations, not a
+    // silent cross-scope shadow. Older databases carry the narrower
+    // (app, source_id) index; replace it in place. The index is derived, and
+    // the wider key accepts every row the narrower one held, so no rebuild is
+    // required and no row can be rejected by the swap.
+    const dedupIndex = this.db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_dedup'",
+    ).get() as { sql: string } | undefined;
+    if (dedupIndex && !dedupIndex.sql.includes('(app, source_id, scope)')) {
+      this.db.exec('DROP INDEX idx_dedup');
+    }
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup ON observations(app, source_id, scope)
+        WHERE source_id IS NOT NULL;
+    `);
     ensureColumn(this.db, 'observations', 'idempotency_actor_id', 'TEXT');
     ensureColumn(this.db, 'observations', 'idempotency_key', 'TEXT');
     ensureColumn(this.db, 'observations', 'payload_hash', 'TEXT');
@@ -215,9 +231,10 @@ export class Layer0Index {
     }
   }
 
-  /** Check dedup: return existing obs ID if source_id already seen for this app */
-  checkDedup(app: string, sourceId: string): string | null {
-    const row = this.stmt('SELECT id FROM observations WHERE app = ? AND source_id = ?').get(app, sourceId) as { id: string } | undefined;
+  /** Check dedup: existing obs ID if this (app, source_id, scope) was already seen. */
+  checkDedup(app: string, sourceId: string, scope: string): string | null {
+    const row = this.stmt('SELECT id FROM observations WHERE app = ? AND source_id = ? AND scope = ?')
+      .get(app, sourceId, scope) as { id: string } | undefined;
     return row?.id ?? null;
   }
 

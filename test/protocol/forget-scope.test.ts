@@ -363,6 +363,37 @@ describe('handleForgetScope — erasure', () => {
     searchRebuilt.close();
   });
 
+  it('records an erasure-lane owner attestation in the ops entry; refuses it on other lanes', async () => {
+    seedScope(SCOPE);
+    const operationId = `op_${ulid()}`;
+    const first = await handleForgetScope(
+      { actor: OWNER, scope: SCOPE, reason: 'erasure', attestation: 'no pending dispute / hold released', operation_id: operationId },
+      { evidenceDir, dataDir, layer0, store, searchIndex, config, commitCtx: { opsDir } },
+    );
+    const entries = [...readAllOpLogEntries(opsDir)].filter(e => e.operation_id === operationId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.details?.['attestation']).toBe('no pending dispute / hold released');
+
+    // Idempotent replay of the attested erasure stays exact (payload identity).
+    const second = await handleForgetScope(
+      { actor: OWNER, scope: SCOPE, reason: 'erasure', attestation: 'no pending dispute / hold released', operation_id: operationId },
+      { evidenceDir, dataDir, layer0, store, searchIndex, config, commitCtx: { opsDir } },
+    );
+    expect(second).toEqual(first);
+
+    // Offboarding is the hold lane — an erasure attestation there is a bug, not a record.
+    await expect(handleForgetScope(
+      { actor: OWNER, scope: OTHER_SCOPE, reason: 'offboarding', attestation: 'hold released', operation_id: `op_${ulid()}` },
+      { evidenceDir, dataDir, layer0, store, searchIndex, config, commitCtx: { opsDir } },
+    )).rejects.toThrow(ProtocolError);
+
+    // An empty attestation is not an attestation.
+    await expect(handleForgetScope(
+      { actor: OWNER, scope: OTHER_SCOPE, reason: 'erasure', attestation: '   ', operation_id: `op_${ulid()}` },
+      { evidenceDir, dataDir, layer0, store, searchIndex, config, commitCtx: { opsDir } },
+    )).rejects.toThrow(ProtocolError);
+  });
+
   it('rejects a staff (non-owner) invocation', async () => {
     seedScope(SCOPE);
     await expect(handleForgetScope(

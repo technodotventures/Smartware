@@ -340,6 +340,19 @@ Semantics:
   carry scope erasure/offboarding; staff-initiated five-verb FORGET within a
   cluster is allowed only where the business configures it, and it never
   escalates to scope erasure.
+- **Hold gate (ADR-0009).** A scope that has taken the hold lane carries a
+  **legal hold** in `config.holds`. While the hold is open, `reason=erasure` is
+  **refused** with `legal_hold_open` (nothing mutates; the `operation_id` is not
+  consumed, so the same call succeeds after release), and the retention sweep
+  **skips** the scope. The hold is opened by `reason=offboarding` in the same
+  commit (the ops entry carries `hold_opened: true`), and closed only by the
+  owner-only **`hold.release`** operation (MCP tool `smartware_hold_release`) —
+  `operation_id` **required** (the act is audited by its receipt, and a replay
+  re-publishes a lost config release), one `hold.release` ops entry carrying
+  `payload_hash` and the owner's non-PII `statement`. Release does not revive
+  offboarded state: the scope stays tombstoned (recall-silent, grants revoked)
+  until erasure or a `#N` return. A scope offboarded before the marker existed
+  has no hold entry and erases as before (grandfathered).
 - **Client scopes only.** `self` / `workspace` are pod-internal and rejected
   with `invalid_parameter` — erasing the pod's own scope would destroy the audit
   surface (the marker lives in `self`).
@@ -354,7 +367,9 @@ Semantics:
   (`status: 'revoked'`) and config is saved before the ops-log entry is
   appended — one commit as far as clients and auditors observe.
 - **`reason` determines behavior:**
-  - `erasure` (legal/PII) — physical content purge: Layer1 rows and L1 JSONL
+  - `erasure` (legal/PII) — **refused while the scope has an open legal hold**
+    (`legal_hold_open`; release it with `hold.release` first — ADR-0009).
+    Otherwise: physical content purge — Layer1 rows and L1 JSONL
     records purged, claim / entity-page / observation FTS rows removed,
     vector/embedding records removed, derived L2 summaries removed (flagged for
     re-derivation), compile-queue scope jobs and fingerprint-index rows
@@ -397,6 +412,62 @@ result:
   audit_observation_id: obs_<hash>
   status: forgotten
 ```
+
+### Legal hold and release (v0.5.0 + ADR-0009)
+
+The legal-hold marker is **config/lifecycle state**, not a new memory verb — it
+gates FORGET.SCOPE `erasure` and the retention sweep, and its acts are audited
+in the ops log.
+
+```yaml
+# config.json (additive; absent in pre-marker configs)
+holds:
+  client:<id>#n:
+    scope: client:<id>#n
+    opened_at: <ISO 8601>          # the offboarding commit
+    opened_by: <owner ActorId>
+    operation_id: op_<ulid> | null # the hold-lane operation
+    released_at: <ISO 8601> | null # null ⇔ hold OPEN
+    released_by: <owner ActorId> | null
+    release_operation_id: op_<ulid> | null
+    release_statement: <string> | null   # non-PII, e.g. "no pending dispute / hold released"
+```
+
+```yaml
+hold.release:                      # substrate operation (MCP: smartware_hold_release)
+  scope: client:<id>#n
+  operation_id: op_<ulid>          # required; audit + idempotency key — exactly one receipt
+  statement: <string>              # optional; owner statement (non-PII)
+```
+
+- **Semantics.** `offboarding` opens (or refreshes) the hold in the same commit
+  as its tombstone + grant revocation — the dispute path cannot leave erasure
+  unrefused by forgetting to set a flag. `erasure` on an open hold: refused
+  `legal_hold_open`, no mutation, no `operation_id` consumed, no ops entry.
+  The retention sweep on an open hold: expires 0, writes no bytes, records
+  `details.skipped: 'legal_hold'` in its ops entry (result
+  `skipped_reason: 'legal_hold'`); evidence written after the hold is preserved.
+- **Release.** Owner-only; `operation_id` is **required** — a release without a
+  valid key is refused before any mutation, because the audited act *is* its
+  receipt (a keyless release performed the act with no canonical record). The
+  refusal mechanism differs by surface: the core returns `invalid_parameter`
+  for an absent or malformed key; at the MCP boundary an absent field is
+  refused by the transport's own input validation (`-32602`, before the
+  handler runs) and a malformed value reaches the core and returns
+  `invalid_parameter`. Idempotent: a replay returns the recorded receipt and,
+  when a lost config write left that same hold reading OPEN, re-publishes the
+  recorded release into `config.holds` (the ops entry is canonical; the receipt and the
+  state can never disagree). Convergence is **duty-scoped**: the receipt names
+  the hold it lifted (`hold_operation_id` — the offboarding operation), so a
+  hold opened afterwards (a new duty, §2) is never lifted by a stale replay. A
+  different payload ⇒ `conflict`; a scope with no open hold ⇒ `no_open_hold`.
+  The receipt: one `hold.release` ops entry (`payload_hash`, `scope`,
+  `released_at`, `released_by`, `statement`, `hold_operation_id`) plus the config
+  entry update. The release record persists after erasure.
+- **Boundaries.** `self` / `workspace` are rejected (`invalid_parameter`), same
+  as FORGET.SCOPE. Release never revives; it only lifts the preservation duty.
+- **Error codes (new, additive).** `legal_hold_open` (erasure on an open hold),
+  `no_open_hold` (release with nothing open).
 
 ## RECALL family and operational surface
 
@@ -529,3 +600,63 @@ protocol/spec versions it has actually passed.
      boundaries are in scope for them.
   3. v0.4.2 clients must not submit `client:<id>` / `client:<id>#n` scopes to a
      v0.4.2 server (its schema rejects them by design).
+
+**2026-09-15 — ADR-0009: legal-hold gate (additive behavior; no version bump)**
+
+- **What changed.** The explicit legal-hold marker ships as the owner's
+  pre-production gate (ADR-0009, superseding the ADR-0008 composition): a scope
+  that takes the hold lane (`offboarding`) carries hold state in `config.holds`;
+  `reason=erasure` on an open hold is refused (`legal_hold_open`); the retention
+  sweep skips held scopes (receipt `details.skipped: 'legal_hold'`); the hold is
+  released only by the owner-only, receipt-backed `hold.release` operation
+  (MCP tool `smartware_hold_release`; ops-log op `hold.release`, now in the
+  v0.5.0 ops-log schema enum). `config.holds` is additive.
+- **What does NOT change.** No existing request/result shape, payload hash, or
+  error code of FORGET.SCOPE changes; `attestation` / `export_id` /
+  `owner_pointer` semantics are untouched; the v0.4.2 schema set is frozen;
+  the five-verb surface is untouched. For a scope that never takes the hold
+  lane, behavior is byte-identical to v0.5.0.
+- **Consumer action.** Flows that offboard a disputed client and later erase it
+  must first call `hold.release` (the Coffee F3 attestation step becomes that
+  audited act); a scope offboarded before this change has no hold entry and
+  erases as before. v0.5.0 conformance still requires the v0.5.0 schema set —
+  which now carries the extended op enum — alongside the contract.
+
+**2026-09-15 — legal-hold findings (card t_7a64ded2): release is keyed, replay converges, ops enum completed**
+
+Independent adversarial verification (t_55fdccdd) of the marker passed the gate
+and raised three hardening findings; all three are fixed. None of them changes
+the ADR-0009 decision, a FORGET.SCOPE shape, or a payload hash.
+
+- **`hold.release` requires `operation_id`.** It was optional at the MCP
+  boundary, and a keyless release performed the act while writing **no** ops
+  entry — an unaudited claim about a preservation duty, contradicting "the
+  audited owner act". A release without a valid `op_<ulid>` key is now refused
+  before any mutation: the core returns `invalid_parameter` for an absent or
+  malformed key, while at the MCP boundary an absent field is refused by the
+  transport's input validation (`-32602`) before the handler runs and a
+  malformed value returns `invalid_parameter`. Aligned with
+  `smartware_forget_scope`, which already required it.
+- **Release replay converges `config.holds`.** If a config write was lost while
+  the ops receipt survived (a non-atomic config write could make that order
+  possible), a replay returned the recorded receipt while the scope still read
+  OPEN — fail-closed (erasure stayed refused) but a same-key retry silently
+  reported success and only a new key converged. A replay now re-publishes the
+  recorded release when the scope still reads open, and `saveConfig` is
+  **atomic + fsync** (temp file → fsync → rename → directory fsync) so the
+  divergence window is closed at the root. The ops entry is canonical; the
+  config entry is state, and the two can no longer disagree after a replay.
+  The convergence is **duty-scoped**: the receipt records the offboarding
+  operation it released (`hold_operation_id`), so a hold opened after the
+  release — a new preservation duty — is never lifted by a stale redelivery.
+- **The v0.5.0 ops-log `op` enum now lists every op the substrate writes.**
+  `consolidate`, `reflect.explicit` and `retention.expire` — written since
+  before the v0.5.0 cut, never listed — join `hold.release` (additive only;
+  `schemas/v0.5.0/SHA256SUMS` regenerated). Previously those receipts failed
+  validation against the published set; the hold gate's own sweep-skip receipt
+  (`retention.expire`) was one of them, so the marker's audit surface is now
+  schema-clean end to end.
+- **Out of scope, unchanged:** the refusal path, the committed-erasure replay,
+  the sweep skip and its receipt, release validation/`conflict`/`no_open_hold`,
+  per-scope isolation, pre-marker grandfathering, and the payload-hash identities
+  all remain as verified.

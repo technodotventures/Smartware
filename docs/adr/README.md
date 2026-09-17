@@ -18,10 +18,10 @@ conversation it was made in.
 ```markdown
 # ADR NNNN — <decision in the title>
 
-- **Date:** YYYY-MM-DD
-- **Status:** Proposed | Accepted | Superseded by NNNN | Rejected
-- **Deciders:** <who>
-- **Supersedes:** <NNNN or —>
+**Date:** YYYY-MM-DD
+**Status:** Proposed | Accepted | Superseded by NNNN | Rejected
+**Deciders:** <who>
+**Supersedes:** <NNNN or —>
 
 ## Context
 

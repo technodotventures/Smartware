@@ -58,7 +58,7 @@ describe('compile queue end-to-end (SmartwareCore)', () => {
     expect(observed.status).toBe('accepted');
 
     // Freshness promise: raw-searchable BEFORE any compile job resolves.
-    let hits = core.searchObservations('atlas', 'personal');
+    let hits = core.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal' });
     expect(hits).toHaveLength(1);
     expect(hits[0]!.freshness).toBe('unverified');
     // ...and the durable job is pending.
@@ -71,7 +71,7 @@ describe('compile queue end-to-end (SmartwareCore)', () => {
     expect(result!.failed).toBe(0);
 
     // EXTRACTED: claim ranks above; the raw observation is kept as evidence.
-    hits = core.searchObservations('atlas', 'personal');
+    hits = core.searchObservations({ actor: OWNER, query: 'atlas', scope: 'personal' });
     expect(hits[0]!.freshness).toBe('EXTRACTED');
 
     const recall = await core.recall({

@@ -7,7 +7,12 @@ import fs from 'fs';
 import path from 'path';
 import { ulid } from 'ulid';
 
-import { loadConfig, saveConfig, type Grant, type ScopeEntry, type SmartwareConfig } from './config.js';
+import { loadConfig, saveConfig, type Grant, type ScopeEntry, type SmartwareConfig, type SourceEntry, type SourceKind, type SourceStatus } from './config.js';
+import { registerSourceEntry, listSourceEntries, type RegisterSourceParams } from './ingestion/sources.js';
+import { IngestionStore } from './ingestion/store.js';
+import { handleIngest, type IngestDeps } from './ingestion/ingest.js';
+import type { IngestHooks, IngestParams, IngestResult } from './ingestion/types.js';
+import { computeSourceSyncStatus, type SourceSyncStatus } from './ingestion/sync.js';
 import { SMARTWARE_VERSION } from './version.js';
 import { Layer0Index } from './layer0/index.js';
 import { ClaimStore } from './layer1/store.js';
@@ -54,7 +59,7 @@ import { ensureGitRepo } from './layer2/git.js';
 import { replayCatchUp } from './layer1/replay.js';
 import { iterAllClaimVersions, type ClaimVersionRecord } from './layer1/jsonl.js';
 import { readAll } from './layer0/log.js';
-import type { Actor } from './layer0/types.js';
+import type { Actor, Observation } from './layer0/types.js';
 import type { ClaimRelation, EpistemicTag } from './layer1/types.js';
 import { epistemicToTag } from './layer1/types.js';
 import { runDefaultDream, type DreamResult } from './dream/phases.js';
@@ -82,10 +87,20 @@ import {
   type ForgetScopeResult,
 } from './protocol/forget_scope.js';
 import {
+  handleHoldRelease,
+  type HoldReleaseParams,
+  type HoldReleaseResult,
+} from './protocol/hold_release.js';
+import {
   handleExportScope,
   type ExportScopeParams,
   type ExportScopeResult,
 } from './protocol/export_scope.js';
+import {
+  handleRestoreScope,
+  type RestoreScopeParams,
+  type RestoreScopeResult,
+} from './protocol/restore_scope.js';
 import { handleEndorse, type EndorseParams, type EndorseResult } from './protocol/endorse.js';
 import {
   handleQuarantineReview,
@@ -103,8 +118,8 @@ import {
 import { handleStatus, type StatusResult } from './protocol/status.js';
 import { handleContext, type ContextParams, type ContextBundle } from './protocol/context.js';
 import { SessionStore } from './session/store.js';
-import { createGrant, getGrantForActor, isOwner } from './auth/grants.js';
-import { ProtocolError, requireGrant } from './auth/middleware.js';
+import { createGrant, getGrantForActor, isOwner, checkGrant } from './auth/grants.js';
+import { ProtocolError, requireGrant, requireOwner } from './auth/middleware.js';
 import {
   openCompileQueue,
   runCompileBatch,
@@ -119,6 +134,9 @@ export interface SmartwareCoreOptions {
   dataDir: string;
   ownerId?: string;
 }
+
+// Public type surface for the source registry (re-exported for hosts).
+export type { SourceEntry, SourceKind, SourceStatus };
 
 export interface SmartwareDreamParams {
   actor: Actor;
@@ -181,6 +199,29 @@ export interface SmartwareHybridRecallResult {
   semantic_index_error?: string;
 }
 
+export interface FederatedRecallParams {
+  actor: Actor;
+  query: string;
+  /** Named scopes: every one must be readable by the actor, or the read denies. */
+  scopes?: string[];
+  /** Per-scope result limit. */
+  limit?: number;
+  min_confidence?: QueryParams['min_confidence'];
+  include_stale?: boolean;
+  include_superseded?: boolean;
+  include_forgotten?: boolean;
+  include_sensitive?: boolean;
+}
+
+export interface FederatedRecallResult {
+  /** Scopes actually queried, in request (or registration) order. */
+  scopes: string[];
+  /** Per-scope ranked results, concatenated scope-major. Every row carries `scope`. */
+  results: QueryResult['results'];
+  per_scope: Array<{ scope: string; total_found: number; returned: number }>;
+  total_found: number;
+}
+
 export interface SmartwareActivityEvent {
   id: string;
   type: string;
@@ -192,6 +233,8 @@ export interface SmartwareActivityEvent {
   captured_at: string;
   content: string | object;
   source_id: string | null;
+  /** Registered source id this evidence came from (null on legacy records). */
+  source_ref: string | null;
   sensitive: boolean;
 }
 
@@ -205,6 +248,8 @@ export interface SmartwareObservationSearchResult {
   snippet: string;
   source_app: string;
   source_id: string | null;
+  /** Registered source id this evidence came from (null on legacy records). */
+  source_ref: string | null;
   /** Effective status (accepted / quarantined / tombstoned / redacted / rejected). */
   status: string;
   /** State-based raw-freshness label: unverified | EXTRACTED | FAILED (spec §10a). */
@@ -300,6 +345,7 @@ export class SmartwareCore {
   private store: ClaimStore;
   private searchIndex: SearchIndex;
   private sessionStore: SessionStore;
+  private ingestionStore: IngestionStore;
   private previewGcInterval: NodeJS.Timeout | null = null;
   /** Durable compile queue + fingerprint index (async-compile path, §9.1). */
   private compileQueue: CompileQueue | null = null;
@@ -315,6 +361,9 @@ export class SmartwareCore {
     this.searchIndex = searchIndex;
     this.sessionStore = sessionStore;
     this.previewStore = new CascadePreviewStore(path.join(dataDir, 'indices', 'previews.db'));
+    // Ingestion ledger (batch receipts + stream cursors). Operational state:
+    // see the honesty note in src/ingestion/store.ts.
+    this.ingestionStore = new IngestionStore(path.join(dataDir, 'smartware.db'));
   }
 
   static async open(options: SmartwareCoreOptions): Promise<SmartwareCore> {
@@ -420,6 +469,35 @@ export class SmartwareCore {
     saveConfig(this.dataDir, config);
   }
 
+  /**
+   * Register (or update) a provenance origin for this business brain.
+   *
+   * Owner-only, like every other provisioning change. Coffee owns OAuth,
+   * scheduling and connector credentials; the brain owns the label that makes
+   * ingested evidence attributable. Re-registering an id updates the mutable
+   * fields and preserves `created_at` — never duplicates the entry.
+   */
+  registerSource(params: RegisterSourceParams): SourceEntry {
+    return registerSourceEntry(this.dataDir, params);
+  }
+
+  /** Every registered source in this brain. Owner-only. */
+  listSources(params: { actor: Actor }): SourceEntry[] {
+    requireOwner(params.actor.id, this.getConfig());
+    return listSourceEntries(this.getConfig());
+  }
+
+  /**
+   * Sync status projection for the host's UI/scheduler: per registered source,
+   * per scope: cursor, last sync, and batch outcome counts. Owner-only; a
+   * named unknown source denies (`source_unregistered`) rather than answering
+   * empty.
+   */
+  sourceSyncStatus(params: { actor: Actor; source_id?: string }): SourceSyncStatus[] {
+    requireOwner(params.actor.id, this.getConfig());
+    return computeSourceSyncStatus(this.getConfig(), this.ingestionStore, params.source_id);
+  }
+
   createPodProfile(podId: string, name = 'Pod'): SmartwarePodProfile {
     const config = this.getConfig();
     const scope = (suffix: string) => `pod/${podId}/${suffix}`;
@@ -493,21 +571,42 @@ export class SmartwareCore {
       this.sessionStore,
       this.opsDir,
       {
-        // Sync-raw freshness (spec §10a): index the raw observation at commit
-        // time so the raw window is searchable before any compile job runs.
-        // Status at this moment is the observation's own (accepted or
-        // quarantined); the search query filters status='accepted'.
-        afterObservation: (obs) => {
-          this.searchIndex.indexObservation(observationToIndexRow(obs));
-          // Async-compile (spec §9.1): enqueue accepted observations on the
-          // durable queue — the write path never runs the LLM, never blocks
-          // on extraction, and never silently omits the raw window.
-          if (obs.status === 'accepted') {
-            this.compileQueue?.enqueue(obs.id, obs.scope);
-          }
-        },
+        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1).
+        afterObservation: obs => this.afterObservationCommitted(obs),
       },
     );
+  }
+
+  /**
+   * Post-commit hook shared by OBSERVE and ingestion batches: index the raw
+   * observation into the always-searchable window and enqueue accepted
+   * evidence on the durable compile queue (the LLM never runs on the write
+   * path).
+   */
+  private afterObservationCommitted(obs: Observation): void {
+    this.searchIndex.indexObservation(observationToIndexRow(obs));
+    if (obs.status === 'accepted') {
+      this.compileQueue?.enqueue(obs.id, obs.scope);
+    }
+  }
+
+  /**
+   * Ingest one batch of source-native items (connector polling loop).
+   *
+   * See `src/ingestion/ingest.ts` for the guarantees. Hosts call this with an
+   * authenticated actor + registered source; context problems fail closed
+   * before anything is written.
+   */
+  async ingest(params: IngestParams, hooks?: IngestHooks): Promise<IngestResult> {
+    const deps: IngestDeps = {
+      evidenceDir: this.evidenceDir,
+      layer0: this.layer0,
+      config: this.getConfig(),
+      store: this.ingestionStore,
+      sessionStore: this.sessionStore,
+      afterObservation: obs => this.afterObservationCommitted(obs),
+    };
+    return handleIngest(params, deps, hooks);
   }
 
   async query(params: QueryParams): Promise<QueryResult> {
@@ -516,6 +615,77 @@ export class SmartwareCore {
 
   async recall(params: QueryParams): Promise<QueryResult> {
     return this.query(params);
+  }
+
+  /**
+   * Federated RECALL across multiple scopes in one call (the company-brain
+   * "read across my workspaces" lane). Constraints:
+   *
+   *   - named scopes: the actor must be able to read EVERY named scope —
+   *     otherwise the whole read denies (`insufficient_permission` /
+   *     `actor_unregistered`). A federated read never partially answers a
+   *     request that named an unauthorized scope;
+   *   - omitted scopes: exactly the actor's readable scopes (owner: all scopes
+   *     in the brain; a registered actor: the scopes its grants cover; an
+   *     unregistered actor: denial, not an empty result).
+   *
+   * Results are scope-tagged and ordered scope-major (each scope's own
+   * ranking); scores are comparable within a scope, not across scopes.
+   */
+  async recallFederated(params: FederatedRecallParams): Promise<FederatedRecallResult> {
+    const config = this.getConfig();
+    const owner = isOwner(params.actor.id, config);
+    const allScopes = config.scopes.map(entry => entry.id);
+
+    let scopes: string[];
+    if (params.scopes && params.scopes.length > 0) {
+      scopes = [...new Set(params.scopes)];
+      for (const scope of scopes) {
+        requireGrant(params.actor.id, 'query', scope, config);
+      }
+    } else if (owner) {
+      scopes = allScopes;
+    } else {
+      scopes = allScopes.filter(scope => checkGrant(params.actor.id, 'query', scope, config));
+      if (scopes.length === 0) {
+        const known = config.grants.some(grant => grant.actor_id === params.actor.id || grant.actor_id === '*');
+        throw new ProtocolError(
+          known ? 'insufficient_permission' : 'actor_unregistered',
+          known
+            ? `Actor '${params.actor.id}' has no readable scope`
+            : `Actor '${params.actor.id}' is not registered with this Pod.`,
+        );
+      }
+    }
+
+    const results: FederatedRecallResult['results'] = [];
+    const perScope: FederatedRecallResult['per_scope'] = [];
+    let totalFound = 0;
+    for (const scope of scopes) {
+      const scoped = await handleQuery(
+        {
+          actor: params.actor,
+          query: params.query,
+          scope,
+          limit: params.limit,
+          min_confidence: params.min_confidence,
+          include_stale: params.include_stale,
+          include_superseded: params.include_superseded,
+          include_forgotten: params.include_forgotten,
+          include_sensitive: params.include_sensitive,
+        },
+        this.store,
+        this.searchIndex,
+        config,
+        this.getRegistry(),
+        this.sessionStore,
+      );
+      results.push(...scoped.results);
+      totalFound += scoped.total_found;
+      perScope.push({ scope, total_found: scoped.total_found, returned: scoped.results.length });
+    }
+
+    return { scopes, results, per_scope: perScope, total_found: totalFound };
   }
 
   async context(params: ContextParams): Promise<ContextBundle> {
@@ -729,7 +899,37 @@ export class SmartwareCore {
     };
   }
 
-  listActivity(options: { scope?: string; types?: string[]; actorId?: string; limit?: number; includeSensitive?: boolean } = {}): SmartwareActivityEvent[] {
+  /**
+   * Activity feed over accepted raw observations. Actor-bound: the caller's
+   * identity decides the scopes it may see, whether the request names one
+   * scope (`requireGrant`, so an ungranted scope is a denial rather than an
+   * empty feed) or asks across scopes (the feed is filtered to the scopes the
+   * actor may read). Sensitive observations additionally require the owner AND
+   * an explicit opt-in.
+   */
+  listActivity(options: {
+    actor: Actor;
+    scope?: string;
+    types?: string[];
+    actorId?: string;
+    limit?: number;
+    includeSensitive?: boolean;
+  }): SmartwareActivityEvent[] {
+    const config = this.getConfig();
+    const owner = isOwner(options.actor.id, config);
+    const includeSensitive = options.includeSensitive === true && owner;
+    if (options.scope) requireGrant(options.actor.id, 'read', options.scope, config);
+
+    // Per-scope decision memo: one config read per distinct scope, not per row.
+    const readableScopes = new Map<string, boolean>();
+    const mayRead = (scope: string): boolean => {
+      const cached = readableScopes.get(scope);
+      if (cached !== undefined) return cached;
+      const allowed = owner || checkGrant(options.actor.id, 'read', scope, config);
+      readableScopes.set(scope, allowed);
+      return allowed;
+    };
+
     const limit = options.limit ?? 50;
     const types = new Set(options.types ?? []);
     const events: SmartwareActivityEvent[] = [];
@@ -737,9 +937,10 @@ export class SmartwareCore {
     for (const obs of readAll(this.evidenceDir)) {
       if (obs.status !== 'accepted') continue;
       if (options.scope && obs.scope !== options.scope) continue;
+      if (!options.scope && !mayRead(obs.scope)) continue;
       if (types.size > 0 && !types.has(obs.type)) continue;
       if (options.actorId && obs.source.actor.id !== options.actorId) continue;
-      if (obs.policy.sensitive && !options.includeSensitive) continue;
+      if (obs.policy.sensitive && !includeSensitive) continue;
       events.push({
         id: obs.id,
         type: obs.type,
@@ -751,6 +952,7 @@ export class SmartwareCore {
         captured_at: obs.source.captured_at,
         content: obs.content.body,
         source_id: obs.source.source_id,
+        source_ref: obs.source.source_ref ?? null,
         sensitive: obs.policy.sensitive,
       });
     }
@@ -760,22 +962,32 @@ export class SmartwareCore {
       .slice(0, limit);
   }
 
-  searchObservations(
-    query: string,
-    scope: string,
-    options: {
-      limit?: number;
-      includeSensitive?: boolean;
-      temporalRange?: { from: string; to: string };
-      /** Restrict to these state-based freshness labels (spec §10a). */
-      freshness?: ObservationFreshness[];
-    } = {},
-  ): SmartwareObservationSearchResult[] {
-    const terms = searchObservationQueryTerms(query);
+  /**
+   * Raw-observation window (spec §10a) — the lane where un-compiled evidence is
+   * searchable. Actor-bound like every other read lane: the caller's identity
+   * decides what it may see, and an actor with no `read` grant on the scope is
+   * denied rather than answered with an empty window. Sensitive observations
+   * additionally require the owner AND an explicit opt-in — a staff caller can
+   * never widen its own view by setting the flag.
+   */
+  searchObservations(params: {
+    actor: Actor;
+    query: string;
+    scope: string;
+    limit?: number;
+    includeSensitive?: boolean;
+    temporalRange?: { from: string; to: string };
+    /** Restrict to these state-based freshness labels (spec §10a). */
+    freshness?: ObservationFreshness[];
+  }): SmartwareObservationSearchResult[] {
+    const config = this.getConfig();
+    requireGrant(params.actor.id, 'read', params.scope, config);
+    const includeSensitive = params.includeSensitive === true && isOwner(params.actor.id, config);
+    const terms = searchObservationQueryTerms(params.query);
     // The legacy substring matcher returned [] for a blank query with no
     // temporal anchor; keep that contract (the FTS fallback would otherwise
     // scan the whole scope).
-    if (terms.length === 0 && !options.temporalRange) return [];
+    if (terms.length === 0 && !params.temporalRange) return [];
 
     // Time bound vs. state bound: the FTS window is state-based — the
     // freshness label, never a timestamp. Layer 0 is the authoritative
@@ -783,13 +995,13 @@ export class SmartwareCore {
     // landed after indexing (tombstone/redaction/reject/approve) drops the
     // row immediately rather than after the next rebuild.
     const hits: IndexedObservationSearchResult[] = this.searchIndex.searchObservations(
-      query,
-      scope,
+      params.query,
+      params.scope,
       {
-        limit: options.limit,
-        includeSensitive: options.includeSensitive,
-        temporalRange: options.temporalRange,
-        freshness: options.freshness,
+        limit: params.limit,
+        includeSensitive,
+        temporalRange: params.temporalRange,
+        freshness: params.freshness,
       },
     );
 
@@ -807,6 +1019,7 @@ export class SmartwareCore {
         snippet: makeObservationSnippet(hit.content, terms),
         source_app: hit.source_app,
         source_id: hit.source_id,
+        source_ref: hit.source_ref,
         status: hit.status,
         freshness: hit.freshness,
       });
@@ -814,7 +1027,7 @@ export class SmartwareCore {
 
     return results
       .sort((a, b) => b.observed_at.localeCompare(a.observed_at))
-      .slice(0, options.limit ?? 10);
+      .slice(0, params.limit ?? 10);
   }
 
   /**
@@ -856,6 +1069,7 @@ export class SmartwareCore {
       content: observation.content.body,
       source_app: observation.source.app,
       source_id: observation.source.source_id,
+      source_ref: observation.source.source_ref ?? null,
       sensitive: observation.policy.sensitive,
     };
   }
@@ -1097,7 +1311,14 @@ export class SmartwareCore {
   }
 
   async correct(params: CorrectParams): Promise<CorrectResult> {
-    return handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
+    const result = await handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
+    // Keep the claim-FTS surface truthful after a correction (mirrors
+    // CONSOLIDATE): handleCorrect appends a NEW claim id via replay, and without
+    // this sync the corrected understanding is invisible to RECALL until the
+    // next rebuild — the correction exists but cannot be read.
+    const affectedScope = this.store.getClaim(result.new_claim_id ?? params.target_claim_id)?.scope;
+    if (affectedScope) syncSearchFromClaims(this.store, this.searchIndex, affectedScope);
+    return result;
   }
 
   async revise(params: ReviseParams): Promise<ReviseResult> {
@@ -1155,6 +1376,21 @@ export class SmartwareCore {
   }
 
   /**
+   * HOLD.RELEASE (ADR-0009): the audited owner act that lifts a legal hold.
+   * Owner-only; idempotent per operation_id. While a hold is open, erasure is
+   * refused (`legal_hold_open`) and the retention sweep skips the scope; the
+   * release lifts both. It does not revive offboarded state.
+   */
+  async releaseHold(params: HoldReleaseParams): Promise<HoldReleaseResult> {
+    const config = this.getConfig();
+    return handleHoldRelease(params, {
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      config,
+    });
+  }
+
+  /**
    * EXPORT.SCOPE (spec §10c.4, G3.1): one consumer's exact-scope canonical
    * record package under `<data_dir>/exports/<export_id>/`. Owner-only,
    * read-only to pod data; derived indexes are excluded (regenerable).
@@ -1169,6 +1405,33 @@ export class SmartwareCore {
       store: this.store,
       config,
     });
+  }
+
+  /**
+   * RESTORE.SCOPE — the return path for an EXPORT.SCOPE package: write one package's canonical
+   * records back into this brain (owner-only; target scope must be empty). Derived state
+   * catches up from the canonical records, exactly like a wipe-and-rebuild.
+   */
+  async restoreScope(params: RestoreScopeParams): Promise<RestoreScopeResult> {
+    const config = this.getConfig();
+    const result = await handleRestoreScope(params, {
+      evidenceDir: this.evidenceDir,
+      dataDir: this.dataDir,
+      opsDir: this.opsDir,
+      store: this.store,
+      config,
+    });
+    if (result.status === 'restored') {
+      // Full Layer-0 rebuild, not an incremental catch-up: restored records carry
+      // their ORIGINAL sequences, which can sit below this brain's replay
+      // watermark — catch-up would skip them (and their scope-level markers)
+      // silently. The index is a regenerable projection; a restore is rare.
+      this.layer0.rebuildIndex(this.evidenceDir);
+      this.store.setDataDir(this.dataDir);
+      syncSearchFromClaims(this.store, this.searchIndex, result.scope);
+      syncObservationsFromEvidence(this.evidenceDir, this.layer0, this.searchIndex);
+    }
+    return result;
   }
 
   /**
@@ -1312,8 +1575,8 @@ export class SmartwareCore {
     );
   }
 
-  findObservationBySource(app: string, sourceId: string): string | null {
-    return this.layer0.checkDedup(app, sourceId);
+  findObservationBySource(app: string, sourceId: string, scope: string): string | null {
+    return this.layer0.checkDedup(app, sourceId, scope);
   }
 
   close(): void {
@@ -1328,6 +1591,7 @@ export class SmartwareCore {
     this.searchIndex.close();
     this.sessionStore.close();
     this.previewStore.close();
+    this.ingestionStore.close();
   }
 
   /**

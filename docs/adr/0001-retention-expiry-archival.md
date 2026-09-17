@@ -147,6 +147,28 @@ retention: {
 6. Hold scope is skipped by the sweep; erasure still overrides retention.
 7. `staleness` config remains round-trippable (backward compatible).
 
+**Realization note (added 2026-09-14; see ADR-0008).** AC5 and AC6 above are
+shorthand for the Tier-1 invariant in §2.2 (3) and are read through it. The
+substrate holds no legal-hold state, so "refused under hold" is realized as the
+hold-release attestation the erasure records (`details.attestation` — the
+statement, or an explicit `null` when none was given) with the snapshot linked
+(`details.export_id`), and "skipped by the sweep" is realized by the hold lane
+itself: offboarding tombstones the scope's observations, and the sweep targets
+only `accepted` records. The parts of those shorthands the substrate does not
+enforce are stated (not hidden) in ADR-0008 §4 and pinned by
+`test/conformance/r_legal_hold_composition.test.ts`. §2.2 and these criteria are
+unchanged — ADR-0008 is the interpretation, not an amendment.
+
+**Update (2026-09-15, ADR-0009 — supersedes the note above).** The owner fired
+the ADR-0008 §3 trigger as a pre-production gate: the explicit legal-hold marker
+now ships. The substrate holds hold state (`config.holds`), `erasure` is refused
+on a held scope (`legal_hold_open`), the sweep skips held scopes, and release is
+an audited owner act (`hold.release`). AC5/AC6 are therefore enforced
+**literally** again, by ADR-0009; the composition realization above describes
+only records/holds grandfathered from before the marker (a scope offboarded
+before it has no hold entry). §2.2 and the criteria text remain unchanged — the
+interpretation moved, the invariant did not.
+
 ## 5. Migration / rollback
 
 - Config is additive; old configs load unchanged (retention defaults to

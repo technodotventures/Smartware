@@ -9,7 +9,11 @@
 //     in the operation closure and (b) forget.scope audit markers for the
 //     target (they live in the POD scope by design and reference the scope id).
 //   - Content = canonical records only. Derived indexes (FTS, vector, pages,
-//     ops-index SQLite, compile queue) are regenerable and excluded.
+//     ops-index SQLite, compile queue) are regenerable and excluded. Scope-level
+//     mutation markers (forget.scope audit records, pod scope) travel WITH a
+//     retained-scope package: they reference the scope id and are its replay
+//     evidence, so a restored offboarded scope comes back tombstoned. A
+//     post-erasure package stays empty (deletion certificate only).
 //   - Post-erasure export of an erased scope: empty package + deletion
 //     certificate reference (marker obs id + operation_id) — the erasure
 //     proof is portable. (The raw evidence-log records of an erased scope
@@ -217,6 +221,24 @@ export async function handleExportScope(
     ? []
     : allObservations.filter(obs => obs.scope === params.scope);
 
+  // Scope-level mutation markers for the target (forget.scope audit records).
+  // They live in the POD scope by design and reference the scope id, so the
+  // contract lists them as the ONE permitted cross-scope content record
+  // (§10c.4). They TRAVEL with a retained-scope package: they are the replay
+  // evidence that makes a restored offboarded scope come back tombstoned
+  // instead of resurrecting raw evidence in the raw window. A post-erasure
+  // package stays empty — the deletion certificate is the reference.
+  const scopeMarkerRecords = eraseMarker
+    ? []
+    : allObservations.filter(obs => {
+        if (obs.type !== 'erasure') return false;
+        const body = (typeof obs.content.body === 'object' && obs.content.body) as Record<string, unknown> | null;
+        return body?.['target_kind'] === 'scope' && body['scope'] === params.scope;
+      });
+  const scopedObservationRecords = eraseMarker
+    ? []
+    : [...observationRecords, ...scopeMarkerRecords];
+
   const claimRecords = [
     ...iterAllClaimVersions(dataDir),
   ].filter(record => record.scope === params.scope);
@@ -243,7 +265,7 @@ export async function handleExportScope(
   // Operation closure: every ops entry referenced by the exported records +
   // every forget.scope audit entry for the target (cross-scope by design).
   const referencedOpIds = new Set<string>();
-  for (const obs of observationRecords) if (obs.operation_id) referencedOpIds.add(obs.operation_id);
+  for (const obs of scopedObservationRecords) if (obs.operation_id) referencedOpIds.add(obs.operation_id);
   for (const record of claimRecords) referencedOpIds.add(record.operation_id);
   for (const obs of evidenceRecords) if (obs.operation_id) referencedOpIds.add(obs.operation_id);
   const operationRecords = [...readAllOpLogEntries(opsDir)].filter(entry =>
@@ -257,7 +279,7 @@ export async function handleExportScope(
   ensurePrivateDirectory(packageDir);
 
   const fileRecords: Record<ExportContentFile, unknown[]> = {
-    observations: observationRecords,
+    observations: scopedObservationRecords,
     claims: claimRecords,
     evidence: evidenceRecords,
     operations: operationRecords,
@@ -266,7 +288,7 @@ export async function handleExportScope(
 
   const digests: Record<string, string> = {};
   const counts: ExportCounts = {
-    observations: observationRecords.length,
+    observations: scopedObservationRecords.length,
     claims: claimRecords.length,
     evidence: evidenceRecords.length,
     operations: operationRecords.length,

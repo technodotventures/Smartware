@@ -6,9 +6,11 @@
 import { SmartwareCore, createDefaultConfig, knownTime, nullTime, canonicalKey } from 'smartware';
 import { showAttributionByDefault, attributionLine, whySentence } from 'smartware/render';
 import { ClaimStore } from 'smartware/layer1';
-import { addCorroborationEvidence, resolveFactMatches } from 'smartware/layer1/corroboration';
+import { addCorroborationEvidence } from 'smartware/layer1/corroboration';
+import { admitClaim } from 'smartware/layer1/conflicts';
 import { computeConfidence } from 'smartware/layer1/confidence';
 import { SearchIndex, syncSearchFromClaims } from 'smartware/layer3';
+import { MAX_INGEST_ITEMS } from 'smartware/ingestion';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,6 +37,11 @@ cfg.grants = [
     capabilities: { observe: ['client:acme#1'], query: ['client:acme#1'], compile: [], correct: ['client:acme#1'], forget: [], read: ['client:acme#1'] },
     trusted: false, quarantine: false, created_at: new Date().toISOString(), expires_at: null, status: 'active',
   },
+  {
+    id: 'grant_noah', actor_type: 'person', actor_id: 'user:noah',
+    capabilities: { observe: ['client:acme#1'], query: ['client:acme#1'], compile: [], correct: [], forget: [], read: ['client:acme#1'] },
+    trusted: false, quarantine: false, created_at: new Date().toISOString(), expires_at: null, status: 'active',
+  },
 ];
 fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(cfg, null, 2));
 
@@ -56,7 +63,12 @@ if (obs && obs.status) okay.push(`observe ok (${obs.status})`); else fail.push('
 // before any compile job materializes it. The Coffee product keeps raw
 // observations as the evidence window, then persists structured claims
 // (extraction runs upstream / LLM-backed). Assert the raw window here.
-const rawHits = memory.searchObservations('billing', 'client:acme#1', { limit: 10 });
+const rawHits = memory.searchObservations({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
+  query: 'billing',
+  scope: 'client:acme#1',
+  limit: 10,
+});
 if (rawHits && rawHits.length > 0) {
   okay.push(`raw-observation window ok (${rawHits.length} raw hit(s))`);
 } else {
@@ -128,63 +140,104 @@ if (!existing) {
     fail.push(`corroboration did not accumulate as expected: evidence ${after.supporting_evidence.length}, active claims ${active.length}, confidence ${after.confidence.toFixed(4)} vs expected >${scoredAlone.toFixed(4)}`);
   }
 }
-
-// 3e. Duplicate active claims for ONE fact must CONVERGE, not be silently picked.
-//
-// The shape a write path leaves behind when it mints a claim per observation: two ACTIVE claims
-// asserting the same fact. `getClaimsBySubject` has no ORDER BY, so resolving that with `.find()`
-// picks whichever row SQLite returns first, decides the survivor by row order, and reports nothing.
-// Seed that shape, measure the double answer it produces, then resolve it with the shipped helper.
-const reiterated = await memory.observe({
+// 3e. Contradiction and temporal lifecycle (P0-2/P0-4) through the public
+// admission seam. A same-key disagreement is retained and marked contested —
+// recall surfaces both sides instead of a silent empty result. A later
+// event-valid window then supersedes deterministically, closing the old window
+// at the replacement's start (event-valid time) and recording when it was
+// learned (system time).
+store.insertEntity({
+  id: 'entity_beacon', canonical_name: 'Beacon', aliases: [], type: 'organization',
+  scope: 'client:acme#1', created_at: new Date().toISOString(),
+});
+const conflictWindow = '2026-09-01T00:00:00.000Z';
+function beaconClaim(observationId, predicate, value, validFrom = conflictWindow) {
+  const built = {
+    ...claim,
+    id: `claim_${ulid()}`,
+    subject_id: 'entity_beacon', subject_name: 'Beacon', predicate,
+    object: { type: 'text', value },
+    validity: { from: validFrom, to: null },
+    t_valid_from: knownTime(validFrom), t_valid_to: nullTime(),
+    t_ingested: knownTime(new Date().toISOString()),
+    source_event_id: observationId, extraction_event_id: observationId,
+    supporting_evidence: [observationId],
+    superseded_by: null, contested_by: [],
+  };
+  built.confidence = computeConfidence(built);
+  return built;
+}
+const beaconObsA = await memory.observe({
   actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
-  type: 'message',
-  content: { format: 'text/markdown', body: 'Acme reiterated: quarterly, not monthly.' },
-  scope: 'client:acme#1',
-  visibility: 'scope',
-  operation_id: opId(),
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon renewal is 2026-09-30' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
 });
-
-// `claim_acme_billing_twin` sorts AFTER `claim_acme_billing`, so the duplicate is the loser.
-const twinId = 'claim_acme_billing_twin';
-const twinValidityFrom = new Date().toISOString();
-const twin = {
-  ...claim, id: twinId, validity: { from: twinValidityFrom, to: null },
-  t_ingested: knownTime(twinValidityFrom), t_valid_from: knownTime(twinValidityFrom),
-  source_event_id: reiterated.id, extraction_event_id: reiterated.id,
-  supporting_evidence: [reiterated.id], superseded_by: null, confidence: 0,
-};
-twin.confidence = computeConfidence(twin);
-store.insertClaim(twin);
+const beaconObsB = await memory.observe({
+  actor: { type: 'person', id: 'user:noah', display_name: 'Noah' },
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon renewal is 2026-10-31' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
+});
+const beaconA = beaconClaim(beaconObsA.id, 'renewal_date', '2026-09-30');
+const admissionA = admitClaim(beaconA, store);
+const beaconB = beaconClaim(beaconObsB.id, 'renewal_date', '2026-10-31');
+const admissionB = admitClaim(beaconB, store);
 syncSearchFromClaims(store, searchIndex, 'client:acme#1');
-
-// The canonical key cannot be the identity: two rows for ONE fact carry two different keys,
-// because the key includes validity_from and this write path stamps a fresh one every time.
-const twinKey = canonicalKey(subjectId, 'prefers_billing', 'client:acme#1', twinValidityFrom);
-if (twinKey !== key && store.findByCanonicalKey(subjectId, 'prefers_billing', 'client:acme#1', twinValidityFrom)?.id === twinId) {
-  okay.push('canonical key is NOT the fact identity (two active rows, one fact, two different keys)');
-} else {
-  fail.push(`the duplicate did not land on its own canonical key: ${twinKey} vs ${key}`);
-}
-
-// Every active claim asserting the fact — the two rows, in survivor order.
-const matches = store.findActiveFactMatches(subjectId, {
-  predicate: 'prefers_billing', scope: 'client:acme#1', object: { type: 'text', value: 'quarterly' },
+const conflictRecall = await memory.recall({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
+  query: 'Beacon renewal', scope: 'client:acme#1', limit: 10,
 });
-if (matches.length === 2 && matches[0].id === 'claim_acme_billing') {
-  okay.push(`findActiveFactMatches returns every duplicate (${matches.map(c => c.id).join(', ')}) with the survivor first`);
+const conflictClaims = (conflictRecall.results ?? []).map(result => result.claim).filter(Boolean);
+const conflictSides = conflictClaims.filter(c => c.predicate === 'renewal_date');
+if (admissionA.outcome === 'inserted'
+  && admissionB.outcome === 'contested'
+  && conflictSides.length === 2
+  && conflictSides.every(c => c.status === 'contested' && c.epistemic_tag === 'contested')) {
+  okay.push(`contradiction semantics ok (admissions ${admissionA.outcome}/${admissionB.outcome}; recall surfaces ${conflictSides.length} contested sides, never silent-empty)`);
 } else {
-  fail.push(`findActiveFactMatches returned ${matches.length} match(es): ${matches.map(c => c.id).join(', ')}`);
+  fail.push(`contradiction semantics failed: outcomes ${admissionA.outcome}/${admissionB.outcome}, recall claim hits ${JSON.stringify(conflictSides.map(c => [c.id, c.status, c.epistemic_tag]))}`);
 }
+
+// 3f. Deterministic supersession: a later event-valid window replaces the
+// active claim, closes its window at the replacement's start, and drops the
+// superseded fact from current recall (history still reaches it).
+const supersedeWindow = '2026-09-20T00:00:00.000Z';
+const supersedeObsC = await memory.observe({
+  actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon contract tier is gold' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
+});
+const supersedeObsD = await memory.observe({
+  actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+  type: 'message', content: { format: 'text/markdown', body: 'Beacon contract tier is platinum' },
+  scope: 'client:acme#1', visibility: 'scope', operation_id: opId(),
+});
+const tierFirst = beaconClaim(supersedeObsC.id, 'contract_tier_is', 'gold', conflictWindow);
+const tierAdmissionFirst = admitClaim(tierFirst, store);
+const tierReplacement = beaconClaim(supersedeObsD.id, 'contract_tier_is', 'platinum', supersedeWindow);
+const tierAdmissionSecond = admitClaim(tierReplacement, store);
+syncSearchFromClaims(store, searchIndex, 'client:acme#1');
+const superseded = store.getClaim(tierFirst.id);
+const currentTier = await memory.recall({
+  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
+  query: 'Beacon contract tier', scope: 'client:acme#1', limit: 10,
+});
+const currentTierClaims = (currentTier.results ?? []).map(result => result.claim).filter(Boolean);
+const tierHits = currentTierClaims.filter(c => c.predicate === 'contract_tier_is');
+if (tierAdmissionFirst.outcome === 'inserted'
+  && tierAdmissionSecond.outcome === 'superseded'
+  && superseded?.status === 'superseded'
+  && superseded?.validity?.to === supersedeWindow
+  && tierHits.length === 1
+  && tierHits[0]?.id === tierReplacement.id) {
+  okay.push(`supersession ok (old window closed at ${superseded.validity.to}; current recall returns only the replacement)`);
+} else {
+  fail.push(`supersession failed: outcomes ${tierAdmissionFirst.outcome}/${tierAdmissionSecond.outcome}, old status ${superseded?.status}, validity.to ${superseded?.validity?.to}, recall ${JSON.stringify(tierHits.map(c => [c.id, c.status]))}`);
+}
+
 store.close();
 searchIndex.close();
 
-const claimIds = (result) => {
-  const rows = Array.isArray(result) ? result : (result.results ?? result.matches ?? result.claims ?? []);
-  return rows.map((r) => r.claim?.id ?? r.claim_id ?? r.id ?? 'unknown');
-};
-
-// 3c. Recall the compiled claim via the public API (owner subject bypasses grants) — BEFORE the
-// duplicate is resolved, where the recipe in older docs left recall double-answering.
+// 3c. Recall the compiled claim via the public API (owner subject bypasses grants).
 const hits = await memory.recall({
   actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
   query: 'Acme billing',
@@ -192,60 +245,11 @@ const hits = await memory.recall({
 });
 const rc = Array.isArray(hits) ? hits : (hits.results ?? hits.matches ?? hits.claims ?? []);
 if (rc && rc.length > 0) okay.push(`recall ok (${rc.length} claim(s))`); else fail.push(`recall empty: ${JSON.stringify(hits).slice(0, 200)}`);
-// The symptom the old recipe produced, measured: ONE fact, TWO answers.
-if (claimIds(hits).length === 2) {
-  okay.push(`duplicate baseline measured: recall answers twice for one fact (${claimIds(hits).join(', ')})`);
-} else {
-  fail.push(`expected 2 recall results for the duplicate-laden fact, got ${claimIds(hits).length}: ${claimIds(hits).join(', ')}`);
-}
-
-// Resolve: fold every active claim for the fact into one survivor that keeps the provenance.
-const resolvingStore = new ClaimStore(dbPath);
-resolvingStore.setDataDir(dataDir);
-const resolution = resolveFactMatches({ store: resolvingStore, matches, observationId: reiterated.id });
-const survivor = resolvingStore.getClaim(resolution.claimId);
-const demoted = resolvingStore.getClaim(twinId);
-const activeAfter = resolvingStore.getActiveClaims('client:acme#1').filter((c) => c.validity.to === null);
-const evidenceBefore = matches[0].supporting_evidence.length;
-const formulaConfidence = survivor ? computeConfidence(survivor) : 0;
-const resolutionOk = survivor
-  && resolution.claimId === 'claim_acme_billing'
-  && resolution.ambiguous_matches === 2
-  && resolution.ambiguity_resolved === true
-  && resolution.superseded_claims.length === 1 && resolution.superseded_claims[0] === twinId
-  && survivor.supporting_evidence.length === evidenceBefore + 1
-  && survivor.supporting_evidence.includes(reiterated.id)
-  && Math.abs(survivor.confidence - formulaConfidence) <= 1e-6
-  && demoted?.status === 'superseded' && demoted?.superseded_by === 'claim_acme_billing'
-  && demoted.supporting_evidence.length === 1
-  && activeAfter.length === 1;
-if (resolutionOk) {
-  okay.push(`duplicate resolved: survivor ${resolution.claimId}, ambiguous_matches ${resolution.ambiguous_matches}, superseded [${resolution.superseded_claims.join(', ')}], evidence ${evidenceBefore}→${survivor.supporting_evidence.length}, confidence formula-consistent`);
-} else {
-  fail.push(`duplicate resolution did not hold: ${JSON.stringify({
-    claimId: resolution.claimId, ambiguous_matches: resolution.ambiguous_matches,
-    superseded_claims: resolution.superseded_claims,
-    evidence: survivor?.supporting_evidence, demoted: demoted?.status,
-    superseded_by: demoted?.superseded_by, active: activeAfter.length,
-    confidenceDelta: survivor ? Math.abs(survivor.confidence - formulaConfidence) : null,
-  })}`);
-}
-const resolvingIndex = new SearchIndex(dbPath);
-syncSearchFromClaims(resolvingStore, resolvingIndex, 'client:acme#1');
-resolvingStore.close();
-resolvingIndex.close();
-
-// The corroborated-and-resolved fact must now answer once: a demoted duplicate leaves the
-// recall-eligible set (`status === 'active'`), which is what removes the second answer.
-const hitsAfter = await memory.recall({
-  actor: { type: 'person', id: 'user:ava', display_name: 'Ava' },
-  query: 'Acme billing',
-  scope: 'client:acme#1',
-});
-if (claimIds(hitsAfter).length === 1) {
-  okay.push(`recall converged to one claim for the fact after resolution (${claimIds(hitsAfter).join(', ')})`);
-} else {
-  fail.push(`recall returned ${claimIds(hitsAfter).length} claims for one fact after resolution: ${claimIds(hitsAfter).join(', ')}`);
+// The corroborated restatement must not have added a second result for the same fact.
+if (rc && rc.length === 1) {
+  okay.push('recall returns one claim for the corroborated fact (restating it did not create a twin)');
+} else if (rc) {
+  fail.push(`recall returned ${rc.length} claims for one fact — corroboration did not prevent a duplicate`);
 }
 
 // 4. Provenance render (staff-facing attribution) via smartware/render.
@@ -282,6 +286,119 @@ if (hasObservations) {
   okay.push(`export ok (${exported.export_id} → observations.jsonl, ${exported.counts?.observations?.toString() ?? '?'} obs)`);
 } else {
   fail.push(`export dir missing observations: ${exportDir} (${JSON.stringify(exported).slice(0, 200)})`);
+}
+
+// ── 6. Sources and connector ingestion (P1-2 contract) ─────────────────────
+//
+// Coffee owns OAuth login, scheduled jobs and connector credentials. Smartware
+// owns the provenance origin (the source registry) and the ingestion contract:
+// one batch per polled page, an opaque cursor, an operation_id, and per-item
+// dedup keyed on (source, external_id, scope). Context — actor + registered
+// source — is fail-closed: the brain refuses to write unattributable evidence.
+const owner = { type: 'person', id: 'user:ava', display_name: 'Ava' };
+
+const connector = memory.registerSource({
+  actor: owner,
+  id: 'src_gmail_ava',
+  kind: 'connector',
+  display_name: 'Gmail — ava@harbor-lane',
+  external_ref: 'acct_ava_primary',
+});
+if (connector.id === 'src_gmail_ava' && connector.status === 'active') {
+  okay.push(`source registry ok (${connector.kind}: ${connector.display_name})`);
+} else {
+  fail.push(`source registration failed: ${JSON.stringify(connector)}`);
+}
+
+// One polled page: two real items, one item carrying a credential (rejected —
+// the connector must not be able to wedge on a poisoned message).
+const batchOp = opId();
+const batch = {
+  actor: owner,
+  source_id: 'src_gmail_ava',
+  scope: 'client:acme#1',
+  cursor: 'hist/101',
+  operation_id: batchOp,
+  items: [
+    { external_id: 'msg_101', type: 'message', content: { format: 'text/plain', body: 'Acme onboarding starts Monday.' } },
+    { external_id: 'msg_102', type: 'message', content: { format: 'text/plain', body: 'Acme asked for parking details.' } },
+    { external_id: 'msg_103', type: 'message', content: { format: 'text/plain', body: 'Deploy key: ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } },
+  ],
+};
+const receipt = await memory.ingest(batch);
+if (batch.items.length <= MAX_INGEST_ITEMS && receipt.status === 'ok'
+  && receipt.accepted === 2 && receipt.rejected === 1
+  && receipt.cursor === 'hist/101' && receipt.cursor_before === null
+  && receipt.items.find(item => item.external_id === 'msg_103')?.code === 'secret_detected') {
+  okay.push(`ingest ok (2 accepted, 1 rejected secret_detected; cursor ${receipt.cursor})`);
+} else {
+  fail.push(`ingest failed: ${JSON.stringify(receipt).slice(0, 300)}`);
+}
+
+// Replaying the same operation_id returns the recorded receipt — no new writes.
+const ingestedId = receipt.items[0]?.observation_id;
+const replay = await memory.ingest(batch);
+const rawBefore = memory.searchObservations({ actor: owner, query: 'onboarding', scope: 'client:acme#1' });
+const rawAfter = memory.searchObservations({ actor: owner, query: 'onboarding', scope: 'client:acme#1' });
+if (replay.status === 'replayed' && rawAfter.length === 1 && rawBefore.length === 1) {
+  okay.push(`replay ok (${replay.status}; the retried batch wrote nothing again)`);
+} else {
+  fail.push(`replay failed: status ${replay.status}, raw hits ${rawBefore.length}->${rawAfter.length}`);
+}
+
+// A re-sync under a NEW operation_id dedups stored items instead of minting
+// twins; the poisoned item is (correctly) rejected again on every attempt.
+const resend = await memory.ingest({ ...batch, operation_id: opId(), cursor: 'hist/102' });
+if (resend.accepted === 0 && resend.duplicated === 2 && resend.rejected === 1) {
+  okay.push(`item dedup ok (re-synced page: 0 accepted, ${resend.duplicated} duplicates, ${resend.rejected} rejected again)`);
+} else {
+  fail.push(`item dedup failed: ${JSON.stringify({ accepted: resend.accepted, duplicated: resend.duplicated, rejected: resend.rejected })}`);
+}
+
+// Sync status: what Coffee's scheduler/UI renders.
+const sync = memory.sourceSyncStatus({ actor: owner, source_id: 'src_gmail_ava' })[0];
+if (sync && sync.last_sync?.cursor === 'hist/102' && sync.totals.batches === 2
+  && sync.totals.accepted === 2 && sync.totals.duplicated === 2 && sync.totals.rejected === 2) {
+  okay.push(`sync status ok (last cursor ${sync.last_sync.cursor}, ${sync.totals.batches} batches, accepted ${sync.totals.accepted}, duplicated ${sync.totals.duplicated}, rejected ${sync.totals.rejected})`);
+} else {
+  fail.push(`sync status wrong: ${JSON.stringify(sync)?.slice(0, 300)}`);
+}
+
+// The ingested item resolves to its registered source — provenance, not text matching.
+const ingestedEvidence = memory.readObservationEvidence({ actor: owner, observation_id: ingestedId });
+if (ingestedEvidence?.source_ref === 'src_gmail_ava') {
+  okay.push(`source-scoped provenance ok (${ingestedEvidence.id} ← ${ingestedEvidence.source_ref})`);
+} else {
+  fail.push(`ingested evidence lost its source: ${JSON.stringify(ingestedEvidence)?.slice(0, 200)}`);
+}
+
+// ── 7. Federated reads across client scopes, bounded by grants ──────────────
+
+// The owner reads both client scopes in one call; every result is scope-tagged.
+const federated = await memory.recallFederated({ actor: owner, query: 'billing', scopes: ['client:acme#1'] });
+const federatedScoped = federated.results.every(result => result.scope === 'client:acme#1');
+if (federated.scopes.join(',') === 'client:acme#1' && federatedScoped && federated.results.length > 0) {
+  okay.push(`federated read ok (${federated.results.length} scope-tagged result(s) across ${federated.scopes.join(', ')})`);
+} else {
+  fail.push(`federated read wrong: ${JSON.stringify(federated).slice(0, 300)}`);
+}
+
+// A staff actor naming a scope they cannot read gets a denial, never a partial answer.
+let partial = null;
+try {
+  await memory.recallFederated({
+    actor: { type: 'person', id: 'user:gigi', display_name: 'Gigi' },
+    query: 'billing',
+    scopes: ['client:acme#1', 'workspace'],
+  });
+  partial = 'answered';
+} catch (error) {
+  partial = error?.code ?? String(error);
+}
+if (partial === 'insufficient_permission') {
+  okay.push('federated denial ok (gigi + workspace → insufficient_permission, no partial answer)');
+} else {
+  fail.push(`federated denial wrong: ${partial}`);
 }
 
 memory.close();

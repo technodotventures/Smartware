@@ -18,8 +18,17 @@ export function todayUTC(): string {
  * Append a single observation to the log. NEVER modifies existing lines.
  */
 export function appendObservation(evidenceDir: string, obs: Observation): void {
+  appendObservationAt(evidenceDir, todayUTC(), obs);
+}
+
+/**
+ * Append one observation to a specific UTC date file. Restore replay needs this: an imported
+ * record belongs on the day it was observed, not on the day of the import — the evidence log is
+ * a chronological surface and a restore must not rewrite history's shape.
+ */
+export function appendObservationAt(evidenceDir: string, date: string, obs: Observation): void {
   mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
-  const path = dateToPath(evidenceDir, todayUTC());
+  const path = dateToPath(evidenceDir, date);
   const fd = openSync(path, 'a', 0o600);
   try {
     writeFileSync(fd, JSON.stringify(obs) + '\n', 'utf8');

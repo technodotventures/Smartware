@@ -67,6 +67,31 @@
       "status": "active"
     }
   ],
+  "sources": [
+    {
+      "id": "src_gmail_ava",
+      "kind": "connector",
+      "display_name": "Gmail — ava@harbor-lane",
+      "status": "active",
+      "created_at": "2026-09-01T09:00:00.000Z",
+      "external_ref": "acct_ava_primary"
+    },
+    {
+      "id": "src_gigi_notes",
+      "kind": "note",
+      "display_name": "Gigi's notes",
+      "status": "active",
+      "created_at": "2026-09-01T09:00:00.000Z"
+    },
+    {
+      "id": "src_coffee_agent",
+      "kind": "agent",
+      "display_name": "Coffee assistant runs",
+      "status": "active",
+      "created_at": "2026-09-01T09:00:00.000Z",
+      "actor_ids": ["agent:coffee-assistant"]
+    }
+  ],
   "llm": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-5"
