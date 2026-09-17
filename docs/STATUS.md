@@ -33,7 +33,6 @@
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
 | `integration/v0.8.0` | 204 | 2026-09-17 | Merge branch 'wip/neo/adr-numbering-rule' into integration/v0.8.0 |
-| `tmp/t_5742162f-mix` | 93 | 2026-09-17 | tmp: combined tree for t_5742162f merge-order measurement |
 | `wip/neo/frontmatter-write-residuals` | 86 | 2026-09-17 | docs(t_15b309f3): make the write-boundary lane's R2 and reachability claims true |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
@@ -145,7 +144,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (129 tasks, 9411 events)
+- ✅ kanban board readable (129 tasks, 9414 events)
 - ⚠️ 67 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
