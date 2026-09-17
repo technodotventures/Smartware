@@ -35,6 +35,35 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-17 on Node v26.5.1 for **the L2 page `notices` array through the hand-rolled page YAML
+serialiser** (`fix/tech-head/notices-frontmatter-roundtrip`, stacked on the still-unmerged
+`wip/tech-head/l2-page-frontmatter-schema @ 5a1c58c`; kanban `t_4d84ff6b` — a writer + reader fix in one
+file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **550 tests across 77 files**, 31
+schema files. The delta over the entry below is 6 tests in one new file,
+`test/layer2/l2-notices-frontmatter-roundtrip.test.ts`. Spec §9 / `page-frontmatter.schema.json` declare
+`notices` as an array of objects (the slot a *user-authored* page carries its notice in); the serialiser
+emitted that branch with the item's indent left inside the dash line (`-     type: staleness`, the
+continuation keys at a *shallower* column) and the parser read every dash line as a **string**, so
+`parse(serialise(fm))` returned `notices: ["type: staleness"]` and pushed `message`/`posted_at` out as
+stray top-level keys — which the frozen contract rejects on `additionalProperties: false`. Measured by the
+`t_8d6f4a5c` reviewer at `5a1c58c` (5/7 probe checks); the fix makes the writer emit standard block YAML
+(`- key: value`, continuation keys at the item's content column) **and** the reader decode mapping items,
+including the mis-indented bytes the old writer left on disk, so a page already written by the broken
+writer is recovered on read and converges on its next write. Non-tautological: the pin fails 6/6 on
+`5a1c58c` (`Test Files 1 failed (1) | Tests 6 failed (6)`) and passes 6/6 on the fix; the last test drives
+compile → ENDORSE → notice attached to the user's own page → **recompile** through the real compiler and
+asserts the notice survives with an empty Ajv error list. Gate: `npm run build` exit 0;
+`test/layer2` + `f_l2_voice_protection` + `g_endorsement` 4 files / 24 tests; full suite 77 files / 550
+tests exit 0 (82.06 s); `verify:schemas` 31 files OK; `verify:saas` pass; `npm audit --omit=dev` 0
+vulnerabilities. Not run: `npm ci` (the worktree symlinks the shared `node_modules`, so a reinstall would
+hit every sibling lane — CI runs it on Node 22/24). **This entry also corrects the entry below** on one
+clause: it states a user page's `notices` is preserved verbatim through a rewrite — the frontmatter field
+was carried by both writers, but the serialiser corrupted it on the way to disk. Measured after the fix,
+four neighbouring shapes of the same minimal serialiser still degrade (a multi-line string anywhere, a
+nested object inside a notice item, a single inline-array element containing a comma) — all pre-existing,
+all latent (no in-tree verb writes one), none in this card's scope, carded as `t_cf744a8e`. No published
+schema byte, `SHA256SUMS` line, or spec/protocol text moves with this change.
+
 Verified 2026-09-16 on Node v26.5.1 for **the compiled L2 page frontmatter against
 `page-frontmatter.schema.json`** (`wip/tech-head/l2-page-frontmatter-schema`, stacked on the ADR-0013 lane
 `wip/smarty/canonical-schema-boundary @ 6ed7a93`; kanban `t_8d6f4a5c`, ADR-0013 → D2 — a **writer** fix, so
