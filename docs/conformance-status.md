@@ -35,6 +35,36 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-16 on Node v26.5.1 for **which schema covers the L1 claim record** — the canonical
+`<data_dir>/claims/<yyyy-mm>.jsonl` line and the byte-identical copy `EXPORT.SCOPE` ships as
+`claims.jsonl` (`wip/tech-head/l1-claim-record-boundary`, kanban `t_11fed5bb`, ADR-0013 → *Delta
+(2026-09-16) — the L1 claims record* — a boundary statement plus its pin; **no published schema byte
+moves**, `schemas/v0.5.0/SHA256SUMS` unchanged): **548 tests across 77 files** (544 passed; the four
+failures are `mcp_smoke`'s stdio-transport tests in a tree with no `dist/` — after `npm run build` that
+file alone is 4/4), 31 schema files. The delta over the entry below is **7 tests in one new file**,
+`test/layer1/l1-claim-record-portability-boundary.test.ts`, which pins: the ordinary write path's
+records (a caller-supplied `OperationId`, the legacy marker when none is supplied, a demoted copy, and
+the claim `reflect.auto` creates) validate against `claim.schema.json` with an **empty** Ajv error list;
+the record envelope is exactly the schema's enumerated property set; the schema stays closed at the root
+and inside `semantic` (a pre-v0.6 record with no block still validates, and an invented key at either
+level is rejected with its exact single error); **no other schema file in either published set
+references `claim.schema.json`**, so the artifact has one validator; every emitted record's
+`OperationId` matches `^op_[0-9A-HJKMNP-TV-Z]{26}$` while the pre-fix literal
+`op_LEGACY00000000000000000000` is asserted to fail it; the package's `claims.jsonl` lines are
+**byte-identical** to the canonical lines and validate against the file the manifest's set holds
+(`manifest.schemas` names a set that contains it — no extra manifest field is needed for claims, unlike
+the L0 record, whose schema is named explicitly); and the one open half — `insertClaim` omitting
+`supersedes` on a `version >= 2` and on a born-forgotten record (`t_3ba3ee39`, ADR-0014, another lane)
+— is asserted as its **exact** two-error list `/:required:supersedes` + `/:if`, so it can neither hide
+a fourth divergence nor survive the fix. RED control: the same file against the packaged revision
+`e937fab` is **6 failed | 1 passed**, the ordinary-path assertion failing with
+`/:additionalProperties:semantic` and the id assertion on the pre-fix literal — the gate's two
+divergences (`t_66f1dd7d` §3 B2), reproduced by the pin. Mutation checks: deleting `semantic` from the
+schema → 5 failed | 2 passed; reverting the writer to the pre-fix literal → 3 failed | 4 passed;
+applying the `supersedes` writer half alone → 1 failed | 6 passed (the residual flips when closed). The
+README's *Which schema covers which surface* table now lists the L1 record and its export copy — one
+artifact, one validator. No other suite changed.
+
 Verified 2026-09-15 on Node v26.5.1 for **which artifact each published schema covers** — the L0
 evidence record and the compiled L2 page frontmatter (`wip/smarty/canonical-schema-boundary`, kanban
 `t_0920aa1d`, ADR-0013 — schema/contract accuracy plus a disclosed boundary; **no published schema byte
@@ -280,6 +310,15 @@ The exact ordering and recovery state table are documented in
 
 ## Remaining limits
 
+- **The L1 claim record has one open divergence on this lane.** `insertClaim` (`src/layer1/store.ts`)
+  omits `supersedes` on a `version >= 2` record and on a born-forgotten (`version 1`,
+  `state: forgotten`) record, which `claim.schema.json`'s `if version >= 2` branch requires in every
+  state. Decided and fixed on `wip/smarty/l1-forgotten-supersedes` (ADR-0014, kanban `t_3ba3ee39`) —
+  the writer names the version it replaces, and the schema's `forgotten` branch stops requiring it,
+  because a claim can be born forgotten with no prior version to name — but not composed on this lane.
+  Pinned as its **exact** residual by `test/layer1/l1-claim-record-portability-boundary.test.ts`,
+  which flips to an empty list when that branch composes. Everything else the ordinary write path emits
+  (a real `OperationId`, the legacy marker, a demoted copy, `reflect.auto`'s own claim) validates whole.
 - **The L0 evidence record's field shape is not published in v0.5.0.** `observation.schema.json` covers the
   observation object *on the wire* (the OBSERVE payload plus the stamped identity), not the record the
   substrate appends to `<data_dir>/evidence/<date>.jsonl` — which carries the same information under

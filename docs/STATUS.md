@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/smarty/canonical-schema-boundary` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/tech-head/l1-claim-record-boundary` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -25,21 +25,27 @@
 ## Latest material change
 
 - **Journal:** [`2026-09-16-t_74faf12d.md`](journal/2026-09-16-t_74faf12d.md) — Integration: rebase the ADR-0013 lane onto the moved base `9fcfff7`, regenerate `STATUS.md`, refresh the `ADR-0012` → `0015` labels (PR #19) (2026-09-16)
-- **Journal entries:** 39 · tasks completed on board `smartware`: 78
+- **Journal entries:** 40 · tasks completed on board `smartware`: 88
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/neo/consent-change-scope` | 76 | 2026-09-16 | docs: regenerate the STATUS projection (branch row, journal count, in-flight tips) |
+| `wip/tech-head/l2-page-frontmatter-schema` | 74 | 2026-09-16 | docs(journal): correct the push-blocker paragraph — the branch is published as PR #22 |
+| `wip/smarty/l0-record-schema` | 73 | 2026-09-16 | docs(journal): name the published PR and the CI result (t_f1157ed4) |
+| `wip/smarty/canonical-schema-boundary` | 69 | 2026-09-16 | docs(journal): fix the pushed-tip clause in the t_74faf12d entry (review round 1, neo) |
+| `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
-| `wt/t_f2b584dc` | 62 | 2026-09-16 | docs: record the round-3 status drift measurements and regenerate the projection |
+| `wt/t_f2b584dc` | 64 | 2026-09-16 | docs: regenerate STATUS projection + journal sync for the round-4 text fix |
 | `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
 | `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
 | `wip/tech-head/l1-forgotten-carry-superseded` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
 | `wip/tech-head/l1-replay-crockford-claim-id` | 59 | 2026-09-15 | docs: regenerate STATUS projection (kanban t_3ba3ee39; board counters moved while closing) |
 | `fix/status-projection-adr-bullet` | 58 | 2026-09-15 | fix(status): the ADR reader accepts the template's `- **Status:**` bullet |
 | `wip/neo/optype-derivation-guard` | 58 | 2026-09-15 | docs: STATUS projection refresh for t_0e732b96 (status:check current at commit time) |
+| `fix/b1-correction-durability` | 57 | 2026-09-16 | docs: record t_8ddfa350's verified baseline and regenerate the STATUS projection |
 | `wip/smarty/retention-cross-op-id` | 57 | 2026-09-15 | fix(protocol): an OperationId spent on another op conflicts with the retention sweep |
 | `wip/tech-head/claim-record-semantic` | 57 | 2026-09-15 | docs: regenerate STATUS projection (board event counter moved while closing t_229601e4) |
 | `wip/smarty/retention-payload-identity` | 56 | 2026-09-15 | fix(protocol): the retention sweep matches the OperationId payload, not just the id |
@@ -89,12 +95,18 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Queued / next up
 
-- `t_e19e8f19` [todo] REVIEW (independent, round 3 text check): ADR-0012 retired-marker rule in the re-grant procedure, §6 C7, and the qualified handoff (wt/t_f2b584dc @ ce9005d, PR #16) (created 2026-09-16, assignee smarty-pants)
+- `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
+- `t_4d84ff6b` [ready] FIX (low): a populated `notices` array does not round-trip the page YAML serialiser — parse drops the object and leaks stray top-level keys (measured; pre-existing) (created 2026-09-16, assignee tech-head)
+- `t_1cde6d63` [ready] VERIFY (independent): consent-change writers stamp the pod lane `self` — wip/neo/consent-change-scope @ 658c3cb (PR #24, base wip/smarty/l0-record-schema @ e0241d4) (created 2026-09-16, assignee tech-head)
+- `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
+- `t_574be8cd` [ready] MEASURE+DECIDE: the remaining `personal` literals — confidence.ts's 365-day half-life keyed on the legacy lane (measured 0.4018 vs 0.3305), the session summarizer default (driven), the OBSERVE tool-description example, the vestigial wiki/ dirs (created 2026-09-16, assignee tech-head)
+- `t_336ba0b9` [ready] FIX/MEASURE: SmartwareCore.revise appends claim versions without re-syncing the claim-FTS index (code-read lead from t_8ddfa350 — probe first) (created 2026-09-16, assignee neo)
+- `t_3ee1ae37` [ready] FIX (docs, low): t_8ddfa350's journal entry names pre-rewrite commit ids (b8ea3ad / 35ae614 / stamp 7872d21) that the delivered branch does not contain (created 2026-09-17, assignee tech-head)
+- `t_e833be91` [ready] MEASURE + DECIDE: a pod whose canonical log was written by a pre-fix build still replays a retracted value after upgrade (B1 residual, no repair path) (created 2026-09-17, assignee tech-head)
 
 ## Blockers and stale work
 
-- `t_66f1dd7d` GATE review: independent Coffee company-brain release verdict
-- `t_dc609143` VERIFY (independent): retention sweep OperationId writer — branch wip/smarty/retention-op-id @ 37c914c (base 0a68482)
+- No blocked tasks on the board.
 
 ## Decisions
 
@@ -118,10 +130,9 @@ Unmerged work — read the branch before assuming this tree is current.
 
 ## Health
 
-- ✅ declared block fresh (5d old)
-- ✅ kanban board readable (97 tasks, 8243 events)
-- ⚠️ 40 completed task(s) have no journal entry — run: npm run journal:sync
-- ⚠️ 2 blocked task(s)
+- ✅ declared block fresh (6d old)
+- ✅ kanban board readable (110 tasks, 8691 events)
+- ⚠️ 50 completed task(s) have no journal entry — run: npm run journal:sync
 
 ## Canonical index
 
