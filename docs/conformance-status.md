@@ -35,6 +35,45 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-17 on Node v26.5.1 for **the page YAML serialiser's coerced scalars and the
+guard's value positions** (`wip/neo/frontmatter-coercion-depth @ 7ef9ab0`, stacked on the
+still-unmerged `wip/neo/frontmatter-lossy-shapes @ b10c77c`; kanban `t_5768425d` — a writer +
+guard change in one file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **565
+tests across 79 files**, 31 schema files. The delta over the entry below is 15 tests in two new
+files — this lane's 7 in `test/layer2/l2-frontmatter-coercion-depth.test.ts` and the t_cf744a8e
+lane's 8 in `test/layer2/l2-frontmatter-lossy-shapes.test.ts`. Two shapes a contract-legal page
+could still hit were measured lossy at `b10c77c` by the independent VERIFY `t_3e511c55` (rows
+A3a–A3d and A2b, its §8 "two shapes the decision does not enumerate") and fixed here:
+
+- a numeric/boolean/null-looking **string** at a bare `type: string` (`summary: "123"`, `"1.50"`,
+  `"true"`, `"null"`, the `0x10`/`1e3`/`Infinity`/`007`/`.5`/`5.` spellings) was written unquoted
+  and read back as another type, so the page failed its own published contract (`/summary:type`)
+  after a write it made itself. Fixed: the writer quotes any spelling the reader's coercion would
+  change; `isCoercedScalar` is shared by reader and writer so the two cannot drift. A
+  hand-authored bare `summary: 123` is still read as a number — the contract reports it loudly.
+- a **nested object deeper than one level inside a notice item**
+  (`notices[0].links = [{url, meta: {a: 'b'}}]`) was neither refused nor preserved (the reader
+  flattens `meta` into the links item). Fixed: `assertPageVocabulary` walks every value position —
+  an object at any *property* position, at any depth, is refused naming the path (`page field
+  "notices[0].links[0].meta"`), and a mixed scalar/object array (previously written through
+  `String(item)` as `[object Object]` / `0: a` lines) is refused too. Note for integrators: the
+  refused C2 input is **contract-legal** per the published schema (notice items carry no
+  `additionalProperties: false`), so this guard is deliberately **stricter than the published
+  contract** at undeclared item keys — where the contract allows a key the minimal serialiser
+  cannot carry, the honest failure is a loud refusal, not silent flattening.
+
+Non-tautological: the 4 feature pins fail 4/4 on `b10c77c` (`Test Files 1 failed | 3 passed (4)`,
+`Tests 4 failed | 22 passed (26)` — the 3 pre-existing layer2 files pass) and pass 4/4 on the fix;
+the lane's probe goes 24 SILENT_LOSS → 0 (final 31 PASS / 7 GUARDED / 1 MEASURED), and the
+reviewer's own probe re-run against the fix build flips exactly A3a–A3d (→ PASS) and A2b (→
+GUARDED) with no other row moved. Gate: `npm run build` exit 0; focused `test/layer2` 4 files / 26
+tests; full suite 79 files / 565 tests exit 0 (130.97 s); `verify:schemas` 31 files OK;
+`verify:saas` `SMOKE_OUTCOME=pass`; `npm audit --omit=dev` 0 vulnerabilities. Not run: `npm ci`
+(shared `node_modules` symlink policy — CI runs it on Node 22/24). Remaining limits of the same
+serialiser, pre-existing and carded onward (`t_6fc254cd`): a nested **sequence** item (`[["x"]]`)
+is still written as `0: …` lines and garbled on read, and the `|-`/`|+`/`>` block styles are
+still not read; both are recorded in the code comment on the fix.
+
 Verified 2026-09-17 on Node v26.5.1 for **the L2 page `notices` array through the hand-rolled page YAML
 serialiser** (`fix/tech-head/notices-frontmatter-roundtrip`, stacked on the still-unmerged
 `wip/tech-head/l2-page-frontmatter-schema @ 5a1c58c`; kanban `t_4d84ff6b` — a writer + reader fix in one
