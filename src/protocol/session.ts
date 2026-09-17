@@ -5,6 +5,7 @@
 
 import { ulid } from 'ulid';
 import type { Actor } from '../layer0/types.js';
+import { POD_SELF_SCOPE } from '../config.js';
 import type { SmartwareConfig } from '../config.js';
 import type { SessionStore } from '../session/store.js';
 import type { TrustLevel, ClientCapabilities, Session } from '../session/types.js';
@@ -202,7 +203,11 @@ export async function handleSessionEnd(
   } else if (writeMode === 'durable_summary' || writeMode === 'auto') {
     if (params.onSummarize) {
       try {
-        const scope = session.requested_scopes[0] ?? 'personal';
+        // A session that declared no scopes has no lane of its own, so the durable
+        // summary goes to the pod's own lane: the protocol-native `self` that a
+        // Core-opened brain registers (pre-fix this literal was `personal`, a lane
+        // nothing registers — ADR-0015 / kanban t_574be8cd).
+        const scope = session.requested_scopes[0] ?? POD_SELF_SCOPE;
         claimsPersisted = await params.onSummarize(scope, session.actor_id);
         durability = 'persisted';
       } catch {
