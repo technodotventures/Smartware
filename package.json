@@ -29,6 +29,7 @@
     "status:check": "node scripts/substrate-status.mjs --check",
     "journal:sync": "node scripts/substrate-journal-sync.mjs",
     "verify:schemas": "node scripts/verify-schema-checksums.mjs",
+    "verify:adrs": "node scripts/verify-adr-registry.mjs",
     "verify:saas": "npm run build --silent && node scripts/saas-integration-smoke.mjs",
     "verify:coffee-adapter": "npm run build --silent && node scripts/coffee-adapter-smoke.mjs",
     "verify:coffee-gate": "npm run build --silent && node scripts/coffee-company-brain-gate.mjs",
