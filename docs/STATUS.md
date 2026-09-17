@@ -37,6 +37,7 @@
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
 | `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
 | `wip/neo/frontmatter-coercion-depth` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
+| `wip/neo/frontmatter-write-residuals` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
 | `wip/neo/frontmatter-lossy-shapes` | 80 | 2026-09-17 | docs: regenerate the STATUS projection (t_cf744a8e, tight check window) |
 | `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
 | `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
@@ -142,7 +143,7 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (124 tasks, 9252 events)
+- ✅ kanban board readable (124 tasks, 9256 events)
 - ⚠️ 43 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
