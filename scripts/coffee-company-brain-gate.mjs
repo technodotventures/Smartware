@@ -80,7 +80,7 @@ if (install.status !== 0) {
   console.error(tail(install.stderr ?? install.stdout, 25));
   process.exit(1);
 }
-const installedPackage = JSON.parse(fs.readFileSync(path.join(appDir, 'node_modules', '@technodotventures', 'smartware', 'package.json'), 'utf8'));
+const installedPackage = JSON.parse(fs.readFileSync(path.join(appDir, 'node_modules', 'smartware', 'package.json'), 'utf8'));
 
 // ── 3. copy the adapter + the fixture next to the install ───────────────────
 fs.copyFileSync(path.join(REPO, 'examples', 'coffee-adapter', 'adapter.mjs'), path.join(appDir, 'coffee-adapter.mjs'));
@@ -118,7 +118,7 @@ const summary = {
     file: tarball,
     sha256: tarballSha,
     package_version: installedPackage.version,
-    installed_at: path.join(appDir, 'node_modules', '@technodotventures', 'smartware'),
+    installed_at: path.join(appDir, 'node_modules', 'smartware'),
   },
   scratch_dir: scratch,
   evidence_dir: evidenceDir,

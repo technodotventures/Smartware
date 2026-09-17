@@ -359,7 +359,7 @@ const runMeta = {
     }
     return 'unknown';
   })(),
-  resolved_smartware: import.meta.resolve('@technodotventures/smartware'),
+  resolved_smartware: import.meta.resolve('smartware'),
   harness: 'scripts/coffee-company-brain-fixture.mjs',
 };
 
