@@ -218,6 +218,35 @@ describe('L2 page frontmatter — the reader\'s block-scalar styles and quoted k
     );
   });
 
+  test('a whitespace-only line inside a block scalar keeps its spaces (the C4 caveat)', () => {
+    // Raised as a non-blocking caveat by the independent verify t_3e511c55 (C4) and measured against
+    // both spec readers here: a whitespace-only line *wider than the block's indentation* is content,
+    // and only what is narrower than the indent is the empty line it looks like. The reader used to
+    // trim every whitespace-only line, so `'a\n \nb'` came back as `'a\n\nb'`.
+    assert.equal(readBlock('summary: |\n  a\n   \n  b\n')['summary'], 'a\n \nb');
+    assert.equal(readBlock('summary: |\n  a\n     \n')['summary'], 'a\n   ');
+    assert.equal(
+      readBlock('summary: |-\n  a\n     \n')['summary'],
+      'a\n   ',
+      'strip chomping removes empty lines, not content',
+    );
+    assert.equal(readBlock('summary: >\n  a\n   \n  b\n')['summary'], 'a\n \nb', 'folded: its breaks are kept');
+    assert.equal(readBlock('summary: |\n   \n')['summary'], '', 'a block with no content line fixes no indentation');
+    // Controls: at or below the block's indentation the line is the blank it looks like.
+    assert.equal(readBlock('summary: |\n  a\n \n  b\n')['summary'], 'a\n\nb');
+    assert.equal(readBlock('summary: |\n  a\n  \n  b\n')['summary'], 'a\n\nb');
+
+    // The writer emits this shape for any value carrying such a line, so the round-trip is the pin
+    // that matters: it was lossy before this change.
+    const fm = pageFrontmatter({ summary: 'a\n \nb' });
+    const roundTripped = parseFrontmatter(serialiseFrontmatter(fm, BODY))!;
+    assert.equal(
+      roundTripped.frontmatter['summary'],
+      'a\n \nb',
+      'a multi-line value with a spaces-only line round-trips exactly',
+    );
+  });
+
   test('a quoted item key is decoded, colons and all', () => {
     // Real YAML: `- "k": v` is the mapping `{k: v}`. The reader kept the quotes on the key (and,
     // with a colon inside the quoted key, split the key at that colon as well).

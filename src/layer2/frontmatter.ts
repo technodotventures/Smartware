@@ -384,7 +384,10 @@ function readBlockScalar(
   while (i < lines.length) {
     const line = lines[i]!;
     if (line.trim() === '') {
-      collected.push('');
+      // The line's own whitespace is kept: a whitespace-only line *wider than the block's
+      // indentation* is content (caveat C4 of the t_3e511c55 verify; measured identical on both spec
+      // readers), and only what is narrower than the indent is the empty line it looks like.
+      collected.push(line);
       i++;
       continue;
     }
@@ -396,7 +399,14 @@ function readBlockScalar(
   const strip = style.indent > 0
     ? minIndent
     : indents.length > 0 ? indents.reduce((min, n) => Math.min(min, n)) : 0;
-  const content = collected.map(line => (line.trim() === '' ? '' : line.slice(strip)));
+  const content = collected.map(line => {
+    if (line.trim() !== '') return line.slice(strip);
+    // A whitespace-only line is content as far as the block's indentation is determined — by a
+    // content line or by a declared indentation indicator. With neither, the block is whitespace
+    // only and every line of it is empty (both spec readers return the empty string for that).
+    if (indents.length === 0 && style.indent === 0) return '';
+    return line.length > strip ? line.slice(strip) : '';
+  });
 
   if (style.chomp === '-') {
     while (content.length > 0 && content[content.length - 1] === '') content.pop();
@@ -408,9 +418,9 @@ function readBlockScalar(
 /**
  * Fold a `>` block's content lines: adjacent plain lines join with a space, a run of blank lines
  * becomes a paragraph break of the same length, and a more-indented line (after the block's common
- * indentation is stripped, a line that still starts with a space) keeps its own line breaks — YAML's
- * "more indented lines are not folded" rule. Trailing blank lines of the block are kept as line
- * breaks unless the marker's chomping already removed them.
+ * indentation is stripped, a line that still starts with a space, or one that is whitespace only)
+ * keeps its own line breaks — YAML's "more indented lines are not folded" rule. Trailing blank lines
+ * of the block are kept as line breaks unless the marker's chomping already removed them.
  */
 function foldLines(content: string[]): string {
   const parts: string[] = [];
@@ -418,8 +428,8 @@ function foldLines(content: string[]): string {
   let emitted = false;
   let previousMoreIndented = false;
   for (const line of content) {
-    if (line.trim() === '') { breaks++; continue; }
-    const moreIndented = line.startsWith(' ');
+    if (line === '') { breaks++; continue; }
+    const moreIndented = line.startsWith(' ') || line.trim() === '';
     if (!emitted) {
       parts.push(line);
       emitted = true;
