@@ -74,6 +74,28 @@ assertions pin `supersedes`, the `semantic` enum, the Crockford OperationId and 
 all carded elsewhere), the writer's `supersedes` pointer and the Crockford legacy OperationId (B2,
 `t_5ef44cc1`).
 
+Verified 2026-09-17 on Node v26.5.1 for the **claim-FTS lane survey** (kanban `t_12c79071`, lane
+`wip/tech-head/mutation-fts-sync` off `fix/b1-correction-durability` @ `ab9cf2b` — one `src/core.ts`
+change: `revive` re-syncs the claim-FTS index after the mutation, the way `correct` and `consolidate`
+already did and `revise` does on PR #29): **557 tests across 78 files**, `tsc` clean, `verify:schemas`
+31 schema files OK, `verify:saas` `SMOKE_OUTCOME=pass`, **`verify:coffee-gate` 85/85** against the
+packed artifact (`smartware-0.7.0.tgz` sha256
+`c58be3116a44df71eb17175d88e2706722e7297e63356f69b050fe150f2333d2`). What the pass measured: **REVIVE
+is the third verb of the class** the CORRECT and REVISE fixes closed, on **both** FORGET target shapes
+— after forget → a later write in the scope → revive, the live process served **0 rows** while a
+restart and a genuine second process over the same brain served the re-admitted claim (canonical
+`v3 active`; instrument `scripts/mutation-restart-probe.mjs`, three legs, three scenarios). Measured
+**clean** with the mechanism asserted rather than assumed: FORGET alone, retention expiry alone,
+ENDORSE, and QUARANTINE_REVIEW approve (identical served rows; the lanes' deliberately kept rows show
+up only in the counters, `total_found/filtered_out` `1/1` in-process vs `0/0` after a rebuild, and the
+raw observation window needs no reconcile because `searchObservations` re-checks Layer 0 per hit).
+**Retention + revive is clean in a different sense worth not misreading**: every view agrees and none
+serves the re-admitted claim, because `isEffectiveCurrent` keeps a claim out of every read interface
+while none of its source observations is `accepted` — REVIVE restores the record after an
+evidence-tombstone retraction, not retrievability, and does so consistently after a restart too. The
+pin is `test/protocol/claim-mutation-search-sync.test.ts` (RED at `ab9cf2b`: 1 failed | 5 passed, only
+the revive composition → GREEN 6/6).
+
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set
