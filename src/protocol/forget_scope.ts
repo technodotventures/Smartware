@@ -557,11 +557,20 @@ export async function handleForgetScope(
     // retry after a crash (idempotent DELETE), matching per-observation
     // forget semantics and wipe-and-rebuild (syncObservationsFromEvidence
     // excludes terminal states). Claim FTS rows + entity pages are kept:
-    // the authorized snapshot filters forgotten claims at query time, and
-    // keeping the rows is what makes REVIVE fully reversible — a revived
-    // claim becomes searchable again without waiting for a reindex
-    // (handleRevive does not re-index, and rebuild equivalence is
-    // maintained by the same snapshot filter, not by row presence).
+    // the authorized snapshot filters forgotten claims at query time, so what
+    // recall SERVES is rebuild-equivalent — the same result set a rebuilt lane
+    // serves — without touching the lane. What the counters report is NOT
+    // equal: the kept row still matches its query live (counted in
+    // `total_found`, dropped by the snapshot into `filtered_out`), while a
+    // rebuilt lane never holds it (`syncSearchFromClaims` drops non-indexable
+    // claims; a forgotten version materialises as retracted). The difference is
+    // exactly the kept rows, it is measured (kanban t_8779781f; retention's
+    // sweep keeps its rows the same way), and it is deliberate — deleting the
+    // rows here would move the work, not correctness. REVIVE's "searchable
+    // again without waiting for a reindex" no longer rests on this keep:
+    // `core.revive` re-syncs the revived claim's scope (kanban t_12c79071), so
+    // the guarantee survives an intervening write; the keep is the read-time
+    // filter's single gate.
     searchIndex.removeObservationsByScope(params.scope);
   }
 

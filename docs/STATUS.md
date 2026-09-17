@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/neo/frontmatter-write-residuals` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/kept-rows-settle` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,19 +24,20 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-17-t_4d84ff6b.md`](journal/2026-09-17-t_4d84ff6b.md) — A populated `notices` array now round-trips the page YAML serialiser (2026-09-17)
-- **Journal entries:** 41 · tasks completed on board `smartware`: 105
+- **Journal:** [`2026-09-17-t_8779781f.md`](journal/2026-09-17-t_8779781f.md) — The kept rows stay (decided, documented); the drain's mirror is not the divergence — and the demotion it needs is not durable on this base (2026-09-17)
+- **Journal entries:** 63 · tasks completed on board `smartware`: 104
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
-| `integration/v0.8.0` | 157 | 2026-09-17 | Merge branch 'wip/tech-head/pre-fix-l1-repair-adr' into integration/v0.8.0 |
+| `integration/v0.8.0` | 88 | 2026-09-17 | fix: re-add releaseHold (ADR-0009) + hold_release import dropped by snapshot |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
 | `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
 | `wip/neo/frontmatter-coercion-depth` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
+| `wip/neo/frontmatter-write-residuals` | 83 | 2026-09-17 | docs: regenerate the STATUS projection (t_5768425d) |
 | `wip/neo/frontmatter-lossy-shapes` | 80 | 2026-09-17 | docs: regenerate the STATUS projection (t_cf744a8e, tight check window) |
 | `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
 | `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
@@ -45,8 +46,6 @@
 | `wip/smarty/l0-record-schema` | 73 | 2026-09-16 | docs(journal): name the published PR and the CI result (t_f1157ed4) |
 | `wip/tech-head/l1-claim-record-boundary` | 73 | 2026-09-17 | docs: regenerate the STATUS projection at the round-1-correction tip (t_11fed5bb) |
 | `wip/smarty/canonical-schema-boundary` | 69 | 2026-09-16 | docs(journal): fix the pushed-tip clause in the t_74faf12d entry (review round 1, neo) |
-| `wip/neo/kept-rows-settle` | 66 | 2026-09-17 | docs(journal): exact completion timestamp; STATUS regenerated at the final tip (t_8779781f) |
-| `wip/tech-head/catchup-lane-sync` | 66 | 2026-09-17 | docs(journal): exact completion timestamp; STATUS regenerated at the final tip (t_8779781f) |
 | `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
 | `wt/t_f2b584dc` | 64 | 2026-09-16 | docs: regenerate STATUS projection + journal sync for the round-4 text fix |
@@ -111,6 +110,7 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
 - `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
+- `t_a6bf30a8` [todo] FIX (lead, measured): a mid-session `replayCatchUp` materialises claim rows without re-syncing the claim-FTS lane — live recall misses them until a re-syncing write (created 2026-09-17, assignee tech-head)
 
 ## Blockers and stale work
 
@@ -124,12 +124,14 @@ Unmerged work — read the branch before assuming this tree is current.
 |---|---|---|---|
 | [0001](adr/0001-retention-expiry-archival.md) | ADR-0001 — Retention, Expiry & Archival | Approved (owner sign-off 2026-09-10 — Tier-1 invariants §2.2 frozen; `staleness` block deprecated §2.4) | 2026-09-10 |
 | [0002](adr/0002-consolidation.md) | ADR-0002 — Consolidation of claim clusters | Approved (owner sign-off 2026-09-10 — Tier-1 invariant §2.2 frozen) | 2026-09-10 |
-| [0003](adr/0003-claim-fact-identity.md) | ADR-0003 — Fact identity on the claim write path: the library resolves the fact, not the key | (no status line) |  |
-| [0011](adr/0011-claim-record-materialization-block.md) | ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it | Proposed — owner approval is the gate before merge (an additive, optional property; the | 2026-09-15 |
-| [0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md) | `observation.schema.json` covers the wire observation, not the L0 record; the compiled L2 page frontmatter must conform to `page-frontmatter.schema.json` | Proposed — the two fixes this record decides are owner-gated (one publishes a record surface, the other changes an L2 artifact a core verb reads). The boundary statement in `schemas/v0.5.0/README.md` and the boundary-pinning tests shipped with this ADR move **no** published schema byte. | 2026-09-15 |
-| [0015](adr/0015-host-registered-lanes-and-the-substrate-actor-id.md) | Host-registered lanes are not v0.5.0 scopes, and the substrate has exactly one ActorId | Proposed — owner approval is the gate before merge (it states what the v0.5.0 conformance | 2026-09-15 |
-
-**Pending decision:** 0011 (ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it), 0013 (ADR 0013 — `observation.schema.json` covers the wire observation, not the L0 record; the compiled L2 page frontmatter must conform to `page-frontmatter.schema.json`), 0015 (ADR 0015 — Host-registered lanes are not v0.5.0 scopes, and the substrate has exactly one ActorId)
+| [0004](adr/0004-contradiction-and-bi-temporal-lifecycle.md) | ADR-0004 — Contradiction and bi-temporal lifecycle | (no status line) |  |
+| [0005](adr/0005-sources-ingestion-and-federation.md) | ADR-0005 — Sources, connector ingestion and federated reads | (no status line) |  |
+| [0006](adr/0006-export-restore-return-path.md) | ADR-0006 — An export must have a return path: RESTORE.SCOPE | (no status line) |  |
+| [0007](adr/0007-fencing-token-at-the-mutation-boundary.md) | ADR-0007 — A fencing token validated at the brain mutation boundary | (no status line) |  |
+| [0008](adr/0008-host-facing-health-contract.md) | ADR-0008 — A host-facing health contract with a three-state SLO verdict | (no status line) |  |
+| [0010](adr/0010-coffee-reference-adapter.md) | ADR-0010 — Coffee reference adapter: public-surface ports, settle-before-write, and a deterministic local proof | (no status line) |  |
+| [0011](adr/0011-coffee-company-brain-acceptance-gate.md) | ADR-0011 — Coffee company-brain acceptance gate: the packaged artifact, a six-business fixture, and the surface it forced | (no status line) |  |
+| [0016](adr/0016-canonical-state-is-a-projection-of-status.md) | The canonical record's `state` is the writer's projection of `status`, not a caller input | (no status line) |  |
 
 ## Verification state
 
@@ -141,8 +143,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (124 tasks, 9282 events)
-- ⚠️ 64 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (124 tasks, 9256 events)
+- ⚠️ 43 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index
