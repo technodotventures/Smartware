@@ -73,7 +73,11 @@ export function createSmartwareMcpServer(
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ error: error.code, message: error.message }),
+            text: JSON.stringify({
+              error: error.code,
+              message: error.message,
+              ...(error.details ? { details: error.details } : {}),
+            }),
           }],
           isError: true,
         };

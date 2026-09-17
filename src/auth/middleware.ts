@@ -8,6 +8,12 @@ export class ProtocolError extends Error {
   constructor(
     public readonly code: string,
     message: string,
+    /**
+     * Optional structured details for hosts that route on the error
+     * (e.g. fencing refusals carry { op, token, high_water }). Never contains
+     * content or secrets — identifiers and counters only.
+     */
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ProtocolError';

@@ -364,11 +364,84 @@ to the first acknowledged write after Redis returned → **2.8 s**; brain reads 
 app-store fallback with an explicit "provenance requires the brain" note and **never invent
 provenance**.
 
-Residual limit, stated plainly: with a lease alone the window between "guard passed" and
-"write committed" is bounded but non-zero (a process stall of ≥ TTL inside that window). Closing
-it needs a **fencing token validated at the brain's commit boundary** — not implemented; treat
-it as a substrate-surface decision before promising strict no-split-brain under arbitrary
-pauses.
+**Fencing — the residual window is closed at the brain (ADR-0007).** A lease says who *should*
+own the brain; it cannot stop a process that passed its guard from committing after a handoff.
+The brain now validates a monotonic epoch at the mutation boundary, from the same arbiter as the
+lease — one token per ownership acquisition:
+
+```js
+const token = await redis.incr(`brainfence:${brainIdentity}`);   // once per ownership term
+const brain = await SmartwareCore.open({ dataDir, ownerId, fencingToken: token });
+// takeover without reopening the brain: brain.claimFence(token)
+```
+
+The brain persists the highest epoch it has seen (`writer_fence`, inside `smartware.db`) and,
+before any canonical artifact is written, refuses a mutation that presents an older epoch
+(`ProtocolError` `fencing_token_stale`) — or none at all, once the brain has been fenced
+(`fencing_token_missing`). Claim and guard are single SQLite statements against the brain's own
+database, so they serialise with every process that has the brain open. Refusals are counted and
+auditable via `brain.fencingState()`; the host should demote and answer
+`503 { retryable: true, code }` (the pilot does). A brain that never used fencing is unchanged;
+after the first claim, tokenless writes are refused (fail-closed).
+
+Measured before/after on the same harness (resilience gauntlet, drill `lease-loss-steal` phase A
+with a deterministic post-guard stall): the owner is stalled 12 s between its guard and the
+brain call, then frozen (SIGSTOP) for ~2.6 s while the lease is handed to the other replica.
+
+- **Before** (unfenced build `9cbe1fb`; the installed package is capability-probed on `/health`,
+  not just labelled — `fence_supported: false`): the new owner became owner in 2.55 s and
+  committed; on resume the stalled write **committed too** (`201`, accepted, its text present in
+  the canonical evidence JSONL) — the residual window, demonstrated end-to-end. Evidence:
+  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-fencing-before-20260915T083255Z/`.
+- **After** (fenced build `c65b302`, `fence_supported: true`): the new owner claimed epoch 2
+  (in 2 ms) and committed; on resume the stalled write was refused **before any artifact** —
+  `503 fencing_token_stale` (`details {op: observe, token: 1, high_water: 2}`), the evidence
+  JSONL unchanged, the refusal counted in `fencingState()` (`refusals: 1`) and visible in the
+  pilot's lease events — and the two probe writes issued right after the resume were refused as
+  well (zero acknowledged writes after the handoff; no dual-writer sample). Evidence:
+  `/opt/data/workspaces/brain-pilot-evidence/gauntlet-fencing-after-20260915T083414Z/`.
+
+Latency of the fresh-token path (same-session alternated A/B, 5 pairs × 40 writes/arm, fenced vs
+unfenced pins): p50 median **15.96 ms vs 15.62 ms** (+0.34 ms, inside per-run spread; ranges
+12.7–17.8 vs 14.8–29.0 ms overlap), p95 noise-dominated (33.4 vs 47.6 ms medians). The guard is
+one indexed read per mutation; no measurable regression on this path. Evidence:
+`/opt/data/workspaces/brain-pilot-evidence/latency-ab-20260915T083526Z/`.
+
+What this closes: any mutation whose boundary check runs after a newer epoch is claimed —
+including a writer resumed from an arbitrarily long stall between the guard and the brain call.
+
+**The in-mutation window is closed at storage level (ADR-0010).** A process can also be paused
+*inside* a mutation — after the brain's boundary check and its first canonical artifact, before its
+commit signal. The commit signal is now epoch-gated: one immediate SQLite transaction validates the
+writer's epoch against the persisted high-water mark and records the authorization before the
+signal is appended, so a resumed stale writer is refused at the gate; and recovery **rejects —
+never finalizes, never merges** — an uncommitted artifact set from an epoch behind the mark,
+reporting it under `staleEpochRejected` (exposed on the pilot's `/health` as
+`recovery.stale_epoch_rejected`; zero committed mutations, zero manual-review escalations, no
+speculative repair).
+
+Measured on the same harness, drill `storage-fence-in-mutation` (pause inside OBSERVE after the L0
+artifact; process frozen ~2.2 s across a lease handoff; resumed):
+
+- **Before** (build `5d67409`, boundary-fenced but storage-blind — capability-probed
+  `storage_fence_supported: false`): on resume the stale write **committed** (`201`), and the new
+  owner's open-time recovery had already **finalized** the dead writer's set (`recovered: true`):
+  two commit signals for one operation — the merge this closes. Evidence:
+  `/opt/data/workspaces/brain-pilot-evidence/storage-fence-before-20260915T1018Z/`.
+- **After** (build `c852aae`, `storage_fence_supported: true`): the resumed write was refused at the
+  commit gate (`503 fencing_token_stale`, **zero** commit signals for the operation; the partial L0
+  artifact retained), and the new owner's recovery reported the set as
+  `stale_epoch_rejected: [{ reason: epoch_behind_high_water, epoch: 1, high_water: 2, artifacts: 1 }]`
+  — zero committed operations, zero pending, zero manual review. Evidence:
+  `/opt/data/workspaces/brain-pilot-evidence/storage-fence-after-20260915T1020Z/`.
+
+What is still **NOT proven**: artifact-level epoch stamps (attribution rides on the intent, which is
+written first and removed last — not on stamped artifact records); one narrow interleaving can leave
+a duplicate projection line (a pause between the gate and the append with recovery projecting first;
+consumers key on `operation_id` presence); writers without intents (session bookkeeping, `runCommit`
+without a fence) are not epoch-gated; fencing is only as strong as the token issuer: the arbiter
+must be monotonic per acquisition, and single-node Redis is not a consensus store. Full detail:
+ADR-0010.
 
 ## 2. Model one SaaS tenant = one Pod, clients = scopes
 

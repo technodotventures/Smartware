@@ -15,13 +15,14 @@ import { requireActiveSource } from '../ingestion/sources.js';
 import type { SessionStore } from '../session/store.js';
 import { requireSessionCapability, resolveActorFromSession } from './session.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   readAllOpLogEntries,
   readOperationIntent,
   persistOperationIntent,
   removeOperationIntent,
   runRecovery,
+  type MutationFence,
   type ObservationOperationIntent,
 } from '../ops_log/index.js';
 import { checkAttachmentSafety } from '../layer0/attachment_safety.js';
@@ -71,11 +72,11 @@ export interface ObserveResult {
   sequence: number;
 }
 
-/** Synchronous fault hooks used by crash-boundary conformance tests. */
+/** Synchronous or async fault hooks used by crash-boundary conformance tests. */
 export interface ObserveCommitHooks {
-  afterIntent?: (intent: ObservationOperationIntent) => void;
-  afterObservation?: (observation: Observation) => void;
-  afterCommit?: () => void;
+  afterIntent?: (intent: ObservationOperationIntent) => void | Promise<void>;
+  afterObservation?: (observation: Observation) => void | Promise<void>;
+  afterCommit?: () => void | Promise<void>;
 }
 
 function observePayload(
@@ -118,6 +119,7 @@ export async function handleObserve(
   sessionStore?: SessionStore,
   opsDir?: string,
   commitHooks?: ObserveCommitHooks,
+  fence?: MutationFence | null,
 ): Promise<ObserveResult> {
   const now = new Date().toISOString();
 
@@ -239,6 +241,7 @@ export async function handleObserve(
         opsDir,
         evidenceDir,
         quarantineDir: '',
+        fence: fence ?? undefined,
       });
       const recoveredCommit = committedResult();
       if (recoveredCommit) return recoveredCommit;
@@ -334,6 +337,7 @@ export async function handleObserve(
   };
 
   const withIntegrity = assignIntegrity(obs, config.writer_id, seq, prevHash);
+  const fenceStamp = fence?.stamp() ?? null;
   const intent: ObservationOperationIntent | null = operationId && opsDir
     ? {
         version: 1,
@@ -342,6 +346,7 @@ export async function handleObserve(
         op: 'observe',
         payload_hash: payloadHash,
         prepared_at: now,
+        ...(fenceStamp ? { fence: fenceStamp } : {}),
         expected: {
           surface: 'l0',
           observation_id: withIntegrity.id,
@@ -361,17 +366,17 @@ export async function handleObserve(
     : null;
   if (intent && opsDir) {
     persistOperationIntent(opsDir, intent, true);
-    commitHooks?.afterIntent?.(intent);
+    await commitHooks?.afterIntent?.(intent);
   }
   appendObservation(evidenceDir, withIntegrity);
   layer0.insertOrSkip(withIntegrity);
-  commitHooks?.afterObservation?.(withIntegrity);
+  await commitHooks?.afterObservation?.(withIntegrity);
 
   // The ops-log entry is the durable commit signal. A process interruption
   // after L0 can be finalized only when the persisted intent matches the
   // artifact identity, payload hash, integrity hash, and chain position.
   if (opsDir && operationId) {
-    appendOpLogEntry(opsDir, {
+    appendCommittedOpLogEntry(opsDir, {
       operation_id: operationId,
       actor_id: operationActorId,
       timestamp: now,
@@ -384,8 +389,8 @@ export async function handleObserve(
         status: withIntegrity.status,
         sequence: withIntegrity.integrity.sequence,
       },
-    });
-    commitHooks?.afterCommit?.();
+    }, fence);
+    await commitHooks?.afterCommit?.();
     removeOperationIntent(opsDir, operationId);
   }
 

@@ -63,10 +63,12 @@ import type { Actor, Observation } from './layer0/types.js';
 import type { ClaimRelation, EpistemicTag } from './layer1/types.js';
 import { epistemicToTag } from './layer1/types.js';
 import { runDefaultDream, type DreamResult } from './dream/phases.js';
-import { runRecovery } from './ops_log/recovery.js';
+import { runRecovery, type RecoveryReport } from './ops_log/recovery.js';
+import type { MutationFence } from './ops_log/commit.js';
 import { ensurePrivateDirectory } from './storage/private-fs.js';
+import { FenceStore } from './storage/fence.js';
 
-import { handleObserve, type ObserveParams, type ObserveResult } from './protocol/observe.js';
+import { handleObserve, type ObserveParams, type ObserveResult, type ObserveCommitHooks } from './protocol/observe.js';
 import {
   handleQuery,
   recallMinimumConfidence,
@@ -133,6 +135,33 @@ import {
 export interface SmartwareCoreOptions {
   dataDir: string;
   ownerId?: string;
+  /**
+   * Fencing epoch for this writer (ADR-0007). When present, the writer is bound to this
+   * monotonic token: it is claimed at open (a stale owner fails fast), and every canonical
+   * mutation is refused before any artifact is written if the brain has already seen a
+   * higher epoch. Omit for legacy, unfenced operation.
+   */
+  fencingToken?: number;
+  /**
+   * Crash-boundary test seam (not for production use): hooks fired inside OBSERVE's commit
+   * sequence (after the intent, after the L0 artifact, after the commit signal). The resilience
+   * gauntlet uses them to pause a process deterministically mid-mutation. No effect when omitted.
+   */
+  commitHooks?: ObserveCommitHooks;
+}
+
+/** Public fencing state of a core writer (ADR-0007). */
+export interface FencingState {
+  /** True once this brain has seen any claim (i.e. fencing was adopted). */
+  enabled: boolean;
+  /** The epoch this writer presented (null when it has none). */
+  token: number | null;
+  /** The highest epoch this brain has seen. */
+  high_water: number;
+  /** Canonical mutations refused by the guard so far. */
+  refusals: number;
+  /** The most recent refusal, or null. */
+  last_refusal: { op: string; token: number | null; high_water: number; at: string } | null;
 }
 
 // Public type surface for the source registry (re-exported for hosts).
@@ -350,8 +379,17 @@ export class SmartwareCore {
   /** Durable compile queue + fingerprint index (async-compile path, §9.1). */
   private compileQueue: CompileQueue | null = null;
   private fingerprintIndex: FingerprintIndex | null = null;
+  /** Fencing epoch state (ADR-0007); null token = legacy unfenced writer. */
+  private readonly fence: FenceStore;
+  private fenceToken: number | null = null;
+  /** The brain's canonical writer identity (config.writer_id) — stamped with the epoch. */
+  private writerId = '';
+  /** Crash-boundary test seam forwarded into OBSERVE (see SmartwareCoreOptions.commitHooks). */
+  private observeHooks: ObserveCommitHooks | null = null;
+  /** Recovery report captured at open (ADR-0010); see lastRecoveryReport(). */
+  private openRecoveryReport: RecoveryReport | null = null;
 
-  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore) {
+  private constructor(dataDir: string, layer0: Layer0Index, store: ClaimStore, searchIndex: SearchIndex, sessionStore: SessionStore, fence: FenceStore) {
     this.dataDir = dataDir;
     this.evidenceDir = path.join(dataDir, 'evidence');
     this.wikiDir = path.join(dataDir, 'wiki');
@@ -360,6 +398,7 @@ export class SmartwareCore {
     this.store = store;
     this.searchIndex = searchIndex;
     this.sessionStore = sessionStore;
+    this.fence = fence;
     this.previewStore = new CascadePreviewStore(path.join(dataDir, 'indices', 'previews.db'));
     // Ingestion ledger (batch receipts + stream cursors). Operational state:
     // see the honesty note in src/ingestion/store.ts.
@@ -377,21 +416,39 @@ export class SmartwareCore {
     const store = new ClaimStore(dbPath);
     const searchIndex = new SearchIndex(dbPath);
     const sessionStore = new SessionStore(dbPath);
+    const fence = FenceStore.open(dbPath);
 
-    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore);
+    const core = new SmartwareCore(options.dataDir, layer0, store, searchIndex, sessionStore, fence);
+    // Canonical writer identity + the crash-boundary hook seam (ADR-0010 / test harness).
+    core.writerId = loadConfig(options.dataDir).writer_id;
+    core.observeHooks = options.commitHooks ?? null;
+    // ADR-0007: a fenced writer claims its epoch before any recovery or derived-index
+    // work. A stale owner fails fast here — it must not run recovery or write anything.
+    if (options.fencingToken !== undefined) {
+      try {
+        core.adoptFenceToken(options.fencingToken, 'open');
+      } catch (error) {
+        core.close();
+        throw error;
+      }
+    }
     // PR-14: tell the ClaimStore where the L1 JSONL canonical lives. Every
     // subsequent insertClaim will also append a versioned record.
     store.setDataDir(options.dataDir);
     // Finalize only exact intent-backed canonical artifacts before derived
     // indices catch up. Ambiguous operations remain untouched for Dream/manual
-    // review; startup never invents a completion decision.
+    // review; startup never invents a completion decision. Storage-level fencing
+    // (ADR-0010): uncommitted sets from an epoch behind the high-water mark are
+    // rejected as a set and reported — never finalized, never merged.
     const recovery = runRecovery({
       opsDir: core.opsDir,
       evidenceDir: core.evidenceDir,
       claimsDir: core.dataDir,
       wikiDir: core.wikiDir,
       quarantineDir: path.join(core.dataDir, 'quarantine', 'operations'),
+      fence: core.mutationFence(),
     });
+    core.openRecoveryReport = recovery;
     layer0.catchUp(core.evidenceDir);
     if (recovery.pendingOperations.length === 0) {
       await replayCatchUp(core.evidenceDir, store, layer0);
@@ -445,6 +502,77 @@ export class SmartwareCore {
     return core;
   }
 
+  /**
+   * Fencing (ADR-0007). A host that arbitrates brain ownership outside the brain
+   * (a lease with a monotonic epoch) binds its writer to that epoch here. The brain
+   * persists the highest epoch it has seen and refuses any canonical mutation from a
+   * writer whose epoch is older — before any artifact is written.
+   */
+
+  /** Register a new ownership epoch on this writer (takeover without reopen). */
+  claimFence(token: number): FencingState {
+    this.adoptFenceToken(token, 'claim');
+    return this.fencingState();
+  }
+
+  /** The auditable fencing state of this brain (session token + persisted high-water). */
+  fencingState(): FencingState {
+    const state = this.fence.state();
+    return {
+      enabled: state.high_water > 0,
+      token: this.fenceToken,
+      high_water: state.high_water,
+      refusals: state.refusals,
+      last_refusal: state.last_refusal,
+    };
+  }
+
+  private adoptFenceToken(token: number, op: string): void {
+    this.fence.claim(token, op);
+    this.fenceToken = token;
+  }
+
+  /**
+   * The mutation-boundary guard: every canonical mutation calls this first, so a
+   * stale writer is refused with a code-carrying ProtocolError BEFORE any artifact
+   * (evidence JSONL, claim version, ops entry) is touched.
+   */
+  private fenceGuard(op: string): void {
+    this.fence.guard(this.fenceToken, op);
+  }
+
+  /**
+   * The mutation fence adapter (ADR-0010) handed to every canonical writer: the writer-path
+   * commit gate (`stamp` + `guardCommit`) and the recovery dispositions (`highWater`,
+   * `authorization`, `authorizeAtEpoch`) over this brain's fence store.
+   */
+  private mutationFence(): MutationFence {
+    return {
+      stamp: () => (this.fenceToken === null
+        ? null
+        : { epoch: this.fenceToken, writer_id: this.writerId }),
+      guardCommit: (operationIds: string[], op: string) => {
+        const stamp = this.fenceToken === null
+          ? null
+          : { epoch: this.fenceToken, writer_id: this.writerId };
+        this.fence.guardCommit(operationIds, stamp, op);
+      },
+      highWater: () => this.fence.highWater(),
+      authorization: (operationId: string) => this.fence.authorization(operationId),
+      authorizeAtEpoch: (operationIds: string[], epoch: number, writerId: string) =>
+        this.fence.authorizeAtEpoch(operationIds, epoch, writerId),
+    };
+  }
+
+  /**
+   * The recovery report from this writer's open (ADR-0010 surface): how the brain classified
+   * intent-backed state when it last opened, including `staleEpochRejected` — uncommitted sets
+   * from an epoch behind the high-water mark, rejected and never merged. Null before open.
+   */
+  lastRecoveryReport(): RecoveryReport | null {
+    return this.openRecoveryReport;
+  }
+
   getConfig(): SmartwareConfig {
     return loadConfig(this.dataDir);
   }
@@ -461,6 +589,7 @@ export class SmartwareCore {
    * those concepts to Smartware's profile contract.
    */
   ensureScopes(entries: ScopeEntry[]): void {
+    this.fenceGuard('ensureScopes');
     const config = this.getConfig();
     const existing = new Set(config.scopes.map(scope => scope.id));
     const additions = entries.filter(entry => !existing.has(entry.id));
@@ -478,6 +607,7 @@ export class SmartwareCore {
    * fields and preserves `created_at` — never duplicates the entry.
    */
   registerSource(params: RegisterSourceParams): SourceEntry {
+    this.fenceGuard('registerSource');
     return registerSourceEntry(this.dataDir, params);
   }
 
@@ -499,6 +629,7 @@ export class SmartwareCore {
   }
 
   createPodProfile(podId: string, name = 'Pod'): SmartwarePodProfile {
+    this.fenceGuard('createPodProfile');
     const config = this.getConfig();
     const scope = (suffix: string) => `pod/${podId}/${suffix}`;
     const scopes = {
@@ -526,6 +657,7 @@ export class SmartwareCore {
   }
 
   ensureTrustedClientGrant(actorId: string, actorType: 'agent' | 'person' | 'system', scopes: string[]): Grant {
+    this.fenceGuard('ensureTrustedClientGrant');
     const existing = getGrantForActor(actorId, this.getConfig());
     if (existing) {
       const config = this.getConfig();
@@ -563,6 +695,8 @@ export class SmartwareCore {
   }
 
   async observe(params: ObserveParams): Promise<ObserveResult> {
+    this.fenceGuard('observe');
+    const hostHooks = this.observeHooks;
     return handleObserve(
       params,
       this.evidenceDir,
@@ -571,9 +705,15 @@ export class SmartwareCore {
       this.sessionStore,
       this.opsDir,
       {
-        // Sync-raw freshness (spec §10a) + async-compile (spec §9.1).
-        afterObservation: obs => this.afterObservationCommitted(obs),
+        ...(hostHooks ?? {}),
+        afterObservation: obs => {
+          // Sync-raw freshness (spec §10a) + async-compile (spec §9.1), then the host hook
+          // (crash-boundary test seam; may be async — awaited inside handleObserve).
+          this.afterObservationCommitted(obs);
+          return hostHooks?.afterObservation?.(obs);
+        },
       },
+      this.mutationFence(),
     );
   }
 
@@ -598,6 +738,7 @@ export class SmartwareCore {
    * before anything is written.
    */
   async ingest(params: IngestParams, hooks?: IngestHooks): Promise<IngestResult> {
+    this.fenceGuard('ingest');
     const deps: IngestDeps = {
       evidenceDir: this.evidenceDir,
       layer0: this.layer0,
@@ -1075,6 +1216,7 @@ export class SmartwareCore {
   }
 
   async compile(params: CompileParams): Promise<CompileHandlerResult> {
+    this.fenceGuard('compile');
     return handleCompile(
       params,
       this.evidenceDir,
@@ -1084,7 +1226,7 @@ export class SmartwareCore {
       this.searchIndex,
       this.getConfig(),
       this.dataDir,
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
   }
 
@@ -1101,6 +1243,7 @@ export class SmartwareCore {
   async drainCompileQueue(
     opts: { limit?: number; useLLM?: boolean } = {},
   ): Promise<CompileBatchResult | null> {
+    this.fenceGuard('drainCompileQueue');
     if (!this.compileQueue || !this.fingerprintIndex) return null;
     const ctx: CompileWorkerContext = {
       evidenceDir: this.evidenceDir,
@@ -1110,6 +1253,7 @@ export class SmartwareCore {
       searchIndex: this.searchIndex,
       config: this.getConfig(),
       opsDir: this.opsDir,
+      fence: this.mutationFence(),
       queue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
     };
@@ -1137,13 +1281,14 @@ export class SmartwareCore {
    * scheduler and does not pass a canonical L2 recompile callback.
    */
   dream(params: SmartwareDreamParams): DreamResult {
+    this.fenceGuard('dream');
     const config = this.getConfig();
     if (!isOwner(params.actor.id, config)) {
       throw new ProtocolError('owner_required', 'Dream is an owner-only operator command');
     }
     const substrateId = `substrate:${config.instance_id.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
     return runDefaultDream(
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
       substrateId,
       params.scope,
       {
@@ -1152,6 +1297,7 @@ export class SmartwareCore {
         wikiDir: this.wikiDir,
         quarantineDir: path.join(this.dataDir, 'quarantine', 'operations'),
         reportDir: path.join(this.dataDir, 'derived', 'dream'),
+        fence: this.mutationFence(),
       },
     );
   }
@@ -1311,6 +1457,7 @@ export class SmartwareCore {
   }
 
   async correct(params: CorrectParams): Promise<CorrectResult> {
+    this.fenceGuard('correct');
     const result = await handleCorrect(params, this.evidenceDir, this.layer0, this.store, this.getConfig());
     // Keep the claim-FTS surface truthful after a correction (mirrors
     // CONSOLIDATE): handleCorrect appends a NEW claim id via replay, and without
@@ -1322,23 +1469,25 @@ export class SmartwareCore {
   }
 
   async revise(params: ReviseParams): Promise<ReviseResult> {
+    this.fenceGuard('revise');
     return handleReviseSpec(
       params,
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
   }
 
   async forget(params: ForgetParams): Promise<ForgetResult> {
+    this.fenceGuard('forget');
     const result = await handleForget(
       params,
       this.evidenceDir,
       this.layer0,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
     // Keep the raw-search window truthful after mutations: a terminal
     // observation (tombstone/redaction → tombstoned/redacted) must leave the
@@ -1360,6 +1509,7 @@ export class SmartwareCore {
     params: ForgetScopeParams,
     options: { semanticStore?: SemanticRecordStore | null } = {},
   ): Promise<ForgetScopeResult> {
+    this.fenceGuard('forgetScope');
     const config = this.getConfig();
     return handleForgetScope(params, {
       evidenceDir: this.evidenceDir,
@@ -1368,7 +1518,7 @@ export class SmartwareCore {
       store: this.store,
       searchIndex: this.searchIndex,
       config,
-      commitCtx: { opsDir: this.opsDir },
+      commitCtx: { opsDir: this.opsDir, fence: this.mutationFence() },
       semanticStore: options.semanticStore ?? null,
       compileQueue: this.compileQueue,
       fingerprintIndex: this.fingerprintIndex,
@@ -1413,6 +1563,7 @@ export class SmartwareCore {
    * catches up from the canonical records, exactly like a wipe-and-rebuild.
    */
   async restoreScope(params: RestoreScopeParams): Promise<RestoreScopeResult> {
+    this.fenceGuard('restoreScope');
     const config = this.getConfig();
     const result = await handleRestoreScope(params, {
       evidenceDir: this.evidenceDir,
@@ -1420,6 +1571,7 @@ export class SmartwareCore {
       opsDir: this.opsDir,
       store: this.store,
       config,
+      fence: this.mutationFence(),
     });
     if (result.status === 'restored') {
       // Full Layer-0 rebuild, not an incremental catch-up: restored records carry
@@ -1441,6 +1593,7 @@ export class SmartwareCore {
    * no new expired records. Host-triggered, like `drainCompileQueue`.
    */
   async expireRetention(params: ExpireRetentionParams): Promise<ExpireRetentionResult> {
+    this.fenceGuard('expireRetention');
     const config = this.getConfig();
     return handleExpireRetention(params, {
       evidenceDir: this.evidenceDir,
@@ -1449,6 +1602,7 @@ export class SmartwareCore {
       store: this.store,
       config,
       opsDir: this.opsDir,
+      fence: this.mutationFence(),
     });
   }
 
@@ -1458,12 +1612,13 @@ export class SmartwareCore {
    * tombstoning (not deleting) the inputs.
    */
   async consolidate(params: ConsolidateParams): Promise<ConsolidateResult> {
+    this.fenceGuard('consolidate');
     const result = await handleConsolidate(
       params,
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
     // Keep the claim-FTS surface truthful: the consolidated claim must be
     // findable and the tombstoned inputs must leave the index.
@@ -1486,30 +1641,33 @@ export class SmartwareCore {
   }
 
   async revive(params: ReviveParams): Promise<ReviveResult> {
+    this.fenceGuard('revive');
     return handleRevive(
       params,
       this.dataDir,
       this.store,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
       this.store.getDB(),
     );
   }
 
   async endorse(params: EndorseParams): Promise<EndorseResult> {
+    this.fenceGuard('endorse');
     return handleEndorse(
       params,
       this.dataDir,
       this.store,
       this.previewStore,
       this.getConfig(),
-      { opsDir: this.opsDir },
+      { opsDir: this.opsDir, fence: this.mutationFence() },
     );
   }
 
   async quarantineReview(
     params: QuarantineReviewParams,
   ): Promise<QuarantineReviewResult> {
+    this.fenceGuard('quarantineReview');
     const result = await handleQuarantineReview(
       params,
       this.evidenceDir,
@@ -1524,6 +1682,7 @@ export class SmartwareCore {
   }
 
   async grant(params: GrantParams): Promise<GrantResult> {
+    this.fenceGuard('grant');
     return handleGrant(
       params,
       this.evidenceDir,
@@ -1534,6 +1693,7 @@ export class SmartwareCore {
   }
 
   async revoke(params: RevokeParams): Promise<RevokeResult> {
+    this.fenceGuard('revoke');
     return handleRevoke(
       params,
       this.evidenceDir,
@@ -1586,6 +1746,7 @@ export class SmartwareCore {
     }
     this.compileQueue?.close();
     this.fingerprintIndex?.close();
+    this.fence.close();
     this.layer0.close();
     this.store.close();
     this.searchIndex.close();

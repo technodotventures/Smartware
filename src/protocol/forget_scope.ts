@@ -59,7 +59,7 @@ import {
   type ForgottenClaimVersion,
 } from '../layer1/jsonl.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   persistOperationIntent,
   readAllOpLogEntries,
@@ -321,6 +321,7 @@ export async function handleForgetScope(
         evidenceDir,
         claimsDir: dataDir,
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -438,6 +439,7 @@ export async function handleForgetScope(
   // ── Intent (durable WAL) BEFORE any mutation, matching handleForget.
   let intent: ForgetScopeOperationIntent | null = null;
   if (params.operation_id && commitCtx) {
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     intent = {
       version: 1,
       operation_id: params.operation_id,
@@ -445,6 +447,7 @@ export async function handleForgetScope(
       op: 'forget.scope',
       payload_hash: payloadHash,
       prepared_at: now,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'forget.scope',
         audit: {
@@ -608,7 +611,7 @@ export async function handleForgetScope(
 
   // ── ONE ops-log entry carrying the exact counts.
   if (params.operation_id && commitCtx && intent) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: now,
@@ -629,7 +632,7 @@ export async function handleForgetScope(
         attestation: params.attestation ?? null,
         hold_opened: params.reason === 'offboarding',
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   }

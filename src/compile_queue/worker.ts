@@ -40,6 +40,7 @@ import {
   openOpsIndex,
   readAllOpLogEntries,
   type CommitContext,
+  type MutationFence,
   type OpLogEntry,
   type OpsIndex,
 } from '../ops_log/index.js';
@@ -59,6 +60,8 @@ export interface CompileWorkerContext {
   searchIndex: SearchIndex;
   config: SmartwareConfig;
   opsDir?: string;
+  /** Storage-level fencing (ADR-0010); absent = unfenced caller. */
+  fence?: MutationFence | null;
   queue: CompileQueue;
   fingerprintIndex: FingerprintIndex;
 }
@@ -114,7 +117,9 @@ export async function runCompileBatch(
   }
 
   const actorId = podActorId(ctx.config);
-  const commitCtx: CommitContext | undefined = ctx.opsDir ? { opsDir: ctx.opsDir } : undefined;
+  const commitCtx: CommitContext | undefined = ctx.opsDir
+    ? { opsDir: ctx.opsDir, fence: ctx.fence ?? null }
+    : undefined;
   const pendingRecords: ActiveClaimVersion[] = [];
   const pendingOpEntries: OpLogEntry[] = [];
   const produce = opts.produce ?? produceObservationClaims;

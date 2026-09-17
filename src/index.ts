@@ -194,7 +194,11 @@ async function start(): Promise<void> {
       .catch((err: unknown): MCPContent => {
         if (err instanceof ProtocolError) {
           return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ error: err.code, message: err.message }) }] as [{ type: 'text'; text: string }],
+            content: [{ type: 'text' as const, text: JSON.stringify({
+              error: err.code,
+              message: err.message,
+              ...(err.details ? { details: err.details } : {}),
+            }) }] as [{ type: 'text'; text: string }],
           };
         }
         const msg = err instanceof Error ? err.message : String(err);

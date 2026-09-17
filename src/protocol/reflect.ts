@@ -33,8 +33,8 @@ import { extractDeterministic } from '../extraction/deterministic.js';
 import { extractClaimsLLM } from '../extraction/llm.js';
 import { computePayloadHash } from '../layer0/idempotency.js';
 import {
-  appendOpLogEntries,
-  appendOpLogEntry,
+  appendCommittedOpLogEntries,
+  appendCommittedOpLogEntry,
   defaultOpsIndexPath,
   openOpsIndex,
   OPERATION_ID_PATTERN,
@@ -227,7 +227,7 @@ export function commitReflectClaimBatch(
   hooks?: ReflectCommitHooks,
 ): void {
   if (records.length > 0) appendClaimVersions(dataDir, records);
-  if (commitCtx && opEntries.length > 0) appendOpLogEntries(commitCtx.opsDir, opEntries);
+  if (commitCtx && opEntries.length > 0) appendCommittedOpLogEntries(commitCtx.opsDir, opEntries, commitCtx.fence);
   for (const record of records) hooks?.afterClaimVersion?.(record);
   if (records.length > 0 || opEntries.length > 0) hooks?.afterCommit?.();
 }
@@ -622,7 +622,7 @@ export async function handleCompile(
       },
     };
     if (params.operation_id && commitCtx && !parentEntry) {
-      appendOpLogEntry(commitCtx.opsDir, {
+      appendCommittedOpLogEntry(commitCtx.opsDir, {
         operation_id: params.operation_id,
         actor_id: params.actor.id,
         timestamp: new Date().toISOString(),
@@ -634,7 +634,7 @@ export async function handleCompile(
           pages_compiled: 0,
           synthesis_deferred: true,
         },
-      });
+      }, commitCtx.fence);
     }
     return handlerResult;
   }
@@ -667,7 +667,7 @@ export async function handleCompile(
     llm_extraction_skipped_sensitive: reflectionStats.llmSkippedSensitive,
   };
   if (params.operation_id && commitCtx && !parentEntry) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: new Date().toISOString(),
@@ -678,7 +678,7 @@ export async function handleCompile(
         claims_created: reflectionStats.claimsCreated,
         pages_compiled: compiled.pages.length,
       },
-    });
+    }, commitCtx.fence);
   }
 
   const handlerResult: CompileHandlerResult = {

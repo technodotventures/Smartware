@@ -34,7 +34,8 @@ import { appendObservationAt, readAll } from '../layer0/log.js';
 import type { Actor, Observation } from '../layer0/types.js';
 import { appendClaimVersions, iterAllClaimVersions, type ClaimVersionRecord } from '../layer1/jsonl.js';
 import type { ClaimStore } from '../layer1/store.js';
-import { appendOpLogEntries } from '../ops_log/log.js';
+import { appendCommittedOpLogEntries } from '../ops_log/log.js';
+import type { MutationFence } from '../ops_log/commit.js';
 import type { OpLogEntry } from '../ops_log/types.js';
 import { OPERATION_ID_PATTERN } from '../ops_log/types.js';
 import { ensurePrivateDirectory, writePrivateFile } from '../storage/private-fs.js';
@@ -83,6 +84,8 @@ export interface RestoreScopeDeps {
   opsDir: string;
   store: ClaimStore;
   config: SmartwareConfig;
+  /** Storage-level fencing (ADR-0010); absent = unfenced caller. */
+  fence?: MutationFence | null;
 }
 
 function parsePackageFile(packageDir: string, name: ContentFileName): { text: string; records: unknown[] } {
@@ -267,7 +270,7 @@ export async function handleRestoreScope(
     appendObservationAt(evidenceDir, stamp.slice(0, 10), observation);
   }
   appendClaimVersions(dataDir, claims);
-  appendOpLogEntries(opsDir, operations);
+  appendCommittedOpLogEntries(opsDir, operations, deps.fence);
   ensurePrivateDirectory(importsDir);
 
   return {

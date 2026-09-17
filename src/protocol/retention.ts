@@ -21,7 +21,7 @@ import { isScopeHeld, loadConfig } from '../config.js';
 import { replayCatchUp } from '../layer1/replay.js';
 import { requireGrant, ProtocolError } from '../auth/middleware.js';
 import { readLatestVersion, appendClaimVersion, type ForgottenClaimVersion } from '../layer1/jsonl.js';
-import { appendOpLogEntry, OPERATION_ID_PATTERN, readAllOpLogEntries } from '../ops_log/index.js';
+import { appendCommittedOpLogEntry, OPERATION_ID_PATTERN, readAllOpLogEntries, type MutationFence } from '../ops_log/index.js';
 import { SMARTWARE_VERSION } from '../version.js';
 
 /** Parse the ISO 8601 "PnD" duration emitted by `toRetentionDurationString`. */
@@ -67,6 +67,8 @@ export interface RetentionDeps {
   store: ClaimStore;
   config: SmartwareConfig;
   opsDir: string;
+  /** Storage-level fencing (ADR-0010); absent = unfenced caller. */
+  fence?: MutationFence | null;
 }
 
 function buildTombstoneMutation(
@@ -261,7 +263,7 @@ export async function handleExpireRetention(
   }
 
   if (params.operation_id) {
-    appendOpLogEntry(deps.opsDir, {
+    appendCommittedOpLogEntry(deps.opsDir, {
       operation_id: params.operation_id,
       actor_id: operationActorId,
       timestamp: now,
@@ -272,7 +274,7 @@ export async function handleExpireRetention(
         claims_retracted: claimsRetracted,
         as_of: asOf.toISOString(),
       },
-    });
+    }, deps.fence);
   }
 
   return {

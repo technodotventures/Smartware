@@ -22,7 +22,7 @@ import {
 } from '../layer1/jsonl.js';
 import { revalidateOnRevive } from '../layer1/effective_current.js';
 import {
-  appendOpLogEntry,
+  appendCommittedOpLogEntry,
   OPERATION_ID_PATTERN,
   persistOperationIntent,
   readAllOpLogEntries,
@@ -185,6 +185,7 @@ export async function handleForget(
         evidenceDir,
         ...(storeDataDir ? { claimsDir: storeDataDir } : {}),
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -326,6 +327,7 @@ export async function handleForget(
   let intent: ForgetOperationIntent | null = null;
   if (params.operation_id && commitCtx) {
     const claimRecordHash = forgottenVersion ? computePayloadHash(forgottenVersion) : undefined;
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     intent = {
       version: 1,
       operation_id: params.operation_id,
@@ -333,6 +335,7 @@ export async function handleForget(
       op: 'forget',
       payload_hash: payloadHash,
       prepared_at: now,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'forget',
         audit: {
@@ -383,7 +386,7 @@ export async function handleForget(
   await replayCatchUp(evidenceDir, store, layer0, config);
 
   if (params.operation_id && commitCtx && intent) {
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: now,
@@ -399,7 +402,7 @@ export async function handleForget(
         claims_retracted: intent.result.claims_retracted,
         claims_reduced: intent.result.claims_reduced,
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   }
@@ -521,6 +524,7 @@ export async function handleRevive(
         evidenceDir: '',
         claimsDir: dataDir,
         quarantineDir: '',
+        fence: commitCtx.fence ?? undefined,
       });
       const recovered = committedResult();
       if (recovered) return recovered;
@@ -596,6 +600,7 @@ export async function handleRevive(
 
   if (commitCtx) {
     const recordHash = computePayloadHash(revived);
+    const fenceStamp = commitCtx.fence?.stamp() ?? null;
     const intent: ReviveOperationIntent = {
       version: 1,
       operation_id: params.operation_id,
@@ -603,6 +608,7 @@ export async function handleRevive(
       op: 'revive',
       payload_hash: payloadHash,
       prepared_at: preparedAt,
+      ...(fenceStamp ? { fence: fenceStamp } : {}),
       expected: {
         surface: 'l1',
         claim_id: revived.claim_id,
@@ -625,7 +631,7 @@ export async function handleRevive(
     commitHooks?.afterIntent?.(intent);
     appendClaimVersion(dataDir, revived);
     commitHooks?.afterClaimVersion?.(revived);
-    appendOpLogEntry(commitCtx.opsDir, {
+    appendCommittedOpLogEntry(commitCtx.opsDir, {
       operation_id: params.operation_id,
       actor_id: params.actor.id,
       timestamp: preparedAt,
@@ -638,7 +644,7 @@ export async function handleRevive(
         invalidated_edges: invalidatedEdges,
         record_hash: recordHash,
       },
-    });
+    }, commitCtx.fence);
     commitHooks?.afterCommit?.();
     removeOperationIntent(commitCtx.opsDir, params.operation_id);
   } else {
