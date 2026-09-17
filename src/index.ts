@@ -607,6 +607,15 @@ async function start(): Promise<void> {
         store,
         freshConfig,
         { opsDir },
+        // REVISE appends a claim version and writes no index; the handler
+        // re-syncs the revised claim's scope when it is given the lane. Pass
+        // ours so this surface inherits the repair exactly as
+        // SmartwareCore.revise does (kanban t_dae50f51 — the verb-level half of
+        // the t_a6bf30a8 decision that put the catch-up repair in the
+        // handlers).
+        undefined,
+        undefined,
+        searchIndex,
       );
     }, 'revise'),
   );

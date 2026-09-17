@@ -1457,6 +1457,17 @@ export class SmartwareCore {
       this.store,
       this.getConfig(),
       { opsDir: this.opsDir },
+      // REVISE re-syncs the revised claim's scope in the handler (it appends a
+      // claim version, writes no index, and a wrapper-level repair reaches this
+      // dispatcher only). Pass the lane so this surface and `src/index.ts`'s
+      // MCP tool share the one repair instead of each owning half of it —
+      // kanban t_dae50f51, following the t_a6bf30a8 placement decision. PR #29
+      // (open, not on this base) adds the same repair at the wrapper level;
+      // when both land, keep the handler's — it is the one the MCP surface
+      // gets too.
+      undefined,
+      undefined,
+      this.searchIndex,
     );
   }
 
