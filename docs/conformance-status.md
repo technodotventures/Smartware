@@ -35,6 +35,57 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-17 on Node v26.5.1 for **the page YAML serialiser's remaining write-boundary
+losses** (`wip/neo/frontmatter-write-residuals @ 4a30730`, stacked on the still-unmerged
+`wip/neo/frontmatter-coercion-depth @ c740511`; kanban `t_0e19036e` — a writer + guard change in
+one file, so **no published schema byte moves**, `SHA256SUMS` unchanged): **572 tests across 80
+files**, 31 schema files. The delta over the entry below is 7 tests in one new file
+(`test/layer2/l2-frontmatter-write-residuals.test.ts`; one stale clause in the sibling pin's
+header comment is corrected to match). The independent VERIFY `t_5708fed6` (§4) measured six
+shapes still below this boundary — all pre-existing, identical on both arms it tested — and each
+is decided here, the guard now refusing every shape the writer cannot carry back and supporting
+the one it can:
+
+- a non-string scalar as an **array element** (`meta: [1, 2]`, `['b', true]`, `['a', null]`) was
+  written through `String(item)` and read back as a string, and a null *first* item additionally
+  raised a raw `TypeError: Cannot convert undefined or null to object` with no field name.
+  REFUSED, naming `path[index]` (`page field "meta[0]" holds a number, …`).
+- an **array as an array element** (`['b', []], ['b', ['x']]`, and the pure nested sequence
+  `[['x']]`) was mangled (`String([])` → `''`; `Object.entries` → `0: …` lines) and never read
+  back. REFUSED too — this **supersedes the nested-sequence half of the entry below's "remaining
+  limits"**, where it is still written and garbled: the shape is contract-legal only at
+  undeclared notice-item keys, which is exactly the class the guard refuses rather than flattens
+  (the C2 reasoning of `t_5768425d`). The `|-`/`|+`/`>` half of that sentence still stands and
+  stays with `t_6fc254cd`.
+- an **empty object item** (`notices: [{}]`) degraded to `''`. REFUSED, naming the item.
+- a **multi-line string as an array element** (`aliases: ['a\nb']`) is contract-legal
+  (`aliases.items` is a plain string) and was silently destroyed — the writer quoted the element
+  across lines and the whole array read back as one string. **SUPPORTED**: the writer now emits
+  the block form (the `- <str>` item form, and the `- |` block form for multi-line elements) that
+  the reader has decoded since `t_cf744a8e`'s shape 6, and a hand-authored block-array page is no
+  longer corrupted on re-serialise.
+
+Non-tautological: the pin file (sha256
+`8190c7821dc57e0f734789efe2c5f2942f0585a835a9f9682afaa13980c167b2`) is **5 failed | 2 passed (7)**
+in a worktree at `c740511` with the fix absent (the 5 feature pins fail; the 2 controls pass on
+both arms) and **7 passed (7)** on the fix; the independent probe's 5569 rows move exactly 208 —
+51 `LOSS → PASS` (every one a `S2.aliases_elem` newline string) and 157 `STATUS_MOVED_OTHER` (81
+`LOSS_UNEXPLAINED`, 36 `LOSS_nested_sequence`, 19 `LOSS_empty_object_item`, 8
+`LOSS_scalar_array_type_change`, 8 `MEASURED_LOSS`, 5 `THREW_UNNAMED` → `GUARDED`, every one
+naming a concrete path) — with **0 REGRESSIONS, 0 rows whose read-back moved without a status
+move, 0 OVER_REFUSED** (every must-work control still round-trips and validates) and the
+compile/endorse re-serialise path clean (the reader cannot produce a refused shape; 6/6
+`R.reserialise` rows CLEAN). A byte-level re-run of the same corpus shows emitted frontmatter
+byte-identical on 5256 rows; every byte change is on a row whose status moved, plus one row
+(`'a\n \nb'`) whose status was and stays LOSS. Remaining at this tip: that string loses the space
+on its whitespace-only line at four positions — pre-existing reader behaviour (`readBlockScalar`,
+identical on both arms; the C4 half of `t_6fc254cd`, not in this ancestry) — and `tags: ['123']`
+still fails the published `Tag` pattern (a contract refusal, not a serialiser defect). Gate:
+`npm run build` exit 0; focused `test/layer2` **5 files / 33 tests**; full suite **80 files / 572
+tests exit 0** (151 s); `verify:schemas` 31 files OK; `verify:saas` `SMOKE_OUTCOME=pass`;
+`npm audit --omit=dev` 0 vulnerabilities. Not run: `npm ci` (shared `node_modules` symlink policy
+— CI runs it on Node 22/24).
+
 Verified 2026-09-17 on Node v26.5.1 for **the page YAML serialiser's coerced scalars and the
 guard's value positions** (`wip/neo/frontmatter-coercion-depth @ 7ef9ab0`, stacked on the
 still-unmerged `wip/neo/frontmatter-lossy-shapes @ b10c77c`; kanban `t_5768425d` — a writer +
