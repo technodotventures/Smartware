@@ -160,6 +160,44 @@ still does no lane work of its own) are a separate gap, carded. Gate: **562 test
 53/53, `verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz` sha256 `dc5d6658…af4c7`), `npm audit` 0
 vulnerabilities.
 
+Verified 2026-09-17 on Node v26.5.1 for the **MCP dispatcher surface's verb-level lane repairs** (kanban
+`t_dae50f51`, lane `wip/neo/mcp-lane-sweep` off `wip/tech-head/catchup-lane-sync` @ `63b608f`):
+**568 tests across 80 files** (+6 tests, +1 file — `test/protocol/mcp-surface-lane-sync.test.ts`),
+`tsc` clean, `verify:schemas` 31 schema files OK, `verify:saas` `SMOKE_OUTCOME=pass`,
+`verify:coffee-adapter` 53/53, **`verify:coffee-gate` 85/85** against the packed artifact
+(`smartware-0.7.0.tgz` sha256 `2ebaf2ab1cc0570adfc66b8d030f0df3dd8eb5c6ba11f34b418db10474426b60`). The
+change, its four measured call-shape scenarios, the real-stdio pair and the RED/GREEN revisions are
+described in the lane section below; the out-of-tree instruments are `scripts/mcp-surface-probe.mjs`
+and `scripts/mcp-stdio-probe.mjs`.
+
+Settled 2026-09-17 for the **MCP dispatcher surface's verb-level lane repairs** (kanban `t_dae50f51`,
+lane `wip/neo/mcp-lane-sweep` off `wip/tech-head/catchup-lane-sync` @ `63b608f`; `src/` change):
+`src/index.ts`'s tools call the protocol handlers directly, so a repair that lives in the
+`SmartwareCore` wrappers never reaches them — the gap the block above carded. Re-measured first, and
+the headline instance was already closed there: CORRECT's lane work now comes from the catch-up repair
+(RED at `fd55cc2`, GREEN at `63b608f` on the MCP call shape, demotion-free `reason: wrong`; the
+`changed` shape's remaining live-vs-fresh difference is the demotion resurrection above, not the
+lane). The sweep found exactly one live member: **REVISE**, which on this base re-synced nowhere at
+all (PR #29's wrapper-level fix is not in this ancestry) — the live process answered `[replacement]`
+while every restart served `[replacement, revised]`, on the MCP call shape and on
+`SmartwareCore.revise` alike, and over the real stdio transport (`dist/index.js`: the server's own
+recall vs a fresh open after the server stopped). REVISE's repair now lives in the handler
+(`src/protocol/revise.ts` takes the caller's lane and re-syncs the revised claim's scope on every path
+that syncs a claim row, including the idempotent replay of an already-committed operation), and both
+dispatchers pass their lane — the placement `t_a6bf30a8` chose for the catch-up class, so both
+surfaces inherit one repair, and PR #29's post-handler re-sync in `core.revise` becomes a redundant
+second rebuild when it lands (keep the handler's). Pin `test/protocol/mcp-surface-lane-sync.test.ts`
+(6 tests): CORRECT + REVISE over the MCP call shapes, REVISE through `SmartwareCore.revise`, and a
+**classification tripwire** — every tool `src/index.ts` registers must be classified in the test's
+registry, every claim-row-moving tool's registration must pass `searchIndex` (this wiring check alone
+fails at `63b608f` on `smartware_revise` and at `fd55cc2` on `smartware_correct`), and every such tool
+must name its pin — so the next verb added to that surface cannot land silently. RED with the final
+content: **3 failed | 3 passed** at `63b608f` (both REVISE measurements + the wiring tripwire),
+**4 failed | 2 passed** at `fd55cc2` (+ CORRECT). Gate: **568 tests across 80 files**, `tsc` clean,
+`verify:schemas` 31 files OK, `verify:saas` `SMOKE_OUTCOME=pass`, `verify:coffee-adapter` 53/53,
+`verify:coffee-gate` 85/85 (`smartware-0.7.0.tgz` sha256 `2ebaf2ab…26b60`), `npm audit` 0
+vulnerabilities.
+
 - The TypeScript package builds cleanly (`tsc`; npm run build, no errors).
 - All 16 v0.5.0 schemas compile and match the committed checksum manifest
   (`npm run verify:schemas`: 16 v0.5.0 files OK); the retained v0.4.2 set

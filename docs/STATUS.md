@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/tech-head/catchup-lane-sync` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/neo/mcp-lane-sweep` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,18 +24,17 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-17-t_a6bf30a8.md`](journal/2026-09-17-t_a6bf30a8.md) — The catch-up re-syncs the claim-FTS lane: `replayCatchUp` reports the scopes it materialised, and every call site that owns a lane repairs them (2026-09-17)
-- **Journal entries:** 64 · tasks completed on board `smartware`: 108
+- **Journal:** [`2026-09-17-t_dae50f51.md`](journal/2026-09-17-t_dae50f51.md) — The MCP dispatcher surface: the verb-level claim-FTS lane repair moves into the handlers — REVISE was the one live member of the class there (2026-09-17)
+- **Journal entries:** 65 · tasks completed on board `smartware`: 112
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
-| `integration/v0.8.0` | 204 | 2026-09-17 | Merge branch 'wip/neo/adr-numbering-rule' into integration/v0.8.0 |
-| `tmp/t_5742162f-mix` | 93 | 2026-09-17 | tmp: combined tree for t_5742162f merge-order measurement |
-| `wip/neo/compile-page-refusal` | 88 | 2026-09-17 | docs(conformance): verified baseline for the named page refusal on the compile/endorse re-serialise (t_5742162f) |
-| `wip/neo/frontmatter-write-residuals` | 86 | 2026-09-17 | docs(t_15b309f3): make the write-boundary lane's R2 and reachability claims true |
+| `integration/v0.8.0` | 206 | 2026-09-17 | chore: bump version 0.7.0 -> 0.8.0 |
+| `wip/neo/compile-page-refusal` | 91 | 2026-09-17 | docs: regenerate the STATUS projection (live board counter; t_5742162f) |
+| `wip/neo/frontmatter-write-residuals` | 87 | 2026-09-17 | docs(t_9bdc35ce): the R2 SUPPORTED class needs the whitespace-only-line exclusion |
 | `wip/tech-head/reflect-replay-contract` | 86 | 2026-09-17 | docs: regenerate the STATUS projection (live-board churn; t_efa8d5a8) |
 | `fix/tech-head/frontmatter-unread-constructs` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_6fc254cd, tight check window) |
 | `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
@@ -44,6 +43,7 @@
 | `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
 | `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
 | `wip/neo/consent-change-scope` | 76 | 2026-09-16 | docs: regenerate the STATUS projection (branch row, journal count, in-flight tips) |
+| `wip/tech-head/catchup-lane-sync` | 75 | 2026-09-17 | docs: regenerate the STATUS projection at this round's tip (t_a6bf30a8) |
 | `wip/tech-head/l2-page-frontmatter-schema` | 74 | 2026-09-16 | docs(journal): correct the push-blocker paragraph — the branch is published as PR #22 |
 | `wip/smarty/l0-record-schema` | 73 | 2026-09-16 | docs(journal): name the published PR and the CI result (t_f1157ed4) |
 | `wip/tech-head/l1-claim-record-boundary` | 73 | 2026-09-17 | docs: regenerate the STATUS projection at the round-1-correction tip (t_11fed5bb) |
@@ -113,8 +113,6 @@ Unmerged work — read the branch before assuming this tree is current.
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
 - `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
-- `t_dae50f51` [todo] FIX (lead, read-only evidence): the MCP dispatcher surface (`src/index.ts`) never got the verb-level claim-FTS lane repairs — `smartware_correct` answers [] over MCP until a restart (created 2026-09-17, assignee neo)
-- `t_cee7412a` [ready] VERIFY (independent): the t_15b309f3 text fix — corrected pin/claims at a415578 (PR #37) (created 2026-09-17, assignee tech-head)
 
 ## Blockers and stale work
 
@@ -147,8 +145,8 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (129 tasks, 9408 events)
-- ⚠️ 46 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (131 tasks, 9489 events)
+- ⚠️ 49 completed task(s) have no journal entry — run: npm run journal:sync
 - ⚠️ 3 blocked task(s)
 
 ## Canonical index

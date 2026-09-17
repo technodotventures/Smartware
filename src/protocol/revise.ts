@@ -45,6 +45,7 @@ import {
   type ReviseOperationIntent,
 } from '../ops_log/index.js';
 import type Database from 'better-sqlite3';
+import { syncSearchFromClaims, type SearchIndex } from '../layer3/search.js';
 
 export interface ReviseParams {
   actor: Actor;
@@ -103,6 +104,18 @@ export async function handleRevise(
   commitCtx?: CommitContext,
   db?: Database.Database,
   commitHooks?: ReviseCommitHooks,
+  /**
+   * The caller's claim-FTS lane, when it owns one. REVISE appends a claim
+   * version through the store (`store.syncFromJsonlVersion`) and writes no
+   * index, so the process that performed the revision answers without the
+   * revised claim while every restart — which re-derives the derived rows and
+   * re-syncs the lane — serves it. Every path below that syncs a claim row
+   * from the canonical surface re-syncs that claim's scope; the repair lives
+   * in the handler, not in a wrapper, so every dispatcher that passes its lane
+   * inherits it (`SmartwareCore.revise`, `src/index.ts`'s MCP tool) — and a
+   * dispatcher that passes none behaves exactly as before (kanban t_dae50f51).
+   */
+  searchIndex?: SearchIndex,
 ): Promise<ReviseResult> {
   const isUser = params.actor.id.startsWith('user:') || params.actor.id.startsWith('person_');
   if (!isUser) {
@@ -114,6 +127,18 @@ export async function handleRevise(
   }
 
   const payloadHash = computePayloadHash(revisePayload(params));
+
+  /**
+   * The lane repair, in one place: re-sync the revised claim's scope after a
+   * claim row was synced from the canonical surface (`syncFromJsonlVersion`).
+   * No-op without a lane, so protocol callers without one keep their shape.
+   */
+  const resyncRevisedScope = (claimId: string): void => {
+    if (!searchIndex) return;
+    const scope = store.getClaim(claimId)?.scope;
+    if (scope) syncSearchFromClaims(store, searchIndex, scope);
+  };
+
   const committedResult = (): ReviseResult | null => {
     if (!commitCtx) return null;
     const entries = [...readAllOpLogEntries(commitCtx.opsDir)]
@@ -145,6 +170,7 @@ export async function handleRevise(
       throw new ProtocolError('conflict', `operation_id '${params.operation_id}' requires manual recovery review`);
     }
     store.syncFromJsonlVersion(artifacts[0]!);
+    resyncRevisedScope(claimId);
     return {
       claim_id: claimId,
       new_version: newVersion,
@@ -339,6 +365,7 @@ export async function handleRevise(
   }
 
   store.syncFromJsonlVersion(record);
+  resyncRevisedScope(record.claim_id);
 
   return {
     claim_id: record.claim_id,
