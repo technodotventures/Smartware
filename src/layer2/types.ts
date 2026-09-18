@@ -136,6 +136,17 @@ export interface CompileTelemetry {
    * runs separately (compile queue worker).
    */
   synthesis_deferred?: boolean;
+  /**
+   * Replay marker: true when this call did no work at all because its
+   * `operation_id` had already committed, so `claims_created` /
+   * `pages_compiled` above are the RECORDED counts of the run that did
+   * (protocol v0.5.0, "Idempotency and commit identity"). Every count here
+   * is then 0 because this call measured nothing, and `freshness` is
+   * omitted rather than filled with a current-state read — mixing a live
+   * reading into a recorded result is exactly what this flag exists to rule
+   * out. See `docs/adr/0018-reflect-replay-returns-the-recorded-result.md`.
+   */
+  replayed?: boolean;
 }
 
 /** State-based freshness counts over the raw-observation FTS window. */

@@ -11,7 +11,7 @@
 > canonical state; if it disagrees with a canonical source, this file is wrong.
 > A fresh agent should be able to read this file alone and know where the project is.
 
-**Branch:** `wip/tech-head/reflect-noscope-all-scopes` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
+**Branch:** `wip/tech-head/reflect-replay-contract` · **Trunk:** `main` (trunk has moves this tree does not — run `git log main..HEAD` / `git log HEAD..main`)
 **Version:** 0.7.0 · **Spec:** smartware-spec-v1.6.16.md · **Protocol:** smartware-protocol-v0.5.0.md · **Schemas:** v0.4.2, v0.5.0, v0.5.1
 
 ## Declared (human-owned; the only non-derived block)
@@ -24,14 +24,17 @@
 
 ## Latest material change
 
-- **Journal:** [`2026-09-17-t_27c73d58.md`](journal/2026-09-17-t_27c73d58.md) — An unscoped REFLECT compiles every scope, and the operations log records it as unscoped (2026-09-17)
-- **Journal entries:** 42 · tasks completed on board `smartware`: 93
+- **Journal:** [`2026-09-17-t_efa8d5a8.md`](journal/2026-09-17-t_efa8d5a8.md) — A matched `operation_id` is the prior result: a REFLECT replay returns the recorded result and writes nothing (2026-09-17)
+- **Journal entries:** 43 · tasks completed on board `smartware`: 98
 - Commit-level history is deliberately NOT duplicated here — see `git log`. This projection tracks operational state, not the commit stream.
 
 ## In flight
 
 | Branch | Ahead | Last commit | Subject |
 |---|---|---|---|
+| `wip/tech-head/remaining-personal-literals` | 84 | 2026-09-17 | docs: regenerate the STATUS projection (t_574be8cd) |
+| `wip/neo/frontmatter-lossy-shapes` | 80 | 2026-09-17 | docs: regenerate the STATUS projection (t_cf744a8e, tight check window) |
+| `wip/tech-head/reflect-noscope-all-scopes` | 79 | 2026-09-17 | docs: regenerate the STATUS projection (t_27c73d58) |
 | `fix/tech-head/notices-frontmatter-roundtrip` | 77 | 2026-09-17 | docs(journal): name the published PR (t_4d84ff6b) |
 | `wip/neo/consent-change-scope` | 76 | 2026-09-16 | docs: regenerate the STATUS projection (branch row, journal count, in-flight tips) |
 | `wip/tech-head/l2-page-frontmatter-schema` | 74 | 2026-09-16 | docs(journal): correct the push-blocker paragraph — the branch is published as PR #22 |
@@ -41,6 +44,8 @@
 | `fix/coffee-rc-emitted-record-conformance` | 64 | 2026-09-16 | docs: regenerate STATUS projection after the emitted-record conformance compose (t_5ef44cc1) |
 | `fix/l1-replay-correction-state` | 64 | 2026-09-15 | test(layer1): a 30s hook timeout for the correction-record file — opening a real pod exceeds the 10s default on a loaded box (t_ef77c695) |
 | `wt/t_f2b584dc` | 64 | 2026-09-16 | docs: regenerate STATUS projection + journal sync for the round-4 text fix |
+| `wip/neo/revise-fts-sync` | 62 | 2026-09-17 | docs: journal entry, conformance-status paragraph, STATUS regen (t_336ba0b9) |
+| `wip/tech-head/pre-fix-l1-repair-adr` | 62 | 2026-09-17 | docs(adr): ADR-0017 — tighten three citations to the exact lines they name (t_a54a4606) |
 | `wip/neo/host-lane-identity` | 61 | 2026-09-15 | docs(journal): fix the dead card id in t_9a700aed, record the gate re-run (t_ad84d246) |
 | `wip/smarty/l1-forgotten-supersedes` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
 | `wip/tech-head/l1-forgotten-carry-superseded` | 60 | 2026-09-15 | docs(adr): refile this lane's ADR 0012 -> 0014 before merge (t_201cdca8) |
@@ -98,15 +103,15 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Queued / next up
 
 - `t_5ef44cc1` [todo] FIX (B2, from GATE review t_66f1dd7d): the ordinary write path emits records that fail the published schemas (op_LEGACY ×125) — compose the fixes and make the gate validate what it writes (created 2026-09-16, assignee tech-head)
-- `t_574be8cd` [ready] MEASURE+DECIDE: the remaining `personal` literals — confidence.ts's 365-day half-life keyed on the legacy lane (measured 0.4018 vs 0.3305), the session summarizer default (driven), the OBSERVE tool-description example, the vestigial wiki/ dirs (created 2026-09-16, assignee tech-head)
-- `t_336ba0b9` [ready] FIX/MEASURE: SmartwareCore.revise appends claim versions without re-syncing the claim-FTS index (code-read lead from t_8ddfa350 — probe first) (created 2026-09-16, assignee neo)
-- `t_a54a4606` [ready] DECIDE (owner gate) + ADR: repair path for L1 canonical claim logs written pre-fix (B1 residual, measured on t_e833be91) (created 2026-09-17, assignee tech-head)
-- `t_cf744a8e` [todo] DECIDE (low): the page YAML serialiser's remaining lossy shapes — multi-line strings (top-level and in a notice item), nested object values, comma-bearing inline array items (measured; pre-existing) (created 2026-09-17, assignee neo)
-- `t_e9173766` [ready] TEXT FIX (verifier findings, from t_1cde6d63): the t_e6fce49a journal's frozen-surface line is false at the tip, its "nothing else consumes the lane" enumeration is incomplete, and the pre/post probe pair is not comparable (created 2026-09-17, assignee neo)
+- `t_27c73d58` [ready] MEASURE+DECIDE: `reflect()` with no scope is not "all scopes" — the `?? 'personal'` sentinel filters claim production to an unregistered lane and records it in the ops entry (measured on t_e6fce49a) (created 2026-09-16, assignee tech-head)
+- `t_6fc254cd` [ready] DECIDE+FIX (low): the page YAML reader's still-unread constructs — `|-`/`|+`/`>` block styles and quoted-key items read as silent garbage (measured on t_cf744a8e's tip) (created 2026-09-17, assignee tech-head)
+- `t_5768425d` [ready] FIX (low, DECIDE-first): the page YAML serialiser still degrades two contract-legal shapes — numeric/boolean/null-looking strings (C1) and a nested object deeper than one level inside a notice item (C2) (created 2026-09-17, assignee neo)
 
 ## Blockers and stale work
 
-- No blocked tasks on the board.
+- `t_a54a4606` DECIDE (owner gate) + ADR: repair path for L1 canonical claim logs written pre-fix (B1 residual, measured on t_e833be91)
+- `t_e9173766` TEXT FIX (verifier findings, from t_1cde6d63): the t_e6fce49a journal's frozen-surface line is false at the tip, its "nothing else consumes the lane" enumeration is incomplete, and the pre/post probe pair is not comparable
+- `t_89dc1c98` IMPLEMENT (gated on the owner's ADR-0017 ruling): offline L0-derived repair pass for pre-ADR-0016 canonical claim logs (record shape, audit artifact, derivation-rule pin)
 
 ## Decisions
 
@@ -118,8 +123,9 @@ Unmerged work — read the branch before assuming this tree is current.
 | [0011](adr/0011-claim-record-materialization-block.md) | ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it | Proposed — owner approval is the gate before merge (an additive, optional property; the | 2026-09-15 |
 | [0013](adr/0013-which-schema-covers-the-l0-record-and-the-l2-page-frontmatter.md) | `observation.schema.json` covers the wire observation, not the L0 record; the compiled L2 page frontmatter must conform to `page-frontmatter.schema.json` | Proposed — the two fixes this record decides are owner-gated (one publishes a record surface, the other changes an L2 artifact a core verb reads). The boundary statement in `schemas/v0.5.0/README.md` and the boundary-pinning tests shipped with this ADR move **no** published schema byte. | 2026-09-15 |
 | [0015](adr/0015-host-registered-lanes-and-the-substrate-actor-id.md) | Host-registered lanes are not v0.5.0 scopes, and the substrate has exactly one ActorId | Proposed — owner approval is the gate before merge (it states what the v0.5.0 conformance | 2026-09-15 |
+| [0018](adr/0018-reflect-replay-returns-the-recorded-result.md) | A matched `operation_id` returns the recorded result: REFLECT replay writes nothing | Proposed (drafted and implemented on card `t_efa8d5a8`; the operator's ruling is the binding act — this changes the observable result of a published protocol verb) | 2026-09-17 |
 
-**Pending decision:** 0011 (ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it), 0013 (ADR 0013 — `observation.schema.json` covers the wire observation, not the L0 record; the compiled L2 page frontmatter must conform to `page-frontmatter.schema.json`), 0015 (ADR 0015 — Host-registered lanes are not v0.5.0 scopes, and the substrate has exactly one ActorId)
+**Pending decision:** 0011 (ADR-0011 — `claim.schema.json` describes the L1 record, so the extraction materialization block is enumerated in it), 0013 (ADR 0013 — `observation.schema.json` covers the wire observation, not the L0 record; the compiled L2 page frontmatter must conform to `page-frontmatter.schema.json`), 0015 (ADR 0015 — Host-registered lanes are not v0.5.0 scopes, and the substrate has exactly one ActorId), 0018 (ADR 0018 — A matched `operation_id` returns the recorded result: REFLECT replay writes nothing)
 
 ## Verification state
 
@@ -131,8 +137,9 @@ Unmerged work — read the branch before assuming this tree is current.
 ## Health
 
 - ✅ declared block fresh (6d old)
-- ✅ kanban board readable (113 tasks, 8843 events)
-- ⚠️ 52 completed task(s) have no journal entry — run: npm run journal:sync
+- ✅ kanban board readable (119 tasks, 9093 events)
+- ⚠️ 57 completed task(s) have no journal entry — run: npm run journal:sync
+- ⚠️ 3 blocked task(s)
 
 ## Canonical index
 
