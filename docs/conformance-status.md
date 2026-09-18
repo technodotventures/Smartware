@@ -36,6 +36,33 @@ Specification v1.6.16 conformance.
 
 ## Verified baseline
 
+Verified 2026-09-17 on Node v26.5.1 for **what a REFLECT with no scope compiles, and what the
+operations log records for it** (`wip/tech-head/reflect-noscope-all-scopes`, kanban `t_27c73d58`,
+stacked on the consent-change lane `658c3cb`): **78 files / 554 tests**, **32 schema files**
+(v0.4.2, v0.5.0, v0.5.1). `handleCompile`'s `params.scope ?? 'personal'` is gone — the target is the
+absence itself, the spelling every other reader of it already used (`CompileOptions.scope`, the L2
+gather guard, the claim-production filter, `syncSearchFromClaims`) — so an unscoped compile gathers
+every registered lane: measured on a fresh brain with one extractable observation per lane, **0 claims
+/ 0 pages → 3 claims / 3 pages** (exactly the union of the three per-lane runs), and
+`layer3_indexed_count` **0 → 3** on the deferred-synthesis path. The `reflect.explicit` entry records
+`details.scope: null` — the same spelling its own `payload_hash` is computed over, and never a lane the
+caller did not name — instead of the unregistered lane `personal`; the named-lane, non-owner
+`invalid_scope` and grant-enforcement behaviours are unchanged and are pinned as controls on both arms.
+Pre-fix that sentinel did not only mean the (unregistered) id `personal`: the filter's
+`endsWith('/' + scope)` clause also selected a host-registered lane ending in `/personal`, measured on a
+brain with a pod profile (`core.createPodProfile('demo')` registers `pod/demo/personal` — pre-fix
+unscoped compile: **1 claim / 1 page, in `pod/demo/personal`**, entry `scope: "personal"`; post-fix
+**5 claims / 5 pages**, one per registered lane, entry `scope: null`) — corrected and re-measured
+2026-09-18 in answer to the round-1 review, detail in the journal entry.
+A/B pair: the same test file (sha256 `51dc5162…`) at `658c3cb` (3 failed | 3 passed, the three
+unscoped assertions) and at the fix (6/6), pinned by
+`test/protocol/reflect-no-scope-all-scopes.test.ts`. No `$defs/Scope` widening, no published schema
+byte, no `SHA256SUMS` line, no literal re-introduced. **Claim production on this owner-gated path
+changes**, so the merge call belongs to the owner (requirement 2 of the card); the replay behaviour of an
+`operation_id` already used by an unscoped run — it re-runs the compile on an existing brain while
+reporting the recorded claim count, corrected 2026-09-18 — is in
+`docs/journal/2026-09-17-t_27c73d58.md`.
+
 Verified 2026-09-16 on Node v26.5.1 for **the lane the reference implementation's own consent-change
 records are written in** (`wip/neo/consent-change-scope`, kanban `t_e6fce49a`, stacked on the
 L0-record-schema lane `e0241d4`; carded out of `t_f1157ed4`'s writer sweep): **77 files / 548 tests**,
@@ -54,7 +81,8 @@ refused before any lane resolves). No published schema byte and no `SHA256SUMS` 
 `8d47a427…`, v0.5.1 `a7c3095d…`). Pre-fix records keep the `personal` spelling — L0 is append-only.
 Adjacent `personal` literals (`reflect.ts`'s no-scope sentinel, `session.ts`'s summarizer default,
 `confidence.ts`'s half-life key, the OBSERVE tool-description example) are measured and carded, not
-fixed here.
+fixed here — the `reflect.ts` sentinel was fixed on `t_27c73d58` (see the baseline above); the other
+three remain.
 
 Verified 2026-09-16 on Node v26.5.1 for **the published L0 evidence record schema and the export
 manifest's schema label** (`wip/smarty/l0-record-schema`, kanban `t_f1157ed4`, ADR-0013 → *Delta
